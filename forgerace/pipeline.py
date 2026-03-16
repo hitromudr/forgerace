@@ -757,19 +757,22 @@ def run_pipeline(
     batch = ready[:max_tasks]
     agent_names = cfg.agent_names
 
-    # Маршрутизация: сложные → конкурентный (оба агента), простые → распределённый (один)
+    # Маршрутизация:
+    # - Одна задача → всегда конкурентный (модели безлимитные, race даёт лучшее качество)
+    # - Много задач → сложные конкурентно, простые распределённо (параллелизм важнее)
     competitive = []
     distributed = []
-    for t in batch:
-        task_prefix = t.id.lower()
-        has_failures = any(cfg.log_dir.glob(f"{task_prefix}-*-attempt*.log"))
-        score = has_failures * 2 + len((t.description or "")) // 500
-        if score >= cfg.max_task_complexity:
-            competitive.append(t)
-        else:
-            distributed.append(t)
-    # Если все простые но агенты свободны — НЕ форсируем конкуренцию,
-    # распределяем по round-robin (экономим ресурсы)
+    if len(batch) == 1:
+        competitive = list(batch)
+    else:
+        for t in batch:
+            task_prefix = t.id.lower()
+            has_failures = any(cfg.log_dir.glob(f"{task_prefix}-*-attempt*.log"))
+            score = has_failures * 2 + len((t.description or "")) // 500
+            if score >= cfg.max_task_complexity:
+                competitive.append(t)
+            else:
+                distributed.append(t)
 
     total_procs = len(competitive) * len(agent_names) + len(distributed)
     log.info(f"Запускаю: {len(competitive)} конкурентных + {len(distributed)} распределённых = {total_procs} процессов")
