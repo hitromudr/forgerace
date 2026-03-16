@@ -38,8 +38,9 @@ def pick_reviewer(passed: list[AgentResult]) -> str:
     return passed[0].agent_type
 
 
-def single_review(reviewer: str, author: str, diff: str, task: Task) -> dict:
-    """Один ревьюер проверяет одного автора. Возвращает parsed review."""
+def single_review(reviewer: str, author: str, diff: str, task: Task, build_passed: bool = True) -> dict:
+    """Один ревьюер проверяет одного автора. Возвращает parsed review.
+    build_passed=True означает что сборка автора прошла (для валидации замечаний)."""
     prompt = f"""Ты ревьюер кода {cfg.project_context}. Ты проверяешь реализацию агента {author}.
 
 Задача: {task.id} — {task.name}
@@ -87,6 +88,19 @@ NEEDS_WORK = нужны правки.
             log.warning(f"[{reviewer}] APPROVED без обоснования — понижаю до NEEDS_WORK")
             verdict = "NEEDS_WORK"
             comments = "Ревьюер не обосновал APPROVED. Требуется повторное ревью с конкретным анализом."
+
+        # NEEDS_WORK с ложным замечанием "не компилируется" — если сборка прошла, отклоняем
+        if verdict == "NEEDS_WORK":
+            build_fail_phrases = [
+                "не компилируется", "не собирается", "ошибка компиляции",
+                "compilation error", "does not compile", "build fails",
+            ]
+            comments_lower = comments.lower()
+            has_build_claim = any(p in comments_lower for p in build_fail_phrases)
+            if has_build_claim and build_passed:
+                log.warning(f"[{reviewer}] NEEDS_WORK утверждает что не компилируется, но сборка прошла — повышаю до APPROVED")
+                verdict = "APPROVED"
+                comments = f"(автокоррекция: ревьюер ложно заявил о проблемах компиляции, сборка прошла)\n{comments}"
 
         return {
             "verdict": verdict,

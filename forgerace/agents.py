@@ -298,6 +298,12 @@ def build_prompt(task: Task, error_log: str = "") -> str:
 {cfg.agent_rules}
 """
 
+    if cfg.test_instruction:
+        prompt += f"""
+## Тесты
+{cfg.test_instruction}
+"""
+
     if error_log:
         log_head = error_log[-4000:]
         prompt += f"""

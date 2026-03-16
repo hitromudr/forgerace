@@ -74,6 +74,7 @@ class Config:
     project_context: str = ""
     discuss_context: str = ""
     agent_rules: str = ""
+    test_instruction: str = ""  # как запускать и интерпретировать тесты
 
     confidence_instruction: str = """
 В ПОСЛЕДНЕЙ строке ответа ОБЯЗАТЕЛЬНО напиши свою оценку готовности решения к реализации:
@@ -183,6 +184,8 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     rules = data.get("rules", {})
     if "agent_rules" in rules:
         cfg.agent_rules = rules["agent_rules"]
+    if "test_instruction" in rules:
+        cfg.test_instruction = rules["test_instruction"]
 
     # [metrics]
     metrics = data.get("metrics", {})
