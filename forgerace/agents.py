@@ -82,6 +82,22 @@ def _log_gemini_event(tag: str, event: dict):
 
 # --- Запуск агентов ---
 
+def _event_has_edit(event: dict) -> bool:
+    """Проверяет, содержит ли событие Write/Edit tool_use."""
+    etype = event.get("type", "")
+    # Claude: assistant message с tool_use блоками
+    if etype == "assistant":
+        for block in event.get("message", {}).get("content", []):
+            if block.get("type") == "tool_use" and block.get("name") in ("Write", "Edit"):
+                return True
+    # Gemini: tool_call/tool_use событие
+    if etype in ("tool_call", "tool_use"):
+        tool = event.get("tool", event.get("tool_name", "")).lower()
+        if any(w in tool for w in ("write", "edit", "replace")):
+            return True
+    return False
+
+
 def _get_diff_snapshot(workdir: Path) -> str:
     """Быстрый снимок diff для отслеживания прогресса."""
     try:
@@ -113,6 +129,9 @@ def _run_agent_streaming(
     last_diff_snapshot = _get_diff_snapshot(workdir)
     last_diff_change = time.time()
     next_progress_check = time.time() + 30  # проверяем каждые 30с
+    # Early-abort: tool_calls без Write/Edit
+    tool_calls_since_edit = 0
+    MAX_CALLS_WITHOUT_EDIT = 25
     try:
         proc = subprocess.Popen(
             cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -166,9 +185,19 @@ def _run_agent_streaming(
                         event = json.loads(stripped)
                         if activity_check_fn(event):
                             last_activity = time.time()
+                            # Early-abort: трекаем tool_calls без Write/Edit
+                            tool_calls_since_edit += 1
+                            if _event_has_edit(event):
+                                tool_calls_since_edit = 0
                         log_event_fn(tag, event)
                     except json.JSONDecodeError:
                         pass
+
+                    if tool_calls_since_edit >= MAX_CALLS_WITHOUT_EDIT:
+                        proc.kill()
+                        proc.wait()
+                        log.error(f"[{tag}] ⏰ {tool_calls_since_edit} tool_calls без Edit/Write — зацикливание, убиваю")
+                        return subprocess.CompletedProcess(cmd, 1, "", "NO_EDIT_ABORT")
             elif proc.poll() is not None:
                 for line in proc.stdout:
                     stdout_lines.append(line)
