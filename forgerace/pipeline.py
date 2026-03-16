@@ -181,8 +181,9 @@ def collect_metrics(workdir: Path, task: Task) -> dict:
 
 # --- Запуск одного агента ---
 
-def run_single_agent(task: Task, agent_num: int, agent_type: str) -> AgentResult:
-    """Запускает одного агента на задачу."""
+def run_single_agent(task: Task, agent_num: int, agent_type: str,
+                     cancel_event: "threading.Event | None" = None) -> AgentResult:
+    """Запускает одного агента на задачу. cancel_event — для отмены при race."""
     slug = translate_slug(task.name)
     branch = f"task/{task.id.lower()}-{slug}-{agent_type}"
     run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
@@ -199,7 +200,8 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str) -> AgentResult
         log.info(f"[{tag}] Попытка {attempt}/{cfg.max_retries}")
 
         prompt = build_prompt(task, error_log)
-        result = run_agent_process(agent_type, workdir, task, prompt)
+        result = run_agent_process(agent_type, workdir, task, prompt,
+                                   cancel_event=cancel_event)
 
         agent_log = cfg.log_dir / f"{task.id.lower()}-{agent_type}-attempt{attempt}.log"
         agent_log.write_text(
@@ -268,12 +270,14 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
     agent_names = cfg.agent_names
     all_results = []
     passed = []
+    cancel_event = threading.Event()  # сигнал отмены для проигравших
 
     with ThreadPoolExecutor(max_workers=len(agent_names)) as pool:
         futures = {}
         for i, agent_name in enumerate(agent_names):
             agent_num = task_idx * len(agent_names) + i - (len(agent_names) - 1)
-            f = pool.submit(run_single_agent, task, agent_num, agent_name)
+            f = pool.submit(run_single_agent, task, agent_num, agent_name,
+                            cancel_event=cancel_event)
             futures[f] = agent_name
 
         for future in as_completed(futures):
@@ -300,6 +304,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             if rv["verdict"] == "APPROVED":
                 log.info(f"[{task.id}] ✅ Ревью пройдено: {result.agent_type}")
                 log.info(f"[{task.id}] 🏆 победитель: {result.agent_type}")
+                cancel_event.set()  # убиваем проигравших агентов
                 if merge_to_develop(result.branch, task.id):
                     update_task_status(task.id, "done", agent=result.agent_type, branch=result.branch)
                     log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
@@ -752,20 +757,19 @@ def run_pipeline(
     batch = ready[:max_tasks]
     agent_names = cfg.agent_names
 
-    if len(batch) <= len(agent_names):
-        competitive = list(batch)
-        distributed = []
-    else:
-        competitive = []
-        distributed = []
-        for t in batch:
-            task_prefix = t.id.lower()
-            has_failures = any(cfg.log_dir.glob(f"{task_prefix}-*-attempt*.log"))
-            score = has_failures * 2 + len((t.description or "")) // 500
-            if score >= cfg.max_task_complexity:
-                competitive.append(t)
-            else:
-                distributed.append(t)
+    # Маршрутизация: сложные → конкурентный (оба агента), простые → распределённый (один)
+    competitive = []
+    distributed = []
+    for t in batch:
+        task_prefix = t.id.lower()
+        has_failures = any(cfg.log_dir.glob(f"{task_prefix}-*-attempt*.log"))
+        score = has_failures * 2 + len((t.description or "")) // 500
+        if score >= cfg.max_task_complexity:
+            competitive.append(t)
+        else:
+            distributed.append(t)
+    # Если все простые но агенты свободны — НЕ форсируем конкуренцию,
+    # распределяем по round-robin (экономим ресурсы)
 
     total_procs = len(competitive) * len(agent_names) + len(distributed)
     log.info(f"Запускаю: {len(competitive)} конкурентных + {len(distributed)} распределённых = {total_procs} процессов")

@@ -102,8 +102,10 @@ def _run_agent_streaming(
     log_event_fn,
     activity_check_fn,
     extract_result_fn,
+    cancel_event: "threading.Event | None" = None,
 ) -> subprocess.CompletedProcess:
     """Общий цикл запуска агента со стримингом."""
+    import threading
     stdout_lines = []
     deadline = time.time() + cfg.agent_timeout
     last_activity = time.time()
@@ -123,6 +125,13 @@ def _run_agent_streaming(
                 proc.wait()
                 log.error(f"[{tag}] ⏰ Таймаут ({cfg.agent_timeout}с)")
                 return subprocess.CompletedProcess(cmd, 1, "", "TIMEOUT")
+
+            # Отмена: другой агент уже победил
+            if cancel_event and cancel_event.is_set():
+                proc.kill()
+                proc.wait()
+                log.info(f"[{tag}] 🛑 Отменён (другой агент победил)")
+                return subprocess.CompletedProcess(cmd, 1, "", "CANCELLED")
 
             if time.time() - last_activity > inactivity_timeout:
                 proc.kill()
@@ -223,19 +232,16 @@ def _gemini_extract_result(stdout_lines: list[str]) -> str:
     return ""
 
 
-def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str) -> subprocess.CompletedProcess:
-    """Запускает агента нужного типа."""
+def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
+                      cancel_event: "threading.Event | None" = None) -> subprocess.CompletedProcess:
+    """Запускает агента нужного типа. cancel_event — для отмены при race-win."""
+    import threading
     acfg = cfg.agents.get(agent_name)
     if acfg is None:
         raise ValueError(f"Неизвестный агент: {agent_name}. Доступны: {cfg.agent_names}")
 
-    cmd = [acfg.command] + acfg.args
-    # Подставляем промпт — первый -p аргумент заменяем
-    # Для обоих агентов: command -p <prompt> <остальные аргументы>
-    # args уже содержит -p, нужно вставить prompt после -p
     final_cmd = [acfg.command]
-    args_iter = iter(acfg.args)
-    for arg in args_iter:
+    for arg in acfg.args:
         if arg == "-p":
             final_cmd.extend(["-p", prompt])
         else:
@@ -247,17 +253,20 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str) -
         return _run_agent_streaming(
             final_cmd, workdir, tag, acfg.inactivity_timeout,
             _log_claude_event, _claude_activity_check, _claude_extract_result,
+            cancel_event=cancel_event,
         )
     elif agent_name == "gemini":
         return _run_agent_streaming(
             final_cmd, workdir, tag, acfg.inactivity_timeout,
             _log_gemini_event, _gemini_activity_check, _gemini_extract_result,
+            cancel_event=cancel_event,
         )
     else:
         # Универсальный запуск (без стриминга)
         return _run_agent_streaming(
             final_cmd, workdir, tag, acfg.inactivity_timeout,
             lambda t, e: None, lambda e: False, lambda lines: "",
+            cancel_event=cancel_event,
         )
 
 
