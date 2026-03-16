@@ -269,6 +269,11 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
         else:
             log.warning(f"[{tag}] ✗ сборка провалена:\n{error_log[-500:]}")
 
+    # Проверяем: был ли агент отменён (cancel) — тогда это не провал
+    if cancel_event and cancel_event.is_set():
+        log.info(f"[{tag}] 🛑 Отменён (другой агент победил)")
+        _unregister_agent(tag)
+        return AgentResult(agent_type=agent_type, branch=branch, workdir=workdir, success=False)
     log.error(f"[{tag}] ✗ BLOCKED после {cfg.max_retries} попыток")
     _unregister_agent(tag)
     return AgentResult(agent_type=agent_type, branch=branch, workdir=workdir, success=False)
