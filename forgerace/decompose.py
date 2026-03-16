@@ -3,7 +3,7 @@
 import re
 import subprocess
 
-from .config import cfg
+from .config import cfg, run_hint
 from .tasks import Task, parse_tasks, task_paths
 from .utils import log, is_valid_path
 
@@ -196,7 +196,7 @@ def create_checkpoint_task(error_log: str):
     for t in tasks:
         if "make check" in (t.acceptance or "") and t.status != "done":
             print(f"  ℹ Задача {t.id} уже существует")
-            print(f"\n    → python3 forgerace.py run")
+            print(f"\n    → {run_hint()}")
             return
 
     max_num = max((int(re.match(r"TASK-(\d+)", t.id).group(1))
@@ -224,4 +224,4 @@ def create_checkpoint_task(error_log: str):
     run_cmd(["git", "commit", "-m", f"auto: {next_id} — чекпоинт make check"],
             cwd=cfg.root_dir, check=False)
     print(f"  ✅ Создана {next_id}: Чекпоинт — починить make check")
-    print(f"\n    → python3 forgerace.py run")
+    print(f"\n    → {run_hint()}")

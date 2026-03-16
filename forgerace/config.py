@@ -106,6 +106,20 @@ CONFIDENCE: XX%
         return list(self.agents.keys())
 
 
+# Путь к конфигу, переданный через CLI (заполняется в init_config)
+_config_path: Optional[Path] = None
+
+
+def run_hint() -> str:
+    """Возвращает команду запуска для подсказок пользователю."""
+    import sys
+    parts = [sys.executable, sys.argv[0]]
+    if _config_path:
+        parts.extend(["--config", str(_config_path)])
+    parts.append("run")
+    return " ".join(parts)
+
+
 def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None) -> Config:
     """Загружает конфиг из TOML-файла. Если файла нет — возвращает дефолты."""
     cfg = Config()
@@ -186,6 +200,8 @@ cfg = Config()
 
 def init_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None):
     """Инициализирует глобальный конфиг in-place (чтобы все модули видели изменения)."""
+    global _config_path
+    _config_path = config_path
     new_cfg = load_config(config_path, root_dir)
     # Обновляем существующий объект, а не заменяем — иначе from .config import cfg
     # в других модулях будет ссылаться на старый объект

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from .agents import AgentResult, build_prompt, run_agent_process
-from .config import cfg
+from .config import cfg, run_hint
 from .decompose import assess_and_maybe_decompose, create_checkpoint_task
 from .merge import ensure_develop_branch, merge_to_develop
 from .review import code_review, get_diff, send_to_rework, single_review
@@ -569,7 +569,7 @@ def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
         print(f"\n  ▶ Готовы к запуску ({len(ready)}):")
         for t in ready:
             print(f"    {t.id}: {t.name}")
-        print(f"\n    → python3 forgerace.py run")
+        print(f"\n    → {run_hint()}")
 
     if blocked:
         has_action = True
@@ -579,7 +579,7 @@ def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
             print(f"\n  🔄 Blocked, но зависимости готовы:")
             for t in deps_ready:
                 print(f"    {t.id}: {t.name}")
-            print(f"\n    → python3 forgerace.py run")
+            print(f"\n    → {run_hint()}")
         if deps_waiting:
             print(f"\n  ⏸ Blocked, ждут зависимости:")
             for t in deps_waiting:

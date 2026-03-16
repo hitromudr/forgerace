@@ -7,7 +7,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from .config import cfg
+from .config import cfg, run_hint
 from .decompose import insert_tasks_into_tasksmd
 from .tasks import Task, parse_tasks, link_task_discussion
 from .utils import log, run_cmd
@@ -277,7 +277,7 @@ def _post_resolve(filepath: Path):
     print(f"\n  ✓ Задачи сгенерированы и вставлены в TASKS.md")
     print(f"  ✓ Копия: {tasks_file}")
     log.info(f"{linked_task_id or topic}: подзадачи вставлены в TASKS.md")
-    print(f"\n    → python3 forgerace.py run\n")
+    print(f"\n    → {run_hint()}\n")
 
 
 def _chat_auto_resolve(filepath: Path):
