@@ -674,7 +674,14 @@ def run_pipeline(
         log.info("Нет утверждённых задач для выполнения")
         return
 
-    # Декомпозиция
+    # dry-run: только показываем что будет запущено, без мутаций
+    if dry_run:
+        log.info(f"Утверждены и готовы: {[t.id for t in approved]}")
+        for t in approved:
+            log.info(f"[DRY RUN] {t.id} ({t.name})")
+        return
+
+    # Декомпозиция (мутирует TASKS.md — только при реальном запуске)
     final_ready = []
     decomposed = False
     for t in approved:
@@ -698,11 +705,6 @@ def run_pipeline(
         return
 
     log.info(f"Утверждены и готовы: {[t.id for t in ready]}")
-
-    if dry_run:
-        for t in ready:
-            log.info(f"[DRY RUN] {t.id} ({t.name})")
-        return
 
     batch = ready[:max_tasks]
     agent_names = cfg.agent_names
