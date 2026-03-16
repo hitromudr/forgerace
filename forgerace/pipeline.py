@@ -13,7 +13,7 @@ from .agents import AgentResult, build_prompt, run_agent_process
 from .config import cfg, run_hint
 from .decompose import assess_and_maybe_decompose, create_checkpoint_task
 from .merge import ensure_develop_branch, merge_to_develop
-from .review import code_review, get_diff, send_to_rework, single_review
+from .review import code_review, get_changed_files, get_diff, send_to_rework, single_review
 from .tasks import (
     Task, find_ready_tasks, find_retryable_tasks, is_task_approved,
     parse_tasks, task_paths, topic_for_task, translate_slug,
@@ -292,7 +292,8 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             # Race: первый финишировавший → ревью
             reviewer = next((n for n in agent_names if n != result.agent_type), result.agent_type)
             log.info(f"[{task.id}] 📝 Ревью: {reviewer} → {result.agent_type}")
-            rv = single_review(reviewer, result.agent_type, get_diff(result, task), task)
+            rv = single_review(reviewer, result.agent_type, get_diff(result, task), task,
+                               build_passed=True, changed_files=get_changed_files(result, task))
             log.info(f"[{task.id}] 📋 {reviewer} ревьюит {result.agent_type}: {rv['verdict']}")
             log.info(f"[{task.id}] {rv.get('summary', rv.get('comments', '')[:200])}")
 
@@ -434,7 +435,8 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     for review_round in range(1, cfg.max_review_rounds + 1):
         log.info(f"[{task.id}] 📝 Code review (раунд {review_round}/{cfg.max_review_rounds})...")
         log.info(f"[{task.id}] Ревьюер: {reviewer} → {agent_type}")
-        rv = single_review(reviewer, agent_type, get_diff(best_result, task), task)
+        rv = single_review(reviewer, agent_type, get_diff(best_result, task), task,
+                           build_passed=True, changed_files=get_changed_files(best_result, task))
         log.info(f"[{task.id}] 📋 {reviewer} ревьюит {agent_type}: {rv['verdict']}")
         log.info(f"[{task.id}] {rv.get('summary', rv.get('comments', '')[:200])}")
 
@@ -450,7 +452,8 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         send_to_rework(best_result, task, comments)
     else:
         log.info(f"[{task.id}] 📝 Финальное ревью...")
-        rv = single_review(reviewer, agent_type, get_diff(best_result, task), task)
+        rv = single_review(reviewer, agent_type, get_diff(best_result, task), task,
+                           build_passed=True, changed_files=get_changed_files(best_result, task))
         if rv["verdict"] != "APPROVED":
             log.error(f"[{task.id}] ✗ не прошёл ревью → BLOCKED")
             update_task_status(task.id, "blocked")
