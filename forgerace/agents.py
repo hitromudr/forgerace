@@ -314,10 +314,34 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
 
 # --- Промпты ---
 
+def _load_project_claude_md() -> str:
+    """Загружает CLAUDE.md из root проекта если есть."""
+    claude_md = cfg.root_dir / "CLAUDE.md"
+    if claude_md.exists():
+        try:
+            content = claude_md.read_text(encoding="utf-8", errors="ignore")
+            # Обрезаем до разумного размера
+            if len(content) > 4000:
+                content = content[:4000] + "\n... (обрезано)"
+            return content
+        except Exception:
+            pass
+    return ""
+
+
 def build_prompt(task: Task, error_log: str = "") -> str:
     """Формирует промпт для агента."""
-    prompt = f"""Ты автономный агент разработки {cfg.project_context}.
+    # Инжектим CLAUDE.md проекта прямо в промпт — агент ОБЯЗАН видеть инструкции
+    project_docs = _load_project_claude_md()
+    project_section = ""
+    if project_docs:
+        project_section = f"""
+## Документация проекта (CLAUDE.md)
+{project_docs}
+"""
 
+    prompt = f"""Ты автономный агент разработки {cfg.project_context}.
+{project_section}
 ## Твоя задача: {task.id} — {task.name}
 
 {task.description}
