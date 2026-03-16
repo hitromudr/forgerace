@@ -1,0 +1,225 @@
+"""Модель задачи, парсер TASKS.md, обновление статусов."""
+
+import json
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from .config import cfg
+from .utils import log, run_cmd, slugify, is_valid_path
+
+
+# --- Модель задачи ---
+
+@dataclass
+class Task:
+    id: str             # TASK-001
+    name: str           # Аллокатор физических фреймов
+    status: str         # open / claimed:agent / in_progress:agent / review:agent / done
+    priority: str       # P1 / P2 / P3
+    stage: str          # 2
+    deps: list[str]     # [TASK-001, ...]
+    files_new: str      # src/memory/frame_allocator.rs
+    files_modify: str   # src/memory.rs
+    integration: str    # pub mod frame_allocator в memory.rs
+    description: str    # полное описание
+    acceptance: str     # критерий готовности
+    agent: str          # claude / gemini / —
+    branch: str         # task/001-frame-allocator / —
+    discussion: str     # 001-scheduler-design / —
+    raw_section: str    # исходный markdown-блок
+
+
+# --- Парсер TASKS.md ---
+
+def parse_tasks(path: Path | None = None) -> list[Task]:
+    """Парсит TASKS.md, возвращает список задач."""
+    if path is None:
+        path = cfg.tasks_file
+    text = path.read_text(encoding="utf-8")
+    pattern = r"(### (TASK-\d+): .+?)(?=\n### TASK-|\n---|\Z)"
+    matches = re.findall(pattern, text, re.DOTALL)
+
+    tasks = []
+    for raw, task_id in matches:
+        tasks.append(Task(
+            id=task_id,
+            name=_field(raw, r"### TASK-\d+: (.+)"),
+            status=_field(raw, r"\*\*Статус\*\*:\s*(.+)"),
+            priority=_field(raw, r"\*\*Приоритет\*\*:\s*(.+)"),
+            stage=_field(raw, r"\*\*Этап\*\*:\s*(.+)"),
+            deps=_parse_deps(_field(raw, r"\*\*Зависимости\*\*:\s*(.+)")),
+            files_new=_field(raw, r"\*\*Файлы \(новые\)\*\*:\s*(.+)"),
+            files_modify=_field(raw, r"\*\*Файлы \(modify\)\*\*:\s*(.+)"),
+            integration=_field(raw, r"\*\*Интеграция\*\*:\s*(.+)"),
+            description=_field(raw, r"\*\*Описание\*\*:\s*(.+)"),
+            acceptance=_field(raw, r"\*\*Критерий готовности\*\*:\s*(.+)"),
+            agent=_field(raw, r"\*\*Агент\*\*:\s*(.+)"),
+            branch=_field(raw, r"\*\*Ветка\*\*:\s*(.+)"),
+            discussion=_field(raw, r"\*\*Дискуссия\*\*:\s*(.+)"),
+            raw_section=raw.strip(),
+        ))
+    return tasks
+
+
+def _field(text: str, pattern: str) -> str:
+    m = re.search(pattern, text)
+    return m.group(1).strip() if m else ""
+
+
+def _parse_deps(deps_str: str) -> list[str]:
+    if not deps_str or deps_str == "—":
+        return []
+    return [d.strip() for d in re.findall(r"TASK-\d+", deps_str)]
+
+
+# --- Обновление статусов ---
+
+def update_task_status(task_id: str, new_status: str, agent: str = "", branch: str = ""):
+    """Обновляет статус задачи в TASKS.md (в основном репозитории)."""
+    tasks_file = cfg.tasks_file
+    lines = tasks_file.read_text(encoding="utf-8").splitlines()
+    in_task = False
+    result = []
+
+    for line in lines:
+        if line.startswith(f"### {task_id}:"):
+            in_task = True
+        elif line.startswith("### TASK-"):
+            in_task = False
+
+        if in_task:
+            if line.startswith("- **Статус**:"):
+                line = f"- **Статус**: {new_status}"
+            elif agent and line.startswith("- **Агент**:"):
+                line = f"- **Агент**: {agent}"
+            elif branch and line.startswith("- **Ветка**:"):
+                line = f"- **Ветка**: {branch}"
+
+        result.append(line)
+
+    tasks_file.write_text("\n".join(result) + "\n", encoding="utf-8")
+
+
+def link_task_discussion(task_id: str, topic: str):
+    """Прописывает дискуссию в TASKS.md для задачи."""
+    tasks_file = cfg.tasks_file
+    lines = tasks_file.read_text(encoding="utf-8").splitlines()
+    in_task = False
+    result = []
+
+    for line in lines:
+        if line.startswith(f"### {task_id}:"):
+            in_task = True
+        elif line.startswith("### TASK-"):
+            in_task = False
+
+        if in_task and line.startswith("- **Дискуссия**:"):
+            line = f"- **Дискуссия**: {topic}"
+
+        result.append(line)
+
+    tasks_file.write_text("\n".join(result) + "\n", encoding="utf-8")
+
+
+# --- Топик дискуссии ---
+
+_slug_cache_file: Path | None = None
+
+
+def _get_slug_cache_file() -> Path:
+    global _slug_cache_file
+    if _slug_cache_file is None:
+        _slug_cache_file = cfg.agents_dir / "slug_cache.json"
+    return _slug_cache_file
+
+
+def translate_slug(name: str) -> str:
+    """Переводит русское название в короткий английский slug. Кэширует."""
+    cache_file = _get_slug_cache_file()
+    cache = {}
+    if cache_file.exists():
+        try:
+            cache = json.loads(cache_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    if name in cache:
+        return cache[name]
+
+    result = run_cmd(
+        ["claude", "-p",
+         f"Переведи на английский и сделай kebab-case slug (2-4 слова, без кавычек, только slug): {name}",
+         "--output-format", "text"],
+        cwd=cfg.root_dir, timeout=15, check=False,
+    )
+    slug = (result.stdout or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9-]", "", slug).strip("-")
+    if not slug or len(slug) >= 50:
+        slug = slugify(name)
+
+    cache[name] = slug
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+    return slug
+
+
+def topic_for_task(task: Task) -> str:
+    """Генерирует имя топика дискуссии из задачи."""
+    num = task.id.replace("TASK-", "").lstrip("0")
+    slug = translate_slug(task.name)
+    return f"{num}-{slug}"
+
+
+# --- Проверка утверждённости ---
+
+def is_task_approved(task: Task) -> bool:
+    """Проверяет, утверждена ли задача (есть дискуссия с резолюцией)."""
+    if "make check" in (task.acceptance or ""):
+        return True
+    if not task.discussion or task.discussion == "—":
+        return False
+    filepath = cfg.discuss_dir / f"{task.discussion}.md"
+    if not filepath.exists():
+        return False
+    text = filepath.read_text(encoding="utf-8")
+    return "РЕЗОЛЮЦИЯ" in text
+
+
+# --- Поиск задач ---
+
+def find_ready_tasks(tasks: list[Task]) -> list[Task]:
+    """Находит задачи, которые можно взять (open + зависимости done)."""
+    done_ids = {t.id for t in tasks if t.status == "done"}
+    ready = []
+    for t in tasks:
+        if t.status != "open":
+            continue
+        if all(d in done_ids for d in t.deps):
+            ready.append(t)
+    return sorted(ready, key=lambda t: t.priority)
+
+
+def find_retryable_tasks(tasks: list[Task]) -> list[Task]:
+    """Находит задачи для повторного запуска (review, blocked, in_progress)."""
+    retryable = []
+    for t in tasks:
+        status_base = t.status.split(":")[0]
+        if status_base in ("review", "blocked", "in_progress"):
+            retryable.append(t)
+    return sorted(retryable, key=lambda t: t.priority)
+
+
+# --- Пути файлов задачи ---
+
+def task_paths(task: Task) -> list[str]:
+    """Возвращает список путей из задачи (новые + modify) + src/ как fallback."""
+    paths = set()
+    for files_str in (task.files_new, task.files_modify):
+        if files_str and files_str.strip() != "—":
+            for f in files_str.split(","):
+                f = re.sub(r"\s*\\(.*?\\)", "", f).strip()
+                if f and is_valid_path(f):
+                    paths.add(f)
+    if not paths:
+        paths.add("src/")
+    return sorted(paths)
