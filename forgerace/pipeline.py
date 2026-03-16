@@ -71,14 +71,35 @@ def _unregister_agent(tag: str):
 
 def check_already_done(task: Task) -> bool:
     """Проверяет, выполнен ли критерий готовности задачи уже в develop.
-    Если файлы задачи существуют и сборка проходит — задача уже сделана."""
-    # Проверяем наличие новых файлов (если заявлены)
-    if task.files_new and task.files_new.strip() != "—":
+    Проверяет: наличие файлов, сборку, и наличие кода в git log."""
+    has_files_requirement = (task.files_new and task.files_new.strip() != "—")
+
+    if has_files_requirement:
+        all_exist = True
         for f in task.files_new.split(","):
             f = re.sub(r"\s*\(.*?\)", "", f).strip()
             if f and is_valid_path(f):
                 if not (cfg.root_dir / f).exists():
-                    return False  # файла нет — задача не выполнена
+                    all_exist = False
+                    break
+        if not all_exist:
+            return False
+        # Файлы есть + сборка проходит → done
+        for cmd_list in cfg.build_commands:
+            result = run_cmd(cmd_list, cwd=cfg.root_dir, timeout=cfg.build_timeout, check=False)
+            if result.returncode != 0:
+                return False
+        log.info(f"[{task.id}] pre-check: все файлы существуют, сборка проходит")
+        return True
+
+    # Нет files_new — проверяем git log на коммиты с ID этой или родительской задачи
+    # Это ловит подзадачи декомпозиции чей код уже вмержен
+    result = run_cmd(
+        ["git", "log", "--oneline", "--all", "--grep", task.id],
+        cwd=cfg.root_dir, check=False,
+    )
+    if result.stdout.strip():
+        log.info(f"[{task.id}] pre-check: найдены коммиты в git log")
 
     # Проверяем критерий "make check"
     if "make check" in (task.acceptance or ""):
@@ -86,13 +107,8 @@ def check_already_done(task: Task) -> bool:
                          timeout=cfg.build_timeout, check=False)
         return result.returncode == 0
 
-    # Проверяем сборку
-    for cmd_list in cfg.build_commands:
-        result = run_cmd(cmd_list, cwd=cfg.root_dir, timeout=cfg.build_timeout, check=False)
-        if result.returncode != 0:
-            return False
-
-    return True
+    # Без files_new и без make check — не можем определить, нужен ли агент
+    return False
 
 
 def verify_build(workdir: Path, task: Task | None = None) -> tuple[bool, str]:
@@ -324,7 +340,13 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
 
     # Оба завершились, никто не получил APPROVED
     if not passed:
-        log.error(f"[{task.id}] ✗ ни один агент не написал рабочий код → BLOCKED")
+        # Оба агента заблокировались — проблема в задаче, не в агентах
+        no_edit = all((r.success is False and not get_diff(r, task)) for r in all_results)
+        if no_edit:
+            log.error(f"[{task.id}] ✗ ОБА агента не написали код — задача требует уточнения или уже выполнена")
+            log.error(f"[{task.id}]   → Проверьте: описание задачи, конфликт с существующим кодом, тесты среды")
+        else:
+            log.error(f"[{task.id}] ✗ ни один агент не написал рабочий код → BLOCKED")
         update_task_status(task.id, "blocked")
         cleanup_worktrees(all_results)
         return False
