@@ -210,8 +210,13 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
         )
 
         if result.returncode != 0:
+            stderr = result.stderr or result.stdout or "Агент упал без вывода"
             log.warning(f"[{tag}] Агент завершился с ошибкой (код {result.returncode})")
-            error_log = result.stderr or result.stdout or "Агент упал без вывода"
+            # NO_EDIT_ABORT / CANCELLED — не ретраим, агент зацикливается
+            if stderr in ("NO_EDIT_ABORT", "CANCELLED", "PROGRESS_TIMEOUT"):
+                log.error(f"[{tag}] ✗ {stderr} — прекращаю попытки")
+                break
+            error_log = stderr
             continue
 
         # Коммит
