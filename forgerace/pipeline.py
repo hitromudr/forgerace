@@ -69,6 +69,32 @@ def _unregister_agent(tag: str):
 
 # --- Верификация ---
 
+def check_already_done(task: Task) -> bool:
+    """Проверяет, выполнен ли критерий готовности задачи уже в develop.
+    Если файлы задачи существуют и сборка проходит — задача уже сделана."""
+    # Проверяем наличие новых файлов (если заявлены)
+    if task.files_new and task.files_new.strip() != "—":
+        for f in task.files_new.split(","):
+            f = re.sub(r"\s*\(.*?\)", "", f).strip()
+            if f and is_valid_path(f):
+                if not (cfg.root_dir / f).exists():
+                    return False  # файла нет — задача не выполнена
+
+    # Проверяем критерий "make check"
+    if "make check" in (task.acceptance or ""):
+        result = run_cmd(["make", "check"], cwd=cfg.root_dir,
+                         timeout=cfg.build_timeout, check=False)
+        return result.returncode == 0
+
+    # Проверяем сборку
+    for cmd_list in cfg.build_commands:
+        result = run_cmd(cmd_list, cwd=cfg.root_dir, timeout=cfg.build_timeout, check=False)
+        if result.returncode != 0:
+            return False
+
+    return True
+
+
 def verify_build(workdir: Path, task: Task | None = None) -> tuple[bool, str]:
     """Проверяет сборку в worktree."""
     if task and task.files_new and task.files_new.strip() != "—":
@@ -230,6 +256,13 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str) -> AgentResult
 def execute_task_competitive(task: Task, task_idx: int) -> bool:
     """Конкурентное выполнение: агенты параллельно, race-to-merge."""
     log.info(f"═══ {task.id}: {task.name} (конкурентный режим) ═══")
+
+    # Pre-check: критерий готовности уже выполнен в develop?
+    if check_already_done(task):
+        log.info(f"[{task.id}] ✅ Критерий готовности уже выполнен в develop — пропускаю")
+        update_task_status(task.id, "done", agent="pre-check")
+        return True
+
     update_task_status(task.id, "in_progress:both")
 
     agent_names = cfg.agent_names
@@ -369,6 +402,13 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
 def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     """Выполнение одним агентом + ревью другим."""
     log.info(f"═══ {task.id}: {task.name} ({agent_type}, ревью другим) ═══")
+
+    # Pre-check: критерий готовности уже выполнен в develop?
+    if check_already_done(task):
+        log.info(f"[{task.id}] ✅ Критерий готовности уже выполнен в develop — пропускаю")
+        update_task_status(task.id, "done", agent="pre-check")
+        return True
+
     update_task_status(task.id, f"in_progress:{agent_type}")
 
     result = run_single_agent(task, task_idx, agent_type)

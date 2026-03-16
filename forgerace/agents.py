@@ -82,6 +82,18 @@ def _log_gemini_event(tag: str, event: dict):
 
 # --- Запуск агентов ---
 
+def _get_diff_snapshot(workdir: Path) -> str:
+    """Быстрый снимок diff для отслеживания прогресса."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--stat"], cwd=workdir,
+            capture_output=True, text=True, timeout=5,
+        )
+        return (result.stdout or "").strip()
+    except Exception:
+        return ""
+
+
 def _run_agent_streaming(
     cmd: list[str],
     workdir: Path,
@@ -95,6 +107,10 @@ def _run_agent_streaming(
     stdout_lines = []
     deadline = time.time() + cfg.agent_timeout
     last_activity = time.time()
+    # Progress tracking: diff snapshot
+    last_diff_snapshot = _get_diff_snapshot(workdir)
+    last_diff_change = time.time()
+    next_progress_check = time.time() + 30  # проверяем каждые 30с
     try:
         proc = subprocess.Popen(
             cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -113,6 +129,21 @@ def _run_agent_streaming(
                 proc.wait()
                 log.error(f"[{tag}] ⏰ Нет tool_use {inactivity_timeout}с — завис, убиваю")
                 return subprocess.CompletedProcess(cmd, 1, "", "INACTIVITY_TIMEOUT")
+
+            # Progress timeout: diff не меняется слишком долго
+            now = time.time()
+            if now >= next_progress_check:
+                next_progress_check = now + 30
+                current_diff = _get_diff_snapshot(workdir)
+                if current_diff != last_diff_snapshot:
+                    last_diff_snapshot = current_diff
+                    last_diff_change = now
+                elif now - last_diff_change > cfg.progress_timeout:
+                    proc.kill()
+                    proc.wait()
+                    stale_mins = int((now - last_diff_change) / 60)
+                    log.error(f"[{tag}] ⏰ Diff не меняется {stale_mins}мин — зацикливание, убиваю")
+                    return subprocess.CompletedProcess(cmd, 1, "", "PROGRESS_TIMEOUT")
 
             ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 5.0))
             if ready:

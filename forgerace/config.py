@@ -40,6 +40,7 @@ class Config:
     build_timeout: int = 120
     max_review_rounds: int = 3
     max_task_complexity: int = 3
+    progress_timeout: int = 600  # kill агента если diff не меняется N секунд (10 мин)
 
     # --- Агенты ---
     agents: dict[str, AgentConfig] = field(default_factory=lambda: {
@@ -160,7 +161,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
 
     # [limits]
     limits = data.get("limits", {})
-    for key in ("max_parallel_tasks", "agent_timeout", "max_review_rounds", "max_task_complexity"):
+    for key in ("max_parallel_tasks", "agent_timeout", "max_review_rounds", "max_task_complexity", "progress_timeout"):
         if key in limits:
             setattr(cfg, key, limits[key])
 
