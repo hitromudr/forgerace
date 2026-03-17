@@ -783,6 +783,22 @@ def run_pipeline(
         log.info("Нет задач для выполнения (все декомпозированы, ждут зависимости)")
         return
 
+    # Pre-check ДО параллелизации — последовательно, без конфликтов cargo lock
+    actually_ready = []
+    for t in ready:
+        if check_already_done(t):
+            log.info(f"[{t.id}] ✅ Критерий готовности уже выполнен в develop — пропускаю")
+            update_task_status(t.id, "done", agent="pre-check")
+        else:
+            actually_ready.append(t)
+    ready = actually_ready
+
+    if not ready:
+        log.info("Все задачи уже выполнены (pre-check)")
+        tasks = parse_tasks()
+        _print_next_steps(tasks, max_tasks, auto)
+        return
+
     log.info(f"Утверждены и готовы: {[t.id for t in ready]}")
 
     batch = ready[:max_tasks]
