@@ -101,36 +101,8 @@ def check_already_done(task: Task) -> bool:
             return True
         return False
 
-    # Нет files_new — проверяем: files_modify существуют + сборка проходит + git log
-    # Это ловит интеграционные задачи и подзадачи декомпозиции чей код уже вмержен
-    has_modify = (task.files_modify and task.files_modify.strip() != "—")
-    if has_modify:
-        # Проверяем что файлы для модификации существуют
-        for f in task.files_modify.split(","):
-            f = re.sub(r"\s*\(.*?\)", "", f).strip()
-            if f and is_valid_path(f) and not (cfg.root_dir / f).exists():
-                return False
-        # Файлы есть — проверяем сборку
-        for cmd_list in cfg.build_commands:
-            result = run_cmd(cmd_list, cwd=cfg.root_dir, timeout=cfg.build_timeout, check=False)
-            if result.returncode != 0:
-                return False
-        log.info(f"[{task.id}] pre-check: files_modify существуют, сборка проходит")
-        return True
-
-    # Последний шанс: ищем коммиты с task ID в git log + сборка ок
-    git_result = run_cmd(
-        ["git", "log", "--oneline", "--all", "--grep", task.id],
-        cwd=cfg.root_dir, check=False,
-    )
-    if git_result.stdout.strip():
-        for cmd_list in cfg.build_commands:
-            result = run_cmd(cmd_list, cwd=cfg.root_dir, timeout=cfg.build_timeout, check=False)
-            if result.returncode != 0:
-                return False
-        log.info(f"[{task.id}] pre-check: коммиты в git log + сборка проходит")
-        return True
-
+    # Без files_new и без make check — не можем определить, выполнена ли задача
+    # НЕ закрываем по наличию files_modify или git log — это ложные срабатывания
     return False
 
 
