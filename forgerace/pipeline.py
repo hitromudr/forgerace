@@ -92,11 +92,14 @@ def check_already_done(task: Task) -> bool:
         log.info(f"[{task.id}] pre-check: все файлы существуют, сборка проходит")
         return True
 
-    # Проверяем критерий "make check"
+    # Проверяем критерий "make check" (увеличенный таймаут — может потребоваться компиляция)
     if "make check" in (task.acceptance or ""):
         result = run_cmd(["make", "check"], cwd=cfg.root_dir,
-                         timeout=cfg.build_timeout, check=False)
-        return result.returncode == 0
+                         timeout=max(cfg.build_timeout, 300), check=False)
+        if result.returncode == 0:
+            log.info(f"[{task.id}] pre-check: make check проходит")
+            return True
+        return False
 
     # Нет files_new — проверяем: files_modify существуют + сборка проходит + git log
     # Это ловит интеграционные задачи и подзадачи декомпозиции чей код уже вмержен
