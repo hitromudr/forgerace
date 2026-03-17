@@ -124,6 +124,15 @@ COMPLEXITY: N
     decompose_file = cfg.log_dir / f"{task.id.lower()}-decomposed.md"
     decompose_file.write_text(tasks_block + "\n", encoding="utf-8")
 
+    # Принудительно подставляем дискуссию родителя в подзадачи
+    # (LLM может проигнорировать и написать "—")
+    if task.discussion and task.discussion != "—":
+        tasks_block = re.sub(
+            r"(\*\*Дискуссия\*\*:\s*).*",
+            rf"\g<1>{task.discussion}",
+            tasks_block,
+        )
+
     # Вставляем в TASKS.md
     insert_tasks_into_tasksmd(tasks_block, task.id)
 
