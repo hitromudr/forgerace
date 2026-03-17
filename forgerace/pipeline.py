@@ -92,10 +92,10 @@ def check_already_done(task: Task) -> bool:
         log.info(f"[{task.id}] pre-check: все файлы существуют, сборка проходит")
         return True
 
-    # Проверяем критерий "make check" (увеличенный таймаут — может потребоваться компиляция)
+    # Проверяем критерий "make check"
     if "make check" in (task.acceptance or ""):
         result = run_cmd(["make", "check"], cwd=cfg.root_dir,
-                         timeout=max(cfg.build_timeout, 300), check=False)
+                         timeout=cfg.build_timeout, check=False)
         if result.returncode == 0:
             log.info(f"[{task.id}] pre-check: make check проходит")
             return True
