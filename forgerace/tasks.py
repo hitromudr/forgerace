@@ -124,43 +124,14 @@ def link_task_discussion(task_id: str, topic: str):
 
 # --- Топик дискуссии ---
 
-_slug_cache_file: Path | None = None
-
-
-def _get_slug_cache_file() -> Path:
-    global _slug_cache_file
-    if _slug_cache_file is None:
-        _slug_cache_file = cfg.agents_dir / "slug_cache.json"
-    return _slug_cache_file
-
-
 def translate_slug(name: str) -> str:
-    """Переводит русское название в короткий английский slug. Кэширует."""
-    cache_file = _get_slug_cache_file()
-    cache = {}
-    if cache_file.exists():
-        try:
-            cache = json.loads(cache_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    if name in cache:
-        return cache[name]
-
-    result = run_cmd(
-        ["claude", "-p",
-         f"Переведи на английский и сделай kebab-case slug (2-4 слова, без кавычек, только slug): {name}",
-         "--output-format", "text"],
-        cwd=cfg.root_dir, timeout=15, check=False,
-    )
-    slug = (result.stdout or "").strip().lower()
-    slug = re.sub(r"[^a-z0-9-]", "", slug).strip("-")
-    if not slug or len(slug) >= 50:
-        slug = slugify(name)
-
-    cache[name] = slug
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-    cache_file.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
-    return slug
+    """Транслитерация названия в kebab-case slug для веток."""
+    slug = slugify(name)
+    # Обрезаем до разумной длины (макс 6 слов, 50 символов)
+    parts = slug.split("-")
+    if len(parts) > 6:
+        slug = "-".join(parts[:6])
+    return slug[:50]
 
 
 def topic_for_task(task: Task) -> str:

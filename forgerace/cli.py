@@ -255,8 +255,10 @@ def main():
 
     args = parser.parse_args()
 
-    # init — до загрузки конфига
+    # init — создаёт файлы в CWD, --config не имеет смысла
     if args.command == "init":
+        if args.config:
+            print(f"  {C['yellow']}--config игнорируется для init (файлы создаются в текущей директории){R}")
         _cmd_init()
         return
 
