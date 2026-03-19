@@ -599,16 +599,16 @@ def _print_flow_guide(tasks: list[Task]):
   1. Добавь задачи в TASKS.md:
 
      ### TASK-001: Название задачи
-     - **Status**: open
-     - **Priority**: P1
-     - **Dependencies**: —
-     - **Files (new)**: path/to/new_file.py
-     - **Files (modify)**: path/to/existing.py
-     - **Description**: Что сделать
-     - **Acceptance**: Критерии готовности
-     - **Discussion**: —
-     - **Agent**: —
-     - **Branch**: —
+     - **Статус**: open
+     - **Приоритет**: P1
+     - **Зависимости**: —
+     - **Файлы (новые)**: path/to/new_file.py
+     - **Файлы (modify)**: path/to/existing.py
+     - **Описание**: Что сделать
+     - **Критерий готовности**: Что должно работать
+     - **Дискуссия**: —
+     - **Агент**: —
+     - **Ветка**: —
 
   2. (Опционально) Обсуди архитектуру перед реализацией:
      {hint} discuss new my-topic 'Как лучше реализовать X?'

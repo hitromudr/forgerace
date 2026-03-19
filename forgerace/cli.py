@@ -7,7 +7,7 @@ import signal
 import sys
 from pathlib import Path
 
-from .config import cfg, init_config
+from .config import cfg, init_config, run_hint
 from .discuss import discuss_chat, discuss_create, discuss_list, discuss_reply, discuss_show
 from .merge import ensure_develop_branch, merge_to_develop
 from .pipeline import run_pipeline
@@ -18,16 +18,21 @@ from .utils import log, run_cmd, setup_logging
 def show_status():
     """Показывает статус всех задач."""
     tasks = parse_tasks()
+    if not tasks:
+        hint = run_hint().rsplit(" ", 1)[0]
+        print(f"\n  📋 Нет задач в TASKS.md. Подсказка: {hint} run\n")
+        return
+
     status_groups = {}
     for t in tasks:
-        s = t.status.split(":")[0]
+        s = t.status.split(":")[0] or "unknown"
         status_groups.setdefault(s, []).append(t)
 
-    for status in ["done", "review", "in_progress", "open", "blocked"]:
+    icons = {"done": "✓", "review": "⏳", "in_progress": "▶", "open": "○", "blocked": "✗", "failed": "❌", "unknown": "?"}
+    for status in ["done", "review", "in_progress", "open", "blocked", "failed", "unknown"]:
         group = status_groups.get(status, [])
         if not group:
             continue
-        icons = {"done": "✓", "review": "⏳", "in_progress": "▶", "open": "○", "blocked": "✗"}
         icon = icons.get(status, "?")
         print(f"\n{icon} {status.upper()} ({len(group)}):")
         for t in group:
