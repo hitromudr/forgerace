@@ -93,16 +93,22 @@ If you write a task in `TASKS.md` manually without a `Discussion` field, `run` w
 
 Exception: tasks with acceptance criterion `make check` are auto-approved.
 
-## Competitive Mode
+## Execution Modes
 
-On `run`, each task launches in **competitive mode**: all agents work in parallel in isolated git worktrees.
+### Competitive (one task → all agents)
 
-- First to finish → cross-reviewed by the other agent
-- **APPROVED** → merged to develop, others cancelled
-- **NEEDS_WORK** → rework, up to `max_review_rounds` rounds
-- Review stall (same comment 2+ rounds) → escalation with summary
+All agents solve one task in parallel, each in its own git worktree. First to finish gets cross-reviewed by the other agent. Passes — merged to develop, others cancelled.
 
-With multiple tasks in a batch: complex ones go competitive, simple ones are distributed across agents.
+### Distributed (many tasks → one agent per task)
+
+When the batch has multiple tasks, simple ones are distributed: each agent takes its own. Review by the other agent.
+
+### Review Cycle
+
+After implementation, the agent receives review from its opponent:
+- **APPROVED** → merge to develop
+- **NEEDS_WORK** → agent reworks based on comments (up to `max_review_rounds` rounds)
+- Same comment 2 rounds in a row → escalation to techlead
 
 ## Auto-Decomposition
 
