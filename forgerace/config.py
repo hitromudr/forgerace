@@ -46,7 +46,7 @@ class Config:
     agents: dict[str, AgentConfig] = field(default_factory=lambda: {
         "claude": AgentConfig(
             command="claude",
-            args=["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob",
+            args=["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSearch",
                   "--max-turns", "50", "--output-format", "stream-json", "--verbose"],
             review_args=["-p", "-", "--output-format", "text", "--permission-mode", "auto"],
             inactivity_timeout=300,

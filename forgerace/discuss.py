@@ -1,9 +1,11 @@
 """Система дискуссий: создание, ответы агентов, интерактивный чат, резолюции."""
 
+import json
 import re
 import readline
 import select
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +13,24 @@ from .config import cfg, run_hint
 from .decompose import insert_tasks_into_tasksmd
 from .tasks import Task, parse_tasks, link_task_discussion
 from .utils import log, run_cmd
+
+# --- ANSI цвета ---
+_C = {
+    "reset":   "\033[0m",
+    "bold":    "\033[1m",
+    "dim":     "\033[2m",
+    "cyan":    "\033[36m",
+    "green":   "\033[32m",
+    "yellow":  "\033[33m",
+    "magenta": "\033[35m",
+    "blue":    "\033[34m",
+    "red":     "\033[31m",
+    "white":   "\033[97m",
+}
+
+def _agent_color(agent: str) -> str:
+    colors = {"claude": "cyan", "gemini": "magenta", "techlead": "green"}
+    return _C.get(colors.get(agent, "white"), _C["white"])
 
 
 # --- CRUD ---
@@ -163,11 +183,11 @@ def discuss_chat(topic: str):
                 _chat_agent_reply(filepath, "claude")
             if cmd in ("/gemini", "/both"):
                 _chat_agent_reply(filepath, "gemini")
-            print("─" * 60)
-            print("  Введите текст — добавить свой комментарий в дискуссию")
-            print("  /both — пусть оба прокомментируют   /ok — одобрить и закрыть")
-            print("  /help — все команды")
-            print("─" * 60)
+            print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
+            print(f"  Введите текст — добавить свой комментарий в дискуссию")
+            print(f"  {_C['yellow']}/both{_C['reset']} — пусть оба прокомментируют   {_C['green']}/ok{_C['reset']} — одобрить и закрыть")
+            print(f"  {_C['yellow']}/help{_C['reset']} — все команды")
+            print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             continue
         elif cmd == "/ok":
             comment = extra or ""
@@ -314,8 +334,40 @@ def _chat_append(filepath: Path, role: str, message: str):
         f.write(f"\n## @{role} ({now})\n\n{message}\n")
 
 
+def _extract_text_from_claude_event(event: dict) -> str:
+    """Извлекает текст из stream-json события Claude."""
+    etype = event.get("type", "")
+    if etype == "assistant":
+        parts = []
+        for block in event.get("message", {}).get("content", []):
+            if block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        return "".join(parts)
+    if etype == "content_block_delta":
+        delta = event.get("delta", {})
+        if delta.get("type") == "text_delta":
+            return delta.get("text", "")
+    return ""
+
+
+def _extract_text_from_gemini_event(event: dict) -> str:
+    """Извлекает текст из stream-json события Gemini."""
+    etype = event.get("type", "")
+    if etype in ("text", "content"):
+        return event.get("text", event.get("content", ""))
+    if etype == "message":
+        parts = []
+        for block in event.get("content", []):
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return ""
+
+
 def _chat_agent_reply(filepath: Path, agent_type: str):
-    """Вызывает агента со стримингом вывода."""
+    """Вызывает агента со стримингом текста по токенам."""
     discussion = filepath.read_text(encoding="utf-8")
 
     prompt = f"""Ты участник архитектурной дискуссии {cfg.discuss_context}.
@@ -338,13 +390,22 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
         print(f"\n[ОШИБКА: агент '{agent_type}' не найден в конфиге]")
         return
 
-    if agent_type == "gemini":
-        cmd = [acfg.command, "-p", prompt]
+    # Используем stream-json для реального стриминга текста
+    if agent_type == "claude":
+        cmd = [acfg.command, "-p", "-", "--output-format", "stream-json",
+               "--verbose", "--permission-mode", "auto"]
+        extract_fn = _extract_text_from_claude_event
     else:
-        cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+        cmd = [acfg.command, "-p", prompt, "--output-format", "stream-json"]
+        extract_fn = _extract_text_from_gemini_event
 
-    reply_lines = []
+    reply_parts = []
     spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    start_time = time.time()
+    R = _C["reset"]
+    color = _agent_color(agent_type)
+    label = f"{color}{_C['bold']}{agent_type.capitalize()}{R}"
+    raw_label = agent_type.capitalize()
     try:
         proc = subprocess.Popen(
             cmd, cwd=cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -355,32 +416,62 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
         proc.stdin.close()
 
         spin_idx = 0
-        print(f"{agent_type.capitalize()}> ", end="", flush=True)
-        got_output = False
+        got_text = False
+        print(f"{label}> ", end="", flush=True)
+
         while True:
             ready, _, _ = select.select([proc.stdout], [], [], 0.15)
             if ready:
                 line = proc.stdout.readline()
                 if not line:
                     break
-                if not got_output:
-                    print("\r" + " " * 40 + f"\r{agent_type.capitalize()}> ", end="", flush=True)
-                    got_output = True
-                print(line, end="", flush=True)
-                reply_lines.append(line)
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    # Gemini иногда пишет plain text
+                    if not got_text:
+                        print(f"\r{label}> ", end="", flush=True)
+                        got_text = True
+                    print(line, flush=True)
+                    reply_parts.append(line)
+                    continue
+
+                text = extract_fn(event)
+                if text:
+                    if not got_text:
+                        # Очистить спиннер
+                        print(f"\r{' ' * 50}\r", end="", flush=True)
+                        got_text = True
+                    print(text, end="", flush=True)
+                    reply_parts.append(text)
             else:
                 if proc.poll() is not None:
+                    # Дочитать остатки
                     for line in proc.stdout:
-                        if not got_output:
-                            print("\r" + " " * 40 + f"\r{agent_type.capitalize()}> ", end="", flush=True)
-                            got_output = True
-                        print(line, end="", flush=True)
-                        reply_lines.append(line)
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            event = json.loads(line)
+                            text = extract_fn(event)
+                            if text:
+                                if not got_text:
+                                    print(f"\r{' ' * 50}\r", end="", flush=True)
+                                    got_text = True
+                                print(text, end="", flush=True)
+                                reply_parts.append(text)
+                        except json.JSONDecodeError:
+                            pass
                     break
-                if not got_output:
+                if not got_text:
                     ch = spinner_chars[spin_idx % len(spinner_chars)]
-                    print(f"\r{agent_type.capitalize()}> {ch} думает...", end="", flush=True)
+                    elapsed = int(time.time() - start_time)
+                    print(f"\r{label}> {color}{ch}{R} {_C['dim']}думает... {elapsed}s{R}  ", end="", flush=True)
                     spin_idx += 1
+
         proc.wait(timeout=cfg.agent_timeout)
     except subprocess.TimeoutExpired:
         proc.kill()
@@ -394,7 +485,7 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
         print(f"\n[ОШИБКА: команда '{cmd[0]}' не найдена]")
         return
 
-    reply = "".join(reply_lines).strip()
+    reply = "".join(reply_parts).strip()
     if not reply:
         stderr = proc.stderr.read() if proc.stderr else ""
         if stderr:
@@ -409,7 +500,10 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
 
 
 def _format_discussion(text: str) -> str:
-    """Форматирует markdown дискуссии для терминала."""
+    """Форматирует markdown дискуссии для терминала с цветами."""
+    R = _C["reset"]
+    DIM = _C["dim"]
+    BOLD = _C["bold"]
     lines = text.splitlines()
     result = []
     for line in lines:
@@ -417,13 +511,14 @@ def _format_discussion(text: str) -> str:
         if m:
             agent = m.group(1)
             meta = m.group(2)
-            result.append(f"\n{'═' * 60}")
-            result.append(f"  @{agent} {meta}")
-            result.append(f"{'═' * 60}")
+            color = _agent_color(agent)
+            result.append(f"\n{DIM}{'═' * 60}{R}")
+            result.append(f"  {color}{BOLD}@{agent}{R} {DIM}{meta}{R}")
+            result.append(f"{DIM}{'═' * 60}{R}")
         elif line.startswith("# ") and not line.startswith("## "):
-            result.append(f"\n{'━' * 60}")
-            result.append(f"  {line[2:]}")
-            result.append(f"{'━' * 60}")
+            result.append(f"\n{_C['yellow']}{'━' * 60}{R}")
+            result.append(f"  {_C['yellow']}{BOLD}{line[2:]}{R}")
+            result.append(f"{_C['yellow']}{'━' * 60}{R}")
         elif re.match(r"^CONFIDENCE:\s*\d+\s*%", line.strip()):
             continue
         else:
@@ -433,29 +528,43 @@ def _format_discussion(text: str) -> str:
 
 def _print_chat_help():
     """Справка по командам чата."""
-    print("Команды:")
-    print("  (текст)   — ваш комментарий, сохраняется в дискуссию (агенты не вызываются)")
-    print("  /claude   — запросить ответ Claude")
-    print("  /gemini   — запросить ответ Gemini")
-    print("  /both     — оба последовательно (Claude → Gemini)")
-    print("  /claude (текст) — записать ваш комментарий, затем вызвать Claude")
-    print("  /both (текст)   — записать комментарий, затем вызвать обоих")
-    print("  /show     — показать всю дискуссию")
-    print("  /ok       — одобрить и закрыть (резолюция генерируется автоматически)")
-    print("  /resolve  — написать резолюцию вручную")
-    print("  /help     — показать эту справку")
-    print("  /exit     — выйти без резолюции")
+    R = _C["reset"]
+    DIM = _C["dim"]
+    Y = _C["yellow"]
+    G = _C["green"]
+    print(f"{DIM}Команды:{R}")
+    print(f"  {DIM}(текст){R}   — ваш комментарий, сохраняется в дискуссию (агенты не вызываются)")
+    print(f"  {Y}/claude{R}   — запросить ответ {_C['cyan']}Claude{R}")
+    print(f"  {Y}/gemini{R}   — запросить ответ {_C['magenta']}Gemini{R}")
+    print(f"  {Y}/both{R}     — оба последовательно ({_C['cyan']}Claude{R} → {_C['magenta']}Gemini{R})")
+    print(f"  {Y}/claude{R} {DIM}(текст){R} — записать ваш комментарий, затем вызвать Claude")
+    print(f"  {Y}/both{R} {DIM}(текст){R}   — записать комментарий, затем вызвать обоих")
+    print(f"  {Y}/show{R}     — показать всю дискуссию")
+    print(f"  {G}/ok{R}       — одобрить и закрыть (резолюция генерируется автоматически)")
+    print(f"  {Y}/resolve{R}  — написать резолюцию вручную")
+    print(f"  {Y}/help{R}     — показать эту справку")
+    print(f"  {_C['red']}/exit{R}     — выйти без резолюции")
 
 
 def _print_confidence(text: str, agent_type: str):
-    """Парсит CONFIDENCE: XX% и печатает футер."""
+    """Парсит CONFIDENCE: XX% и печатает цветной футер."""
+    R = _C["reset"]
     m = re.search(r"CONFIDENCE:\s*(\d+)\s*%", text)
     if m:
         pct = int(m.group(1))
-        label = f"  {agent_type} confidence: {pct}%  "
-        width = max(len(label) + 4, 40)
-        bar = "═" * width
-        pad = (width - len(label)) // 2
+        color = _agent_color(agent_type)
+        # Цвет процента по значению
+        if pct >= 80:
+            pct_color = _C["green"]
+        elif pct >= 50:
+            pct_color = _C["yellow"]
+        else:
+            pct_color = _C["red"]
+        label = f"{agent_type} confidence: {pct_color}{pct}%{R}"
+        raw_label = f"{agent_type} confidence: {pct}%"
+        width = max(len(raw_label) + 8, 40)
+        bar = f"{_C['dim']}{'═' * width}{R}"
+        pad = (width - len(raw_label) - 4) // 2
         print(f"\n{bar}")
-        print(f"{'═' * pad}{label}{'═' * (width - pad - len(label))}")
+        print(f"{_C['dim']}{'═' * pad}{R}  {color}{label}  {_C['dim']}{'═' * (width - pad - len(raw_label) - 4)}{R}")
         print(f"{bar}\n")
