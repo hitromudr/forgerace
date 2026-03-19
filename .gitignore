@@ -1,3 +1,10 @@
 __pycache__/
 *.pyc
 .agents/
+.claude/
+*.log
+.env
+docs/discuss/
+*.egg-info/
+dist/
+build/

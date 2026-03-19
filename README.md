@@ -2,96 +2,140 @@
 
 Multi-agent development orchestrator. Run multiple AI agents (Claude, Gemini, etc.) competitively on coding tasks, with cross-review, auto-decomposition, and race-to-merge.
 
-## Features
+## How It Works
 
-- **Competitive mode**: Multiple agents solve the same task, cross-review each other, best wins
-- **Distributed mode**: Different tasks assigned to different agents for parallelism
-- **Race model**: First agent to pass review gets merged immediately
-- **Auto-decomposition**: Complex tasks split into subtasks via LLM complexity assessment
-- **Cross-review**: Each agent reviews the other's code (not self-review)
-- **Streaming**: Real-time tool call events from agents (Read, Write, Bash, etc.)
-- **Auto-checkpoint**: `make check` runs automatically when all tasks are done
-- **Discussion system**: Structured architecture discussions before implementation
+1. You define tasks in `TASKS.md`
+2. ForgeRace launches multiple agents on each task in parallel
+3. Agents solve the task in isolated git worktrees
+4. Cross-review: each agent reviews the other's code (never self-review)
+5. First agent to pass review gets merged — race model
 
-## Supported Agents
+Complex tasks are automatically decomposed into subtasks. Stalled reviews are detected and resolved. All agent activity streams to your terminal with MUD-style colored output — each agent gets its own color, and you see tool calls (Read, Write, Bash, etc.) in real time.
 
-- **Claude Code** (`claude` CLI) — with stream-json event parsing
-- **Gemini CLI** (`gemini` CLI) — with stream-json event parsing
-- Extensible: add new agents in config
+## Requirements
+
+- Python 3.10+
+- Git
+- At least one agent CLI installed and authenticated:
+  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` CLI)
+  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini` CLI)
+
+**Important:** ForgeRace uses official agent CLIs (not API keys). Agents authenticate through your browser — run `claude` or `gemini` once to log in, and ForgeRace reuses that session. This means you use your existing Claude/Gemini subscription, no separate API billing.
 
 ## Quick Start
 
 ```bash
-# 1. Create TASKS.md with your tasks
-# 2. Configure forgerace.toml
-# 3. Run
-python3 forgerace.py run
+# Clone and enter the project you want to work on
+cd your-project
 
-# Or with discussion first
-python3 forgerace.py discuss new my-feature 'How should we implement X?'
-python3 forgerace.py discuss chat my-feature
-python3 forgerace.py run
+# Create a config file (see examples/example.toml)
+cp path/to/forgerace/examples/example.toml forgerace.toml
+# Edit forgerace.toml — set project name, build commands, agent paths
+
+# Create a task file (see examples/TASKS.md)
+cp path/to/forgerace/examples/TASKS.md TASKS.md
+# Edit TASKS.md — define your tasks
+
+# Run all open tasks
+python3 path/to/forgerace.py run
+
+# Or install as a package
+pip install path/to/forgerace
+forgerace run
 ```
+
+### Discussion System
+
+Before jumping into implementation, use structured discussions to align agents on architecture:
+
+```bash
+forgerace discuss new auth-design 'How should we structure the auth module?'
+forgerace discuss chat auth-design    # agents discuss back and forth
+forgerace discuss show auth-design    # view the conversation
+forgerace run                         # tasks linked to discussions get context
+```
+
+## Features
+
+- **Competitive mode** — multiple agents solve the same task, best solution wins
+- **Race-to-merge** — first agent to pass review gets merged immediately
+- **Cross-review** — agents review each other's code, not their own
+- **Auto-decomposition** — complex tasks are split into subtasks via LLM assessment
+- **Review stall detection** — detects and breaks out of review loops
+- **Discussion system** — structured architecture discussions before implementation
+- **Streaming output** — real-time colored terminal output showing agent tool calls
+- **Git worktree isolation** — each agent works in its own worktree, no conflicts
 
 ## Task Format (TASKS.md)
 
 ```markdown
 ### TASK-001: Feature name
-- **Status**: open
-- **Priority**: P1
-- **Dependencies**: TASK-000 or —
-- **Files (new)**: src/path/file.rs
-- **Files (modify)**: — or path
-- **Description**: what to implement
-- **Acceptance**: what should work
-- **Discussion**: topic-name
-- **Agent**: —
-- **Branch**: —
+- **Статус**: open
+- **Приоритет**: P1
+- **Зависимости**: TASK-000 or —
+- **Файлы (новые)**: src/path/file.py
+- **Файлы (modify)**: — or path
+- **Описание**: what to implement
+- **Критерий готовности**: what should work
+- **Дискуссия**: topic-name or —
+- **Агент**: —
+- **Ветка**: —
 ```
+
+Field names are in Russian (as parsed by the task engine). See `examples/TASKS.md` for complete examples.
 
 ## Configuration (forgerace.toml)
 
 ```toml
 [project]
 name = "my-project"
+context = "brief project description for agent context"
 root = "."
 dev_branch = "develop"
 
-[agents]
-claude = { command = "claude", args = ["-p", "--max-turns", "50"] }
-gemini = { command = "gemini", args = ["-p", "--approval-mode", "yolo"] }
+[agents.claude]
+command = "claude"
+args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSearch",
+        "--max-turns", "50", "--output-format", "stream-json", "--verbose"]
+review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+inactivity_timeout = 300
+
+[agents.gemini]
+command = "gemini"
+args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
+review_args = ["-p", "-"]
+inactivity_timeout = 180
 
 [build]
-commands = [["cargo", "build"], ["cargo", "test", "--no-run"]]
-check_commands = ["make check"]
+commands = [["make", "build"], ["make", "test"]]
+check_command = "make check"
 
 [limits]
 max_parallel_tasks = 4
 agent_timeout = 900
-inactivity_timeout_claude = 300
-inactivity_timeout_gemini = 180
 max_review_rounds = 3
-max_task_complexity = 3
 ```
+
+See `examples/example.toml` for a complete configuration reference.
 
 ## Architecture
 
 ```
 forgerace/
-  __init__.py
-  config.py       — Configuration loading (TOML)
+  __init__.py     — package entry
+  config.py       — configuration loading (TOML)
   tasks.py        — TASKS.md parser, task model
-  agents.py       — Agent runners (Claude, Gemini, streaming)
-  review.py       — Cross-review, single review, verdict parsing
-  pipeline.py     — Main pipeline: competitive, distributed, race model
-  decompose.py    — Complexity assessment, auto-decomposition
-  discuss.py      — Discussion system (create, reply, chat, resolve)
-  worktree.py     — Git worktree management
-  merge.py        — Merge to develop (detached worktree + update-ref)
+  agents.py       — agent runners (Claude, Gemini, streaming)
+  review.py       — cross-review, verdict parsing
+  pipeline.py     — main pipeline: competitive execution, race model
+  decompose.py    — complexity assessment, auto-decomposition
+  discuss.py      — discussion system (create, reply, chat, resolve)
+  worktree.py     — git worktree management
+  merge.py        — merge to develop (detached worktree + update-ref)
   utils.py        — run_cmd, logging, heartbeat
   cli.py          — CLI entry point (argparse)
 ```
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

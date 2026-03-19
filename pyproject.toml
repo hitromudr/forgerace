@@ -1,0 +1,14 @@
+[project]
+name = "forgerace"
+version = "0.1.0"
+description = "Multi-agent development orchestrator with competitive coding, cross-review, and race-to-merge"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+toml = ["tomli; python_version < '3.11'"]
+
+[project.scripts]
+forgerace = "forgerace.cli:main_with_signal_handling"
