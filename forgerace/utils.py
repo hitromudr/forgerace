@@ -46,38 +46,110 @@ class _ColorFormatter(logging.Formatter):
         logging.CRITICAL: C["red"] + C["bold"],
     }
 
-    # Паттерны для автоматической раскраски содержимого
+    # Паттерны для автоматической MUD-раскраски
     _HIGHLIGHTS = [
-        # [TASK-002/claude] → task bold, agent colored
+        # --- Идентификаторы ---
+        # [TASK-002/claude] → task yellow bold, agent colored
         (re.compile(r"\[(TASK-\d+)/(\w+)\]"),
-         lambda m: f"[{C['bold']}{m.group(1)}{R}/{_agent_c(m.group(2))}{m.group(2)}{R}]"),
-        # [TASK-002] → task bold
+         lambda m: f"[{C['yellow']}{C['bold']}{m.group(1)}{R}/{_agent_c(m.group(2))}{m.group(2)}{R}]"),
+        # [TASK-002] → task yellow bold
         (re.compile(r"\[(TASK-\d+)\]"),
-         lambda m: f"[{C['bold']}{m.group(1)}{R}]"),
-        # ═══ ... ═══ → yellow bold
+         lambda m: f"[{C['yellow']}{C['bold']}{m.group(1)}{R}]"),
+        # TASK-002 без скобок (в тексте)
+        (re.compile(r"\b(TASK-\d+)\b"),
+         lambda m: f"{C['yellow']}{C['bold']}{m.group(1)}{R}"),
+
+        # --- Агенты (в любом контексте) ---
+        (re.compile(r"\b(claude)\b", re.IGNORECASE),
+         lambda m: f"{C['cyan']}{m.group(1)}{R}"),
+        (re.compile(r"\b(gemini)\b", re.IGNORECASE),
+         lambda m: f"{C['magenta']}{m.group(1)}{R}"),
+
+        # --- Обрамление ---
+        # ═══ заголовки ═══ → yellow bold
         (re.compile(r"(═+.+═+)"),
          lambda m: f"{C['yellow']}{C['bold']}{m.group(1)}{R}"),
-        # ✅ ✓ → green
-        (re.compile(r"(✅|✓)(.*)"),
-         lambda m: f"{C['green']}{m.group(1)}{m.group(2)}{R}"),
-        # 🏆 победитель → green bold
-        (re.compile(r"(🏆.*)"),
-         lambda m: f"{C['green']}{C['bold']}{m.group(1)}{R}"),
-        # ❌ ✗ → red
-        (re.compile(r"(❌|✗|BLOCKED|FAILED)"),
-         lambda m: f"{C['red']}{m.group(1)}{R}"),
-        # → done → green
-        (re.compile(r"→ (done)"),
-         lambda m: f"→ {C['green']}{m.group(1)}{R}"),
-        # APPROVED → green bold
+
+        # --- Вердикты и статусы ---
         (re.compile(r"\b(APPROVED)\b"),
          lambda m: f"{C['green']}{C['bold']}{m.group(1)}{R}"),
-        # NEEDS_WORK → yellow
         (re.compile(r"\b(NEEDS_WORK)\b"),
+         lambda m: f"{C['yellow']}{C['bold']}{m.group(1)}{R}"),
+        (re.compile(r"\b(BLOCKED|FAILED|NO_EDIT_ABORT|CANCELLED|TIMEOUT|INACTIVITY_TIMEOUT|PROGRESS_TIMEOUT)\b"),
+         lambda m: f"{C['red']}{C['bold']}{m.group(1)}{R}"),
+
+        # --- Секции ревью ---
+        (re.compile(r"^(VERDICT:)(.*)$", re.MULTILINE),
+         lambda m: f"{C['yellow']}{C['bold']}{m.group(1)}{R}{m.group(2)}"),
+        (re.compile(r"^(COMMENTS:)(.*)$", re.MULTILINE),
+         lambda m: f"{C['blue']}{C['bold']}{m.group(1)}{R}{m.group(2)}"),
+        (re.compile(r"^(SUMMARY:)(.*)$", re.MULTILINE),
+         lambda m: f"{C['cyan']}{C['bold']}{m.group(1)}{R}{C['dim']}{m.group(2)}{R}"),
+
+        # --- Действия агентов (эмодзи + инструменты) ---
+        (re.compile(r"(📖 Read) (.+)"),
+         lambda m: f"{C['dim']}{m.group(1)} {m.group(2)}{R}"),
+        (re.compile(r"(✏️  (?:Write|Edit)) (.+)"),
+         lambda m: f"{C['green']}{m.group(1)} {m.group(2)}{R}"),
+        (re.compile(r"(💻 Bash:) (.+)"),
+         lambda m: f"{C['blue']}{m.group(1)}{R} {m.group(2)}"),
+        (re.compile(r"(🔍 (?:Grep|Glob):) (.+)"),
+         lambda m: f"{C['magenta']}{m.group(1)}{R} {C['dim']}{m.group(2)}{R}"),
+
+        # --- Прогресс ---
+        (re.compile(r"(⏳ \d+m\d+s) — (.+)"),
+         lambda m: f"{C['dim']}{m.group(1)}{R} — {m.group(2)}"),
+        (re.compile(r"(📊 .+turns.+)"),
+         lambda m: f"{C['dim']}{m.group(1)}{R}"),
+
+        # --- Успех ---
+        (re.compile(r"(✅|✓)(.*)"),
+         lambda m: f"{C['green']}{m.group(1)}{m.group(2)}{R}"),
+        (re.compile(r"(🏆.*)"),
+         lambda m: f"{C['green']}{C['bold']}{m.group(1)}{R}"),
+        # → done → green
+        (re.compile(r"→ (done)"),
+         lambda m: f"→ {C['green']}{C['bold']}{m.group(1)}{R}"),
+
+        # --- Ошибки ---
+        (re.compile(r"(❌|✗)(.*)"),
+         lambda m: f"{C['red']}{m.group(1)}{m.group(2)}{R}"),
+        (re.compile(r"(⏰.*)"),
+         lambda m: f"{C['red']}{m.group(1)}{R}"),
+
+        # --- Ревью и доработка ---
+        (re.compile(r"(📝 Code review .+)"),
+         lambda m: f"{C['blue']}{m.group(1)}{R}"),
+        (re.compile(r"(📝 Ревью|📝 Результат|📝 Финальное)(.*)"),
+         lambda m: f"{C['blue']}{m.group(1)}{R}{m.group(2)}"),
+        (re.compile(r"(📋 Ревью прогона.*)"),
+         lambda m: f"{C['yellow']}{C['bold']}{m.group(1)}{R}"),
+        (re.compile(r"(🔧 отправлен на доработку)"),
          lambda m: f"{C['yellow']}{m.group(1)}{R}"),
-        # claude/gemini в контексте агента
-        (re.compile(r"(?<=: )(claude|gemini)\b"),
-         lambda m: f"{_agent_c(m.group(1))}{m.group(1)}{R}"),
+        (re.compile(r"(Доработка по замечаниям.*)"),
+         lambda m: f"{C['yellow']}{m.group(1)}{R}"),
+
+        # --- Инфраструктура ---
+        (re.compile(r"(Worktree создан:.+)"),
+         lambda m: f"{C['dim']}{m.group(1)}{R}"),
+        (re.compile(r"(Worktree удалён:.+)"),
+         lambda m: f"{C['dim']}{m.group(1)}{R}"),
+        (re.compile(r"(Попытка \d+/\d+)"),
+         lambda m: f"{C['dim']}{m.group(1)}{R}"),
+
+        # --- Запуск ---
+        (re.compile(r"(Запускаю:.+процессов)"),
+         lambda m: f"{C['bold']}{m.group(1)}{R}"),
+        (re.compile(r"(Ревьюер:)(.+)"),
+         lambda m: f"{C['blue']}{m.group(1)}{R}{m.group(2)}"),
+        (re.compile(r"(конкурентный|распределённ)"),
+         lambda m: f"{C['cyan']}{m.group(1)}{R}"),
+        (re.compile(r"(→ конкурентный .+)"),
+         lambda m: f"{C['cyan']}{m.group(1)}{R}"),
+
+        # --- Стоимость ($) ---
+        (re.compile(r"(\$[\d.]+)"),
+         lambda m: f"{C['green']}{m.group(1)}{R}"),
     ]
 
     def format(self, record):
