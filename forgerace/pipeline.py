@@ -587,6 +587,74 @@ def review_run_log():
         log.debug(f"Ревью прогона пропущено: {e}")
 
 
+def _print_flow_guide(tasks: list[Task]):
+    """Показывает гайд: что делать дальше в зависимости от состояния задач."""
+    hint = run_hint().rsplit(" ", 1)[0]  # без "run"
+
+    if not tasks:
+        # Пустой TASKS.md — полный гайд
+        print(f"""
+  📋 TASKS.md пуст. Флоу работы с ForgeRace:
+
+  1. Добавь задачи в TASKS.md:
+
+     ### TASK-001: Название задачи
+     - **Status**: open
+     - **Priority**: P1
+     - **Dependencies**: —
+     - **Files (new)**: path/to/new_file.py
+     - **Files (modify)**: path/to/existing.py
+     - **Description**: Что сделать
+     - **Acceptance**: Критерии готовности
+     - **Discussion**: —
+     - **Agent**: —
+     - **Branch**: —
+
+  2. (Опционально) Обсуди архитектуру перед реализацией:
+     {hint} discuss new my-topic 'Как лучше реализовать X?'
+     {hint} discuss chat my-topic
+
+  3. Запусти:  {hint} run
+
+  4. Статус:   {hint} status""")
+        return
+
+    # Есть задачи, но нечего запускать — покажем что происходит
+    by_status: dict[str, list[Task]] = {}
+    for t in tasks:
+        s = t.status.split(":")[0]
+        by_status.setdefault(s, []).append(t)
+
+    print()
+    failed = by_status.get("failed", [])
+    in_progress = by_status.get("in_progress", [])
+    review = by_status.get("review", [])
+    done = by_status.get("done", [])
+
+    if failed:
+        print(f"  ❌ Упавшие ({len(failed)}):")
+        for t in failed:
+            print(f"     {t.id}: {t.name}")
+        print(f"     → {hint} run --retry")
+
+    if in_progress:
+        print(f"  ▶ В работе ({len(in_progress)}):")
+        for t in in_progress:
+            agent = t.status.split(":", 1)[1] if ":" in t.status else "?"
+            print(f"     {t.id}: {t.name} [{agent}]")
+
+    if review:
+        print(f"  ⏳ На ревью ({len(review)}):")
+        for t in review:
+            print(f"     {t.id}: {t.name}")
+        print(f"     → {hint} merge-pending")
+
+    if not failed and not in_progress and not review:
+        print(f"  ℹ Все {len(done)} задач выполнены, но нет open-задач для запуска.")
+        print(f"     Добавь новые задачи в TASKS.md и запусти:")
+        print(f"     → {hint} run")
+
+
 def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
     """Выводит следующие шаги."""
     done_ids = {t.id for t in tasks if t.status == "done"}
@@ -637,42 +705,8 @@ def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
                 stderr = (check_result.stderr or check_result.stdout or "")[-500:]
                 print(f"  ❌ make check FAILED — создаю задачу на фикс...")
                 create_checkpoint_task(stderr)
-        elif not tasks:
-            # TASKS.md пустой — показываем полный гайд
-            hint = run_hint().rsplit(" ", 1)[0]  # без "run"
-            print("""
-  📋 TASKS.md пуст. Флоу работы с ForgeRace:
-
-  1. Добавь задачи в TASKS.md:
-
-     ### TASK-001: Название задачи
-     - **Status**: open
-     - **Priority**: P1
-     - **Dependencies**: —
-     - **Files (new)**: path/to/new_file.py
-     - **Files (modify)**: path/to/existing.py
-     - **Description**: Что сделать
-     - **Acceptance**: Критерии готовности
-     - **Discussion**: —
-     - **Agent**: —
-     - **Branch**: —
-
-  2. (Опционально) Обсуди архитектуру перед реализацией:
-
-     {hint} discuss new my-topic 'Как лучше реализовать X?'
-     {hint} discuss chat my-topic
-
-  3. Запусти агентов:
-
-     {hint} run              # все ready-задачи
-     {hint} run --task TASK-001  # конкретная задача
-     {hint} run --auto        # автозапуск следующих по мере завершения
-
-  4. Следи за прогрессом:
-
-     {hint} status""".format(hint=hint))
         else:
-            print("\n  ℹ Нет задач для выполнения.")
+            _print_flow_guide(tasks)
 
     print(f"{'═' * 60}\n")
 
