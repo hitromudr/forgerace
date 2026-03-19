@@ -25,22 +25,29 @@ Complex tasks are automatically decomposed into subtasks. Stalled reviews are de
 ## Quick Start
 
 ```bash
-# Clone and enter the project you want to work on
-cd your-project
+# 1. Clone ForgeRace
+git clone https://github.com/hitromudr/forgerace.git ~/forgerace
 
-# Create a config file (see examples/example.toml)
-cp path/to/forgerace/examples/example.toml forgerace.toml
-# Edit forgerace.toml — set project name, build commands, agent paths
+# 2. Go to your project and initialize
+cd ~/work/my-project
+python3 ~/forgerace/forgerace.py init
+# Creates forgerace.toml and TASKS.md
 
-# Create a task file (see examples/TASKS.md)
-cp path/to/forgerace/examples/TASKS.md TASKS.md
-# Edit TASKS.md — define your tasks
+# 3. Edit config and add tasks
+vim forgerace.toml    # set build commands, dev_branch, etc.
+vim TASKS.md          # define tasks (see examples/)
 
-# Run all open tasks
-python3 path/to/forgerace.py run
+# 4. Run
+python3 ~/forgerace/forgerace.py run
 
-# Or install as a package
-pip install path/to/forgerace
+# After first run, config is remembered — no --config needed:
+python3 ~/forgerace/forgerace.py status
+python3 ~/forgerace/forgerace.py run
+```
+
+Optionally install as a package for shorter commands:
+```bash
+pip install -e ~/forgerace
 forgerace run
 ```
 
