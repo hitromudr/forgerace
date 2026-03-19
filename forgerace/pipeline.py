@@ -355,6 +355,8 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
 
     # Цикл: ревью → доработка
     best_result = None
+    prev_summary = None
+    repeat_count = 0
     for review_round in range(1, cfg.max_review_rounds + 1):
         log.info(f"[{task.id}] 📝 Code review (раунд {review_round}/{cfg.max_review_rounds})...")
         rv = code_review(passed, task)
@@ -382,6 +384,20 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
         if rv["verdict"] == "APPROVED":
             log.info(f"[{task.id}] ✅ Ревью пройдено: {best_result.agent_type}")
             break
+
+        # Детекция зацикливания: одинаковое замечание 2 раунда подряд → эскалация
+        cur_summary = rv.get("summary", "").strip()
+        if cur_summary and cur_summary == prev_summary:
+            repeat_count += 1
+            if repeat_count >= 1:
+                log.warning(f"[{task.id}] ⚠ Ревьюер зациклился (одно замечание {repeat_count + 1} раунда подряд) → эскалация")
+                _escalate_review_stall(task, passed, rv)
+                update_task_status(task.id, "blocked")
+                cleanup_worktrees(all_results)
+                return False
+        else:
+            repeat_count = 0
+        prev_summary = cur_summary
 
         if rv.get("verdict") == "error" or not rv.get("comments", "").strip():
             log.warning(f"[{task.id}] ⚠ Ревью ошибка/без замечаний — пропускаю раунд")
@@ -463,6 +479,8 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         return False
 
     best_result = result
+    prev_summary = None
+    repeat_count = 0
     for review_round in range(1, cfg.max_review_rounds + 1):
         log.info(f"[{task.id}] 📝 Code review (раунд {review_round}/{cfg.max_review_rounds})...")
         log.info(f"[{task.id}] Ревьюер: {reviewer} → {agent_type}")
@@ -474,6 +492,20 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         if rv["verdict"] == "APPROVED":
             log.info(f"[{task.id}] ✅ Ревью пройдено: {agent_type}")
             break
+
+        # Детекция зацикливания: одинаковое замечание 2 раунда подряд → эскалация
+        cur_summary = rv.get("summary", "").strip()
+        if cur_summary and cur_summary == prev_summary:
+            repeat_count += 1
+            if repeat_count >= 1:
+                log.warning(f"[{task.id}] ⚠ Ревьюер зациклился (одно замечание {repeat_count + 1} раунда подряд) → эскалация")
+                _escalate_review_stall(task, [best_result], rv)
+                update_task_status(task.id, "blocked")
+                cleanup_worktrees([result])
+                return False
+        else:
+            repeat_count = 0
+        prev_summary = cur_summary
 
         comments = rv.get("comments", "")
         if not comments.strip() or rv.get("verdict") == "error":
@@ -516,6 +548,35 @@ def _cleanup_task_branches(task: Task):
     for agent_type in cfg.agent_names:
         branch = f"task/{task.id.lower()}-{slug}-{agent_type}"
         run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
+
+
+def _escalate_review_stall(task: Task, results: list, last_rv: dict):
+    """Эскалация: ревьюер зациклился. Выводит саммари от всех агентов."""
+    print(f"\n{C['red']}{C['bold']}{'═' * 60}{R}")
+    print(f"  {C['red']}{C['bold']}⚠ ЭСКАЛАЦИЯ: ревьюер зациклился на {task.id}{R}")
+    print(f"{C['red']}{C['bold']}{'═' * 60}{R}")
+    print(f"\n  {C['bold']}Задача:{R} {task.id} — {task.name}")
+    print(f"  {C['bold']}Описание:{R} {task.description[:200]}")
+    print(f"  {C['bold']}Критерий:{R} {task.acceptance[:200]}")
+    print()
+
+    # Что сделал каждый агент
+    for r in results:
+        color = agent_color(r.agent_type)
+        print(f"  {color}{C['bold']}@{r.agent_type}{R}:")
+        print(f"    Файлов изменено: {r.code_lines} строк, unsafe={r.unsafe_count}")
+        if r.branch:
+            print(f"    Ветка: {C['dim']}{r.branch}{R}")
+
+    # Замечание ревьюера
+    reviewer = last_rv.get("reviewer", "?")
+    summary = last_rv.get("summary", last_rv.get("comments", "")[:300])
+    print(f"\n  {C['bold']}Замечание ({agent_color(reviewer)}@{reviewer}{R}{C['bold']}):{R}")
+    print(f"    {summary}")
+
+    print(f"\n  {C['yellow']}Решение требуется от techlead.{R}")
+    print(f"  Варианты: исправить задачу, поменять ревьюера, или approve вручную.")
+    print(f"{C['red']}{C['bold']}{'═' * 60}{R}\n")
 
 
 def preflight_check() -> bool:
