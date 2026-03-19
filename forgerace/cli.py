@@ -16,6 +16,68 @@ from .tasks import parse_tasks, update_task_status
 from .utils import log, run_cmd, setup_logging
 
 
+_INIT_TOML = '''# ForgeRace configuration
+# Docs: https://github.com/hitromudr/forgerace
+
+[project]
+name = "{name}"
+root = "."
+dev_branch = "develop"
+
+[agents.claude]
+command = "claude"
+args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSearch",
+        "--max-turns", "50", "--output-format", "stream-json", "--verbose"]
+review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+inactivity_timeout = 300
+
+[agents.gemini]
+command = "gemini"
+args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
+review_args = ["-p", "-"]
+inactivity_timeout = 180
+
+[build]
+commands = []
+check_command = ""
+
+[limits]
+max_parallel_tasks = 4
+agent_timeout = 900
+max_review_rounds = 3
+'''
+
+_INIT_TASKS = '''# TASKS — {name}
+'''
+
+
+def _cmd_init():
+    """Создаёт forgerace.toml и TASKS.md в текущей директории."""
+    cwd = Path.cwd()
+    name = cwd.name
+
+    toml_path = cwd / "forgerace.toml"
+    tasks_path = cwd / "TASKS.md"
+
+    created = []
+    if toml_path.exists():
+        print(f"  {C['dim']}forgerace.toml уже существует{R}")
+    else:
+        toml_path.write_text(_INIT_TOML.format(name=name), encoding="utf-8")
+        created.append("forgerace.toml")
+
+    if tasks_path.exists():
+        print(f"  {C['dim']}TASKS.md уже существует{R}")
+    else:
+        tasks_path.write_text(_INIT_TASKS.format(name=name), encoding="utf-8")
+        created.append("TASKS.md")
+
+    if created:
+        print(f"  {C['green']}✓ Создано: {', '.join(created)}{R}")
+    print(f"\n  Следующий шаг: отредактируй {C['bold']}forgerace.toml{R} и добавь задачи в {C['bold']}TASKS.md{R}")
+    print(f"  Потом: {C['bold']}forgerace run{R}")
+
+
 def show_status():
     """Показывает статус всех задач + граф зависимостей."""
     tasks = parse_tasks()
@@ -182,6 +244,9 @@ def main():
     disc_regen = disc_sub.add_parser("regen", help="Перегенерировать задачи из дискуссии")
     disc_regen.add_argument("topic", help="Имя темы")
 
+    # init
+    sub.add_parser("init", help="Создать forgerace.toml и TASKS.md в текущей директории")
+
     # merge-pending
     sub.add_parser("merge-pending", help="Промержить review-задачи в develop")
 
@@ -189,6 +254,11 @@ def main():
     sub.add_parser("status", help="Статус задач")
 
     args = parser.parse_args()
+
+    # init — до загрузки конфига
+    if args.command == "init":
+        _cmd_init()
+        return
 
     # Инициализация конфига
     # --root имеет приоритет; если не указан — TOML root; если и его нет — CWD

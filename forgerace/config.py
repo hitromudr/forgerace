@@ -127,27 +127,81 @@ def run_hint() -> str:
     return base + " run"
 
 
+_LAST_CONFIG_FILE = Path.home() / ".forgerace-last"
+
+
+def find_config(start_dir: Optional[Path] = None) -> Optional[Path]:
+    """Ищет forgerace.toml вверх по дереву директорий (как .git)."""
+    d = (start_dir or Path.cwd()).resolve()
+    for _ in range(20):  # max depth
+        candidate = d / "forgerace.toml"
+        if candidate.exists():
+            return candidate
+        parent = d.parent
+        if parent == d:
+            break
+        d = parent
+    return None
+
+
+def _save_last_config(path: Path):
+    """Сохраняет путь к последнему использованному конфигу."""
+    try:
+        _LAST_CONFIG_FILE.write_text(str(path.resolve()), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _load_last_config() -> Optional[Path]:
+    """Загружает путь к последнему использованному конфигу."""
+    try:
+        if _LAST_CONFIG_FILE.exists():
+            p = Path(_LAST_CONFIG_FILE.read_text(encoding="utf-8").strip())
+            if p.exists():
+                return p
+    except OSError:
+        pass
+    return None
+
+
 def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None) -> Config:
-    """Загружает конфиг из TOML-файла. Если файла нет — возвращает дефолты."""
+    """Загружает конфиг из TOML-файла. Если файла нет — возвращает дефолты.
+
+    Порядок поиска конфига:
+    1. --config (явно указан)
+    2. forgerace.toml вверх по дереву от CWD
+    3. Последний использованный (~/.forgerace-last)
+    4. Дефолты
+    """
     cfg = Config()
 
     if root_dir:
         cfg.root_dir = root_dir.resolve()
 
     if config_path is None:
-        # Ищем forgerace.toml в root_dir
-        config_path = cfg.root_dir / "forgerace.toml"
+        # Ищем вверх по дереву
+        config_path = find_config(cfg.root_dir)
 
-    if not config_path.exists() or tomllib is None:
+    if config_path is None:
+        # Последний использованный
+        config_path = _load_last_config()
+
+    if config_path is None or not config_path.exists() or tomllib is None:
         return cfg
+
+    _save_last_config(config_path)
 
     with open(config_path, "rb") as f:
         data = tomllib.load(f)
 
+    # Директория TOML-файла — для резолва относительных путей
+    toml_dir = config_path.resolve().parent
+
     # [project]
     proj = data.get("project", {})
     if "root" in proj:
-        cfg.root_dir = Path(proj["root"]).resolve()
+        root_path = Path(proj["root"])
+        cfg.root_dir = (toml_dir / root_path).resolve() if not root_path.is_absolute() else root_path.resolve()
     if "name" in proj:
         pass  # informational only
     if "context" in proj:
