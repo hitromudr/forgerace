@@ -78,12 +78,12 @@ class _ColorFormatter(logging.Formatter):
         (re.compile(r"\b(BLOCKED|FAILED|NO_EDIT_ABORT|CANCELLED|TIMEOUT|INACTIVITY_TIMEOUT|PROGRESS_TIMEOUT)\b"),
          lambda m: f"{C['red']}{C['bold']}{m.group(1)}{R}"),
 
-        # --- Секции ревью ---
-        (re.compile(r"^(VERDICT:)(.*)$", re.MULTILINE),
+        # --- Секции ревью (с опциональными ** markdown bold) ---
+        (re.compile(r"^(\*{0,2}VERDICT:?\*{0,2})(.*)$", re.MULTILINE),
          lambda m: f"{C['yellow']}{C['bold']}{m.group(1)}{R}{m.group(2)}"),
-        (re.compile(r"^(COMMENTS:)(.*)$", re.MULTILINE),
+        (re.compile(r"^(\*{0,2}COMMENTS:?\*{0,2})(.*)$", re.MULTILINE),
          lambda m: f"{C['blue']}{C['bold']}{m.group(1)}{R}{m.group(2)}"),
-        (re.compile(r"^(SUMMARY:)(.*)$", re.MULTILINE),
+        (re.compile(r"^(\*{0,2}SUMMARY:?\*{0,2})(.*)$", re.MULTILINE),
          lambda m: f"{C['cyan']}{C['bold']}{m.group(1)}{R}{C['dim']}{m.group(2)}{R}"),
 
         # --- Действия агентов (эмодзи + инструменты) ---
