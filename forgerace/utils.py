@@ -81,13 +81,16 @@ class _ColorFormatter(logging.Formatter):
     ]
 
     def format(self, record):
-        color = self.LEVEL_COLORS.get(record.levelno, "")
+        level_color = self.LEVEL_COLORS.get(record.levelno, "")
         ts = self.formatTime(record, "%H:%M:%S")
         msg = record.getMessage()
-        if record.levelno <= logging.INFO:
-            for pattern, repl in self._HIGHLIGHTS:
-                msg = pattern.sub(repl, msg)
-        return f"{C['dim']}{ts}{R} {color}{msg}{R}"
+        # Хайлайты применяем всегда
+        for pattern, repl in self._HIGHLIGHTS:
+            msg = pattern.sub(repl, msg)
+        # WARNING/ERROR: оборачиваем весь msg в цвет уровня
+        if level_color:
+            msg = f"{level_color}{msg}{R}"
+        return f"{C['dim']}{ts}{R} {msg}"
 
 
 def _agent_c(name: str) -> str:
