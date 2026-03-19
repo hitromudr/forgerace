@@ -19,7 +19,7 @@ from .tasks import (
     parse_tasks, task_paths, topic_for_task, translate_slug,
     update_task_status, link_task_discussion,
 )
-from .utils import log, run_cmd, is_valid_path
+from .utils import log, run_cmd, is_valid_path, C, R, agent_color
 from .worktree import cleanup_worktrees, create_worktree, remove_worktree
 
 
@@ -582,7 +582,8 @@ def review_run_log():
         )
         review = (result.stdout or "").strip()
         if review:
-            log.info(f"📋 Ревью прогона:\n{review}")
+            header = f"{C['yellow']}{C['bold']}📋 Ревью прогона:{R}"
+            print(f"\n{header}\n{review}\n")
     except Exception as e:
         log.debug(f"Ревью прогона пропущено: {e}")
 
@@ -625,6 +626,8 @@ def _print_flow_guide(tasks: list[Task]):
         s = t.status.split(":")[0]
         by_status.setdefault(s, []).append(t)
 
+    DIM = C["dim"]
+    BOLD = C["bold"]
     print()
     failed = by_status.get("failed", [])
     in_progress = by_status.get("in_progress", [])
@@ -632,27 +635,27 @@ def _print_flow_guide(tasks: list[Task]):
     done = by_status.get("done", [])
 
     if failed:
-        print(f"  ❌ Упавшие ({len(failed)}):")
+        print(f"  {C['red']}❌ Упавшие ({len(failed)}):{R}")
         for t in failed:
-            print(f"     {t.id}: {t.name}")
-        print(f"     → {hint} run --retry")
+            print(f"     {BOLD}{t.id}{R}: {t.name}")
+        print(f"     {DIM}→{R} {hint} run --retry")
 
     if in_progress:
-        print(f"  ▶ В работе ({len(in_progress)}):")
+        print(f"  {C['cyan']}▶ В работе ({len(in_progress)}):{R}")
         for t in in_progress:
-            agent = t.status.split(":", 1)[1] if ":" in t.status else "?"
-            print(f"     {t.id}: {t.name} [{agent}]")
+            a = t.status.split(":", 1)[1] if ":" in t.status else "?"
+            print(f"     {BOLD}{t.id}{R}: {t.name} {agent_color(a)}[{a}]{R}")
 
     if review:
-        print(f"  ⏳ На ревью ({len(review)}):")
+        print(f"  {C['yellow']}⏳ На ревью ({len(review)}):{R}")
         for t in review:
-            print(f"     {t.id}: {t.name}")
-        print(f"     → {hint} merge-pending")
+            print(f"     {BOLD}{t.id}{R}: {t.name}")
+        print(f"     {DIM}→{R} {hint} merge-pending")
 
     if not failed and not in_progress and not review:
-        print(f"  ℹ Все {len(done)} задач выполнены, но нет open-задач для запуска.")
+        print(f"  {DIM}ℹ Все {len(done)} задач выполнены, но нет open-задач для запуска.{R}")
         print(f"     Добавь новые задачи в TASKS.md и запусти:")
-        print(f"     → {hint} run")
+        print(f"     {DIM}→{R} {hint} run")
 
 
 def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
@@ -661,9 +664,11 @@ def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
     blocked = [t for t in tasks if t.status.startswith("blocked")]
     ready = find_ready_tasks(tasks)
 
-    print(f"\n{'═' * 60}")
-    print("  СЛЕДУЮЩИЕ ШАГИ")
-    print(f"{'═' * 60}")
+    DIM = C["dim"]
+    BOLD = C["bold"]
+    print(f"\n{C['yellow']}{BOLD}{'═' * 60}{R}")
+    print(f"  {C['yellow']}{BOLD}СЛЕДУЮЩИЕ ШАГИ{R}")
+    print(f"{C['yellow']}{BOLD}{'═' * 60}{R}")
 
     has_action = False
 
@@ -673,25 +678,25 @@ def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
             log.info(f"Есть ещё задачи: {[t.id for t in ready]}. Запускаю следующий цикл.")
             run_pipeline(max_tasks=max_tasks, auto=True)
             return
-        print(f"\n  ▶ Готовы к запуску ({len(ready)}):")
+        print(f"\n  {C['green']}▶ Готовы к запуску ({len(ready)}):{R}")
         for t in ready:
-            print(f"    {t.id}: {t.name}")
-        print(f"\n    → {run_hint()}")
+            print(f"    {BOLD}{t.id}{R}: {t.name}")
+        print(f"\n    {DIM}→{R} {run_hint()}")
 
     if blocked:
         has_action = True
         deps_ready = [t for t in blocked if all(d in done_ids for d in t.deps)]
         deps_waiting = [t for t in blocked if not all(d in done_ids for d in t.deps)]
         if deps_ready:
-            print(f"\n  🔄 Blocked, но зависимости готовы:")
+            print(f"\n  {C['yellow']}🔄 Blocked, но зависимости готовы:{R}")
             for t in deps_ready:
-                print(f"    {t.id}: {t.name}")
-            print(f"\n    → {run_hint()}")
+                print(f"    {BOLD}{t.id}{R}: {t.name}")
+            print(f"\n    {DIM}→{R} {run_hint()}")
         if deps_waiting:
-            print(f"\n  ⏸ Blocked, ждут зависимости:")
+            print(f"\n  {DIM}⏸ Blocked, ждут зависимости:{R}")
             for t in deps_waiting:
                 waiting = [d for d in t.deps if d not in done_ids]
-                print(f"    {t.id}: {t.name} (ждёт: {', '.join(waiting)})")
+                print(f"    {BOLD}{t.id}{R}: {t.name} {DIM}(ждёт: {', '.join(waiting)}){R}")
 
     if not has_action:
         all_done = tasks and all(t.status == "done" for t in tasks)

@@ -1,4 +1,4 @@
-"""Утилиты: run_cmd, slugify, валидация путей, логирование."""
+"""Утилиты: run_cmd, slugify, валидация путей, логирование, ANSI-цвета."""
 
 import logging
 import re
@@ -7,23 +7,66 @@ from pathlib import Path
 
 from .config import cfg
 
+# --- ANSI цвета ---
+
+C = {
+    "reset":   "\033[0m",
+    "bold":    "\033[1m",
+    "dim":     "\033[2m",
+    "cyan":    "\033[36m",
+    "green":   "\033[32m",
+    "yellow":  "\033[33m",
+    "magenta": "\033[35m",
+    "blue":    "\033[34m",
+    "red":     "\033[31m",
+    "white":   "\033[97m",
+}
+
+R = C["reset"]  # shortcut
+
+
+def agent_color(name: str) -> str:
+    """Возвращает ANSI-цвет для агента."""
+    colors = {"claude": "cyan", "gemini": "magenta", "techlead": "green"}
+    return C.get(colors.get(name, "white"), C["white"])
+
+
 # --- Логирование ---
 
 log = logging.getLogger("forgerace")
+
+
+class _ColorFormatter(logging.Formatter):
+    """Цветной форматтер для консоли."""
+    LEVEL_COLORS = {
+        logging.DEBUG:    C["dim"],
+        logging.INFO:     "",
+        logging.WARNING:  C["yellow"],
+        logging.ERROR:    C["red"],
+        logging.CRITICAL: C["red"] + C["bold"],
+    }
+
+    def format(self, record):
+        color = self.LEVEL_COLORS.get(record.levelno, "")
+        ts = self.formatTime(record, "%H:%M:%S")
+        msg = record.getMessage()
+        return f"{C['dim']}{ts}{R} {color}{msg}{R}"
 
 
 def setup_logging(verbose: bool = False):
     """Настраивает логирование в консоль и файл."""
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(cfg.log_dir / "orchestrator.log"),
-        ],
-    )
+
+    # Консоль — цветной
+    console = logging.StreamHandler()
+    console.setFormatter(_ColorFormatter())
+
+    # Файл — без цветов
+    fh = logging.FileHandler(cfg.log_dir / "orchestrator.log")
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+
+    logging.basicConfig(level=level, handlers=[console, fh])
 
 
 # --- Запуск команд ---

@@ -32,10 +32,10 @@ def _log_claude_event(tag: str, event: dict):
                 path = inp.get("file_path", "?").rsplit("/", 1)[-1]
                 log.info(f"[{tag}] ✏️  {tool} {path}")
             elif tool == "Bash":
-                cmd_str = inp.get("command", "?")[:60]
+                cmd_str = inp.get("command", "?")[:120]
                 log.info(f"[{tag}] 💻 Bash: {cmd_str}")
             elif tool in ("Grep", "Glob"):
-                pattern = inp.get("pattern", "?")[:40]
+                pattern = inp.get("pattern", "?")[:80]
                 log.info(f"[{tag}] 🔍 {tool}: {pattern}")
 
     elif etype == "result":
@@ -63,10 +63,10 @@ def _log_gemini_event(tag: str, event: dict):
             path = args.get("file_path", args.get("path", "?")).rsplit("/", 1)[-1]
             log.info(f"[{tag}] ✏️  {tool} {path}")
         elif any(w in tool_lower for w in ("run", "command", "shell", "bash")):
-            cmd_str = args.get("command", "?")[:60]
+            cmd_str = args.get("command", "?")[:120]
             log.info(f"[{tag}] 💻 Bash: {cmd_str}")
         elif any(w in tool_lower for w in ("search", "list", "glob", "grep")):
-            pattern = str(args.get("pattern", args.get("path", "?")))[:40]
+            pattern = str(args.get("pattern", args.get("path", "?")))[:80]
             log.info(f"[{tag}] 🔍 {tool}: {pattern}")
         else:
             log.info(f"[{tag}] 🔧 {tool}")

@@ -12,25 +12,10 @@ from pathlib import Path
 from .config import cfg, run_hint
 from .decompose import insert_tasks_into_tasksmd
 from .tasks import Task, parse_tasks, link_task_discussion
-from .utils import log, run_cmd
+from .utils import log, run_cmd, C, R, agent_color
 
-# --- ANSI цвета ---
-_C = {
-    "reset":   "\033[0m",
-    "bold":    "\033[1m",
-    "dim":     "\033[2m",
-    "cyan":    "\033[36m",
-    "green":   "\033[32m",
-    "yellow":  "\033[33m",
-    "magenta": "\033[35m",
-    "blue":    "\033[34m",
-    "red":     "\033[31m",
-    "white":   "\033[97m",
-}
-
-def _agent_color(agent: str) -> str:
-    colors = {"claude": "cyan", "gemini": "magenta", "techlead": "green"}
-    return _C.get(colors.get(agent, "white"), _C["white"])
+_C = C  # alias для совместимости
+_agent_color = agent_color
 
 
 # --- CRUD ---

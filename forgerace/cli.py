@@ -10,6 +10,7 @@ from pathlib import Path
 from .config import cfg, init_config, run_hint
 from .discuss import discuss_chat, discuss_create, discuss_list, discuss_reply, discuss_show
 from .merge import ensure_develop_branch, merge_to_develop
+from .utils import C, R, agent_color
 from .pipeline import run_pipeline
 from .tasks import parse_tasks, update_task_status
 from .utils import log, run_cmd, setup_logging
@@ -20,7 +21,7 @@ def show_status():
     tasks = parse_tasks()
     if not tasks:
         hint = run_hint().rsplit(" ", 1)[0]
-        print(f"\n  📋 Нет задач в TASKS.md. Подсказка: {hint} run\n")
+        print(f"\n  {C['dim']}📋 Нет задач в TASKS.md. Подсказка:{R} {hint} run\n")
         return
 
     status_groups = {}
@@ -28,17 +29,26 @@ def show_status():
         s = t.status.split(":")[0] or "unknown"
         status_groups.setdefault(s, []).append(t)
 
-    icons = {"done": "✓", "review": "⏳", "in_progress": "▶", "open": "○", "blocked": "✗", "failed": "❌", "unknown": "?"}
+    status_styles = {
+        "done":        ("✓", C["green"]),
+        "review":      ("⏳", C["yellow"]),
+        "in_progress": ("▶", C["cyan"]),
+        "open":        ("○", C["white"]),
+        "blocked":     ("✗", C["dim"]),
+        "failed":      ("❌", C["red"]),
+        "unknown":     ("?", C["dim"]),
+    }
     for status in ["done", "review", "in_progress", "open", "blocked", "failed", "unknown"]:
         group = status_groups.get(status, [])
         if not group:
             continue
-        icon = icons.get(status, "?")
-        print(f"\n{icon} {status.upper()} ({len(group)}):")
+        icon, color = status_styles.get(status, ("?", ""))
+        print(f"\n{color}{icon} {status.upper()} ({len(group)}):{R}")
         for t in group:
-            agent_info = f" [{t.agent}]" if t.agent and t.agent != "—" else ""
-            deps_info = f" (ждёт: {', '.join(t.deps)})" if t.deps and status == "open" else ""
-            print(f"    {t.id}: {t.name}{agent_info}{deps_info}")
+            a = t.agent if t.agent and t.agent != "—" else ""
+            agent_info = f" {agent_color(a)}[{a}]{R}" if a else ""
+            deps_info = f" {C['dim']}(ждёт: {', '.join(t.deps)}){R}" if t.deps and status == "open" else ""
+            print(f"    {C['bold']}{t.id}{R}: {t.name}{agent_info}{deps_info}")
     print()
 
 
