@@ -37,7 +37,7 @@ log = logging.getLogger("forgerace")
 
 
 class _ColorFormatter(logging.Formatter):
-    """Цветной форматтер для консоли."""
+    """Цветной MUD-style форматтер для консоли."""
     LEVEL_COLORS = {
         logging.DEBUG:    C["dim"],
         logging.INFO:     "",
@@ -46,11 +46,53 @@ class _ColorFormatter(logging.Formatter):
         logging.CRITICAL: C["red"] + C["bold"],
     }
 
+    # Паттерны для автоматической раскраски содержимого
+    _HIGHLIGHTS = [
+        # [TASK-002/claude] → task bold, agent colored
+        (re.compile(r"\[(TASK-\d+)/(\w+)\]"),
+         lambda m: f"[{C['bold']}{m.group(1)}{R}/{_agent_c(m.group(2))}{m.group(2)}{R}]"),
+        # [TASK-002] → task bold
+        (re.compile(r"\[(TASK-\d+)\]"),
+         lambda m: f"[{C['bold']}{m.group(1)}{R}]"),
+        # ═══ ... ═══ → yellow bold
+        (re.compile(r"(═+.+═+)"),
+         lambda m: f"{C['yellow']}{C['bold']}{m.group(1)}{R}"),
+        # ✅ ✓ → green
+        (re.compile(r"(✅|✓)(.*)"),
+         lambda m: f"{C['green']}{m.group(1)}{m.group(2)}{R}"),
+        # 🏆 победитель → green bold
+        (re.compile(r"(🏆.*)"),
+         lambda m: f"{C['green']}{C['bold']}{m.group(1)}{R}"),
+        # ❌ ✗ → red
+        (re.compile(r"(❌|✗|BLOCKED|FAILED)"),
+         lambda m: f"{C['red']}{m.group(1)}{R}"),
+        # → done → green
+        (re.compile(r"→ (done)"),
+         lambda m: f"→ {C['green']}{m.group(1)}{R}"),
+        # APPROVED → green bold
+        (re.compile(r"\b(APPROVED)\b"),
+         lambda m: f"{C['green']}{C['bold']}{m.group(1)}{R}"),
+        # NEEDS_WORK → yellow
+        (re.compile(r"\b(NEEDS_WORK)\b"),
+         lambda m: f"{C['yellow']}{m.group(1)}{R}"),
+        # claude/gemini в контексте агента
+        (re.compile(r"(?<=: )(claude|gemini)\b"),
+         lambda m: f"{_agent_c(m.group(1))}{m.group(1)}{R}"),
+    ]
+
     def format(self, record):
         color = self.LEVEL_COLORS.get(record.levelno, "")
         ts = self.formatTime(record, "%H:%M:%S")
         msg = record.getMessage()
+        if record.levelno <= logging.INFO:
+            for pattern, repl in self._HIGHLIGHTS:
+                msg = pattern.sub(repl, msg)
         return f"{C['dim']}{ts}{R} {color}{msg}{R}"
+
+
+def _agent_c(name: str) -> str:
+    """Быстрый доступ к цвету агента для regex-замен."""
+    return agent_color(name)
 
 
 def setup_logging(verbose: bool = False):
