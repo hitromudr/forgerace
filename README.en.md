@@ -26,7 +26,7 @@ You can also write tasks in `TASKS.md` manually. But then `run` will auto-open a
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` CLI) — authenticates via browser (Max/Team subscription)
   - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini` CLI) — authenticates via `GEMINI_API_KEY`
 
-**Important:** ForgeRace uses official agent CLIs, not APIs directly. See each CLI's documentation for setup.
+**Important:** ForgeRace uses official agent CLIs, not APIs directly. Authentication method depends on each CLI — see their docs.
 
 ## Quick Start
 

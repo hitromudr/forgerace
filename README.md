@@ -26,7 +26,7 @@
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` CLI)
   - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini` CLI)
 
-**Важно:** ForgeRace использует официальные CLI агентов, а не API напрямую. Способ авторизации зависит от CLI: Claude Code авторизуется через браузер (подписка Max/Team), Gemini CLI — через API-ключ (`GEMINI_API_KEY`). Подробности — в документации каждого CLI.
+**Важно:** ForgeRace использует официальные CLI агентов, а не API напрямую. Способ авторизации зависит от конкретного CLI — см. документацию каждого.
 
 ## Быстрый старт
 
