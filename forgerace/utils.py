@@ -86,6 +86,16 @@ class _ColorFormatter(logging.Formatter):
         (re.compile(r"^(\*{0,2}SUMMARY:?\*{0,2})(.*)$", re.MULTILINE),
          lambda m: f"{C['cyan']}{C['bold']}{m.group(1)}{R}{C['dim']}{m.group(2)}{R}"),
 
+        # --- Markdown bold заголовки в тексте ревью (**Текст:**) ---
+        (re.compile(r"\*\*([^*]*(?:блокирующ|критич|проблем|ошибк|баг)[^*]*?):\*\*", re.IGNORECASE),
+         lambda m: f"{C['red']}{C['bold']}{m.group(1)}:{R}"),
+        (re.compile(r"\*\*([^*]*(?:замечани|некритич|minor|нюанс)[^*]*?):\*\*", re.IGNORECASE),
+         lambda m: f"{C['yellow']}{C['bold']}{m.group(1)}:{R}"),
+        (re.compile(r"\*\*([^*]*(?:проверен|корректн|качеств|соответств|ОК|OK)[^*]*?):\*\*", re.IGNORECASE),
+         lambda m: f"{C['green']}{C['bold']}{m.group(1)}:{R}"),
+        (re.compile(r"\*\*([^*]+?):\*\*"),
+         lambda m: f"{C['white']}{C['bold']}{m.group(1)}:{R}"),
+
         # --- Действия агентов (эмодзи + инструменты) ---
         (re.compile(r"(📖 Read) (.+)"),
          lambda m: f"{C['dim']}{m.group(1)} {m.group(2)}{R}"),
