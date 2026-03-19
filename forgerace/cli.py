@@ -17,12 +17,15 @@ from .utils import log, run_cmd, setup_logging
 
 
 def show_status():
-    """Показывает статус всех задач."""
+    """Показывает статус всех задач + граф зависимостей."""
     tasks = parse_tasks()
     if not tasks:
         hint = run_hint().rsplit(" ", 1)[0]
         print(f"\n  {C['dim']}📋 Нет задач в TASKS.md. Подсказка:{R} {hint} run\n")
         return
+
+    task_map = {t.id: t for t in tasks}
+    done_ids = {t.id for t in tasks if t.status == "done"}
 
     status_groups = {}
     for t in tasks:
@@ -49,6 +52,55 @@ def show_status():
             agent_info = f" {agent_color(a)}[{a}]{R}" if a else ""
             deps_info = f" {C['dim']}(ждёт: {', '.join(t.deps)}){R}" if t.deps and status == "open" else ""
             print(f"    {C['bold']}{t.id}{R}: {t.name}{agent_info}{deps_info}")
+
+    # Граф зависимостей для незавершённых задач
+    active = [t for t in tasks if t.status != "done"]
+    if active:
+        print(f"\n{C['yellow']}{C['bold']}Граф зависимостей:{R}")
+
+        # Найдём задачи без незавершённых зависимостей (готовы к запуску)
+        ready_ids = set()
+        for t in active:
+            unmet = [d for d in t.deps if d not in done_ids]
+            if not unmet:
+                ready_ids.add(t.id)
+
+        # Кто от кого зависит (обратный граф — кто разблокируется)
+        unlocks: dict[str, list[str]] = {}
+        for t in active:
+            for d in t.deps:
+                if d not in done_ids:
+                    unlocks.setdefault(d, []).append(t.id)
+
+        # Рисуем дерево от корней (задачи без незавершённых зависимостей)
+        printed = set()
+
+        def _print_tree(tid: str, indent: int = 0):
+            if tid in printed:
+                return
+            printed.add(tid)
+            t = task_map.get(tid)
+            if not t or t.status == "done":
+                return
+            prefix = "  " + "│ " * indent
+            s = t.status.split(":")[0]
+            icon, color = status_styles.get(s, ("?", ""))
+            ready_marker = f" {C['green']}◀ ready{R}" if tid in ready_ids and s == "open" else ""
+            print(f"{prefix}{color}{icon}{R} {C['bold']}{tid}{R}: {t.name}{ready_marker}")
+            for child in unlocks.get(tid, []):
+                connector = "  " + "│ " * indent + "├─"
+                # Не печатаем connector отдельно — он часть дочернего вызова
+                _print_tree(child, indent + 1)
+
+        # Начинаем с корней (нет незавершённых зависимостей)
+        roots = [t.id for t in active if not any(d not in done_ids for d in t.deps)]
+        orphans = [t.id for t in active if t.id not in roots and t.id not in {c for kids in unlocks.values() for c in kids}]
+
+        for root in roots:
+            _print_tree(root)
+        for orph in orphans:
+            _print_tree(orph)
+
     print()
 
 
