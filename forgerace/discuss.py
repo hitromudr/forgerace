@@ -161,17 +161,26 @@ def discuss_chat(topic: str):
         elif cmd == "/show":
             print(filepath.read_text(encoding="utf-8"))
             continue
-        elif cmd in ("/claude", "/gemini", "/both"):
+        elif cmd in ("/claude", "/gemini", "/qwen", "/both", "/all"):
             if extra:
                 _chat_append(filepath, "techlead", extra)
-            if cmd in ("/claude", "/both"):
-                _chat_agent_reply(filepath, "claude")
-            if cmd in ("/gemini", "/both"):
-                _chat_agent_reply(filepath, "gemini")
+            agents_to_call = []
+            if cmd == "/all":
+                agents_to_call = [n for n in cfg.agent_names]
+            elif cmd == "/both":
+                agents_to_call = [n for n in ("claude", "gemini") if n in cfg.agent_names]
+            else:
+                name = cmd.lstrip("/")
+                if name in cfg.agent_names:
+                    agents_to_call = [name]
+                else:
+                    print(f"  {_C['red']}Агент '{name}' не найден в конфиге{_C['reset']}")
+                    continue
+            for name in agents_to_call:
+                _chat_agent_reply(filepath, name)
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             print(f"  Введите текст — добавить свой комментарий в дискуссию")
-            print(f"  {_C['yellow']}/both{_C['reset']} — пусть оба прокомментируют   {_C['green']}/ok{_C['reset']} — одобрить и закрыть")
-            print(f"  {_C['yellow']}/help{_C['reset']} — все команды")
+            print(f"  {_C['yellow']}/all{_C['reset']} — все агенты   {_C['green']}/ok{_C['reset']} — одобрить и закрыть   {_C['yellow']}/help{_C['reset']} — все команды")
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             continue
         elif cmd == "/ok":
@@ -181,9 +190,9 @@ def discuss_chat(topic: str):
             _chat_append(filepath, "techlead",
                          "Я готов утвердить. Ваши финальные замечания или возражения? "
                          "Если согласны — напишите 'согласен'. Если нет — аргументируйте.")
-            print("[Финальный раунд — оба агента высказываются перед закрытием]\n")
-            _chat_agent_reply(filepath, "claude")
-            _chat_agent_reply(filepath, "gemini")
+            print(f"[Финальный раунд — все агенты высказываются перед закрытием]\n")
+            for name in cfg.agent_names:
+                _chat_agent_reply(filepath, name)
             _chat_auto_resolve(filepath)
             _post_resolve(filepath)
             _auto_link_discussion(topic)
@@ -521,9 +530,11 @@ def _print_chat_help():
     print(f"  {DIM}(текст){R}   — ваш комментарий, сохраняется в дискуссию (агенты не вызываются)")
     print(f"  {Y}/claude{R}   — запросить ответ {_C['cyan']}Claude{R}")
     print(f"  {Y}/gemini{R}   — запросить ответ {_C['magenta']}Gemini{R}")
-    print(f"  {Y}/both{R}     — оба последовательно ({_C['cyan']}Claude{R} → {_C['magenta']}Gemini{R})")
+    print(f"  {Y}/qwen{R}     — запросить ответ {_C['blue']}Qwen{R}")
+    print(f"  {Y}/both{R}     — Claude + Gemini")
+    print(f"  {Y}/all{R}      — все агенты последовательно")
     print(f"  {Y}/claude{R} {DIM}(текст){R} — записать ваш комментарий, затем вызвать Claude")
-    print(f"  {Y}/both{R} {DIM}(текст){R}   — записать комментарий, затем вызвать обоих")
+    print(f"  {Y}/all{R} {DIM}(текст){R}    — записать комментарий, затем вызвать всех")
     print(f"  {Y}/show{R}     — показать всю дискуссию")
     print(f"  {G}/ok{R}       — одобрить и закрыть (резолюция генерируется автоматически)")
     print(f"  {Y}/resolve{R}  — написать резолюцию вручную")

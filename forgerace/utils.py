@@ -27,7 +27,7 @@ R = C["reset"]  # shortcut
 
 def agent_color(name: str) -> str:
     """Возвращает ANSI-цвет для агента."""
-    colors = {"claude": "cyan", "gemini": "magenta", "techlead": "green"}
+    colors = {"claude": "cyan", "gemini": "magenta", "qwen": "blue", "techlead": "green"}
     return C.get(colors.get(name, "white"), C["white"])
 
 
@@ -64,6 +64,8 @@ class _ColorFormatter(logging.Formatter):
          lambda m: f"{C['cyan']}{m.group(1)}{R}"),
         (re.compile(r"\b(gemini)\b", re.IGNORECASE),
          lambda m: f"{C['magenta']}{m.group(1)}{R}"),
+        (re.compile(r"\b(qwen)\b", re.IGNORECASE),
+         lambda m: f"{C['blue']}{m.group(1)}{R}"),
 
         # --- Обрамление ---
         # ═══ заголовки ═══ → yellow bold

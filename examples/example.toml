@@ -21,6 +21,13 @@ args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
 review_args = ["-p", "-"]
 inactivity_timeout = 180
 
+[agents.qwen]
+command = "qwen"
+args = ["-p", "--allowed-tools", "read_file,write_file,edit,run_shell_command,grep_search,glob,list_directory,web_fetch",
+        "--output-format", "stream-json", "--approval-mode", "yolo"]
+review_args = ["-p", "--output-format", "text", "--approval-mode", "yolo"]
+inactivity_timeout = 300
+
 [build]
 commands = [
     ["make", "build"],

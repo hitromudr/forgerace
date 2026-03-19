@@ -15,7 +15,7 @@ from .utils import log
 # --- Логирование событий ---
 
 def _log_claude_event(tag: str, event: dict):
-    """Логирует событие из stream-json вывода Claude."""
+    """Логирует событие из stream-json вывода Claude/Qwen (совместимый формат)."""
     etype = event.get("type", "")
 
     if etype == "assistant" and "message" in event:
@@ -25,18 +25,31 @@ def _log_claude_event(tag: str, event: dict):
                 continue
             tool = block.get("name", "?")
             inp = block.get("input", {})
-            if tool == "Read":
-                path = inp.get("file_path", "?").rsplit("/", 1)[-1]
+            # Нормализация имён (Qwen: read_file, write_file, run_shell_command, grep_search)
+            tool_lower = tool.lower()
+            if tool in ("Read", "read_file"):
+                path = inp.get("file_path", inp.get("absolute_path", "?")).rsplit("/", 1)[-1]
                 log.info(f"[{tag}] 📖 Read {path}")
-            elif tool in ("Write", "Edit"):
-                path = inp.get("file_path", "?").rsplit("/", 1)[-1]
+            elif tool in ("Write", "Edit", "write_file", "edit"):
+                path = inp.get("file_path", inp.get("absolute_path", "?")).rsplit("/", 1)[-1]
                 log.info(f"[{tag}] ✏️  {tool} {path}")
-            elif tool == "Bash":
+            elif tool in ("Bash", "run_shell_command"):
                 cmd_str = inp.get("command", "?")[:120]
                 log.info(f"[{tag}] 💻 Bash: {cmd_str}")
-            elif tool in ("Grep", "Glob"):
-                pattern = inp.get("pattern", "?")[:80]
+            elif tool in ("Grep", "Glob", "grep_search", "glob"):
+                pattern = inp.get("pattern", inp.get("query", "?"))[:80]
                 log.info(f"[{tag}] 🔍 {tool}: {pattern}")
+            elif tool == "list_directory":
+                path = inp.get("path", "?").rsplit("/", 1)[-1]
+                log.info(f"[{tag}] 📂 ls {path}")
+            elif tool == "web_fetch":
+                url = inp.get("url", "?")[:80]
+                log.info(f"[{tag}] 🌐 Fetch: {url}")
+            elif tool in ("WebFetch", "WebSearch", "web_search"):
+                query = inp.get("query", inp.get("url", "?"))[:80]
+                log.info(f"[{tag}] 🌐 {tool}: {query}")
+            else:
+                log.info(f"[{tag}] 🔧 {tool}")
 
     elif etype == "result":
         turns = event.get("num_turns", "?")
@@ -45,7 +58,10 @@ def _log_claude_event(tag: str, event: dict):
         usage = event.get("usage", {})
         in_tok = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
         out_tok = usage.get("output_tokens", 0)
-        log.info(f"[{tag}] 📊 {turns} turns, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out, ${cost:.2f}")
+        if cost:
+            log.info(f"[{tag}] 📊 {turns} turns, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out, ${cost:.2f}")
+        else:
+            log.info(f"[{tag}] 📊 {turns} turns, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out")
 
 
 def _log_gemini_event(tag: str, event: dict):
@@ -82,13 +98,16 @@ def _log_gemini_event(tag: str, event: dict):
 
 # --- Запуск агентов ---
 
+_PRODUCTIVE_TOOLS = {"Write", "Edit", "Bash", "write_file", "edit", "run_shell_command"}
+
+
 def _event_has_productive_action(event: dict) -> bool:
     """Проверяет, содержит ли событие продуктивное действие (Write/Edit/Bash)."""
     etype = event.get("type", "")
-    # Claude: assistant message с tool_use блоками
+    # Claude/Qwen: assistant message с tool_use блоками
     if etype == "assistant":
         for block in event.get("message", {}).get("content", []):
-            if block.get("type") == "tool_use" and block.get("name") in ("Write", "Edit", "Bash"):
+            if block.get("type") == "tool_use" and block.get("name") in _PRODUCTIVE_TOOLS:
                 return True
     # Gemini: tool_call/tool_use событие
     if etype in ("tool_call", "tool_use"):
@@ -291,10 +310,10 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
             cancel_event=cancel_event,
         )
     else:
-        # Универсальный запуск (без стриминга)
+        # Qwen и другие CLI с Claude-совместимым stream-json
         return _run_agent_streaming(
             final_cmd, workdir, tag, acfg.inactivity_timeout,
-            lambda t, e: None, lambda e: False, lambda lines: "",
+            _log_claude_event, _claude_activity_check, _claude_extract_result,
             cancel_event=cancel_event,
         )
 
