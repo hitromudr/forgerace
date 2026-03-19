@@ -82,18 +82,18 @@ def _log_gemini_event(tag: str, event: dict):
 
 # --- Запуск агентов ---
 
-def _event_has_edit(event: dict) -> bool:
-    """Проверяет, содержит ли событие Write/Edit tool_use."""
+def _event_has_productive_action(event: dict) -> bool:
+    """Проверяет, содержит ли событие продуктивное действие (Write/Edit/Bash)."""
     etype = event.get("type", "")
     # Claude: assistant message с tool_use блоками
     if etype == "assistant":
         for block in event.get("message", {}).get("content", []):
-            if block.get("type") == "tool_use" and block.get("name") in ("Write", "Edit"):
+            if block.get("type") == "tool_use" and block.get("name") in ("Write", "Edit", "Bash"):
                 return True
     # Gemini: tool_call/tool_use событие
     if etype in ("tool_call", "tool_use"):
         tool = event.get("tool", event.get("tool_name", "")).lower()
-        if any(w in tool for w in ("write", "edit", "replace")):
+        if any(w in tool for w in ("write", "edit", "replace", "bash", "run", "command", "shell")):
             return True
     return False
 
@@ -187,7 +187,7 @@ def _run_agent_streaming(
                             last_activity = time.time()
                             # Early-abort: трекаем tool_calls без Write/Edit
                             tool_calls_since_edit += 1
-                            if _event_has_edit(event):
+                            if _event_has_productive_action(event):
                                 tool_calls_since_edit = 0
                         log_event_fn(tag, event)
                     except json.JSONDecodeError:
@@ -196,7 +196,7 @@ def _run_agent_streaming(
                     if tool_calls_since_edit >= MAX_CALLS_WITHOUT_EDIT:
                         proc.kill()
                         proc.wait()
-                        log.error(f"[{tag}] ⏰ {tool_calls_since_edit} tool_calls без Edit/Write — зацикливание, убиваю")
+                        log.error(f"[{tag}] ⏰ {tool_calls_since_edit} tool_calls без Edit/Write/Bash — зацикливание, убиваю")
                         return subprocess.CompletedProcess(cmd, 1, "", "NO_EDIT_ABORT")
             elif proc.poll() is not None:
                 for line in proc.stdout:
