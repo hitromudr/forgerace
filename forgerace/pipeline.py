@@ -523,7 +523,7 @@ def preflight_check() -> bool:
     # Проверяем merge conflict маркеры (ищем в src/ если есть, иначе в корне)
     src_dir = cfg.root_dir / "src"
     search_dir = "src/" if src_dir.exists() else "."
-    result = run_cmd(["grep", "-rl", "<<<<<<<", search_dir], cwd=cfg.root_dir, check=False)
+    result = run_cmd(["grep", "-rlI", "<<<<<<<", search_dir], cwd=cfg.root_dir, check=False)
     if result.stdout.strip():
         conflicted = result.stdout.strip().split("\n")
         log.error(f"⚠ Merge conflict маркеры в: {conflicted}")
@@ -626,7 +626,7 @@ def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
                 print(f"    {t.id}: {t.name} (ждёт: {', '.join(waiting)})")
 
     if not has_action:
-        all_done = all(t.status == "done" for t in tasks)
+        all_done = tasks and all(t.status == "done" for t in tasks)
         if all_done:
             print("\n  ✅ Все задачи выполнены!")
             print("\n  🔍 Запускаю make check...")
@@ -637,6 +637,40 @@ def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
                 stderr = (check_result.stderr or check_result.stdout or "")[-500:]
                 print(f"  ❌ make check FAILED — создаю задачу на фикс...")
                 create_checkpoint_task(stderr)
+        elif not tasks:
+            # TASKS.md пустой — показываем полный гайд
+            hint = run_hint().rsplit(" ", 1)[0]  # без "run"
+            print("""
+  📋 TASKS.md пуст. Флоу работы с ForgeRace:
+
+  1. Добавь задачи в TASKS.md:
+
+     ### TASK-001: Название задачи
+     - **Status**: open
+     - **Priority**: P1
+     - **Dependencies**: —
+     - **Files (new)**: path/to/new_file.py
+     - **Files (modify)**: path/to/existing.py
+     - **Description**: Что сделать
+     - **Acceptance**: Критерии готовности
+     - **Discussion**: —
+     - **Agent**: —
+     - **Branch**: —
+
+  2. (Опционально) Обсуди архитектуру перед реализацией:
+
+     {hint} discuss new my-topic 'Как лучше реализовать X?'
+     {hint} discuss chat my-topic
+
+  3. Запусти агентов:
+
+     {hint} run              # все ready-задачи
+     {hint} run --task TASK-001  # конкретная задача
+     {hint} run --auto        # автозапуск следующих по мере завершения
+
+  4. Следи за прогрессом:
+
+     {hint} status""".format(hint=hint))
         else:
             print("\n  ℹ Нет задач для выполнения.")
 

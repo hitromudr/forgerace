@@ -114,11 +114,17 @@ _config_path: Optional[Path] = None
 def run_hint() -> str:
     """Возвращает команду запуска для подсказок пользователю."""
     import sys
-    parts = [sys.executable, sys.argv[0]]
+    script = sys.argv[0]
+    # Короткая форма: python3 forgerace.py или просто forgerace
+    if script.endswith("forgerace.py"):
+        base = f"python3 {script}"
+    elif script.endswith("__main__.py") or "-m" in sys.orig_argv:
+        base = "python3 -m forgerace"
+    else:
+        base = f"{sys.executable} {script}"
     if _config_path:
-        parts.extend(["--config", str(_config_path)])
-    parts.append("run")
-    return " ".join(parts)
+        base += f" --config {_config_path}"
+    return base + " run"
 
 
 def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None) -> Config:

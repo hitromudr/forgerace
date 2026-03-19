@@ -70,12 +70,17 @@ def merge_pending_tasks():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ForgeRace — мультиагентный оркестратор")
+    parser = argparse.ArgumentParser(
+        description="ForgeRace — мультиагентный оркестратор",
+        usage="forgerace [--config CONFIG] [--root ROOT] [--verbose] <command> ...",
+    )
     parser.add_argument("--config", type=Path, help="Путь к forgerace.toml")
     parser.add_argument("--root", type=Path, help="Корневая директория проекта")
     parser.add_argument("--verbose", action="store_true")
 
-    sub = parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(dest="command", title="commands", metavar="")
+    _orig_format_help = parser.format_help
+    parser.format_help = lambda: _orig_format_help().replace("commands:\n  \n", "commands:\n")
 
     # run
     run_p = sub.add_parser("run", help="Запустить задачи из TASKS.md")
