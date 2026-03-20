@@ -384,33 +384,34 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
         print(f"\n[ОШИБКА: агент '{agent_type}' не найден в конфиге]")
         return
 
-    # Используем stream-json для реального стриминга текста
+    # text mode — промпт через stdin для claude/qwen, через аргумент для gemini
     if agent_type == "claude":
-        cmd = [acfg.command, "-p", "-", "--output-format", "stream-json",
-               "--verbose", "--permission-mode", "auto"]
-        extract_fn = _extract_text_from_claude_event
+        cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+    elif agent_type == "qwen":
+        cmd = [acfg.command, "-p", "--output-format", "text", "--approval-mode", "yolo"]
     else:
-        cmd = [acfg.command, "-p", prompt, "--output-format", "stream-json"]
-        extract_fn = _extract_text_from_gemini_event
+        # gemini и другие — промпт как аргумент
+        cmd = [acfg.command, "-p", prompt]
 
-    reply_parts = []
+    use_stdin = agent_type in ("claude", "qwen")
+
+    reply_lines = []
     spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     start_time = time.time()
     R = _C["reset"]
     color = _agent_color(agent_type)
     label = f"{color}{_C['bold']}{agent_type.capitalize()}{R}"
-    raw_label = agent_type.capitalize()
     try:
         proc = subprocess.Popen(
             cmd, cwd=cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE, text=True, bufsize=1,
+            stdin=subprocess.PIPE if use_stdin else None, text=True, bufsize=1,
         )
-        if agent_type == "claude":
+        if use_stdin:
             proc.stdin.write(prompt)
-        proc.stdin.close()
+            proc.stdin.close()
 
         spin_idx = 0
-        got_text = False
+        got_output = False
         print(f"{label}> ", end="", flush=True)
 
         while True:
@@ -419,48 +420,21 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
                 line = proc.stdout.readline()
                 if not line:
                     break
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    # Gemini иногда пишет plain text
-                    if not got_text:
-                        print(f"\r{label}> ", end="", flush=True)
-                        got_text = True
-                    print(line, flush=True)
-                    reply_parts.append(line)
-                    continue
-
-                text = extract_fn(event)
-                if text:
-                    if not got_text:
-                        # Очистить спиннер
-                        print(f"\r{' ' * 50}\r", end="", flush=True)
-                        got_text = True
-                    print(text, end="", flush=True)
-                    reply_parts.append(text)
+                if not got_output:
+                    print(f"\r{' ' * 50}\r{label}> ", end="", flush=True)
+                    got_output = True
+                print(line, end="", flush=True)
+                reply_lines.append(line)
             else:
                 if proc.poll() is not None:
-                    # Дочитать остатки
                     for line in proc.stdout:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            event = json.loads(line)
-                            text = extract_fn(event)
-                            if text:
-                                if not got_text:
-                                    print(f"\r{' ' * 50}\r", end="", flush=True)
-                                    got_text = True
-                                print(text, end="", flush=True)
-                                reply_parts.append(text)
-                        except json.JSONDecodeError:
-                            pass
+                        if not got_output:
+                            print(f"\r{' ' * 50}\r{label}> ", end="", flush=True)
+                            got_output = True
+                        print(line, end="", flush=True)
+                        reply_lines.append(line)
                     break
-                if not got_text:
+                if not got_output:
                     ch = spinner_chars[spin_idx % len(spinner_chars)]
                     elapsed = int(time.time() - start_time)
                     print(f"\r{label}> {color}{ch}{R} {_C['dim']}думает... {elapsed}s{R}  ", end="", flush=True)
@@ -479,7 +453,7 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
         print(f"\n[ОШИБКА: команда '{cmd[0]}' не найдена]")
         return
 
-    reply = "".join(reply_parts).strip()
+    reply = "".join(reply_lines).strip()
     if not reply:
         stderr = proc.stderr.read() if proc.stderr else ""
         if stderr:
