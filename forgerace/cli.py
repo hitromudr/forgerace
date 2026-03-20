@@ -72,10 +72,22 @@ def _cmd_init():
         tasks_path.write_text(_INIT_TASKS.format(name=name), encoding="utf-8")
         created.append("TASKS.md")
 
+    # Создаём обёртку fr для короткого вызова
+    import sys
+    forgerace_py = Path(sys.argv[0]).resolve()
+    fr_path = cwd / "fr"
+    if not fr_path.exists():
+        fr_path.write_text(f"#!/bin/sh\npython3 {forgerace_py} \"$@\"\n", encoding="utf-8")
+        fr_path.chmod(0o755)
+        created.append("fr")
+
     if created:
         print(f"  {C['green']}✓ Создано: {', '.join(created)}{R}")
-    print(f"\n  Следующий шаг: отредактируй {C['bold']}forgerace.toml{R} и добавь задачи в {C['bold']}TASKS.md{R}")
-    print(f"  Потом: {C['bold']}forgerace run{R}")
+    print(f"\n  Теперь:")
+    print(f"    {C['bold']}vim forgerace.toml{R}     — настрой build-команды и агентов")
+    print(f"    {C['bold']}./fr discuss new ...{R}  — запусти дискуссию → /ok → задачи")
+    print(f"    {C['bold']}./fr run{R}              — запусти агентов")
+    print(f"    {C['bold']}./fr help{R}             — все команды")
 
 
 def show_status():
@@ -253,7 +265,14 @@ def main():
     # status
     sub.add_parser("status", help="Статус задач")
 
+    # help
+    sub.add_parser("help", help="Показать справку")
+
     args = parser.parse_args()
+
+    if args.command == "help" or args.command is None:
+        parser.print_help()
+        return
 
     # init — создаёт файлы в CWD, --config не имеет смысла
     if args.command == "init":
@@ -304,7 +323,6 @@ def main():
 
     # run
     if args.command != "run":
-        parser.print_help()
         return
 
     max_tasks = args.max_tasks or cfg.max_parallel_tasks
