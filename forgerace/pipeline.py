@@ -886,16 +886,16 @@ def run_pipeline(
                  if any(t.status.startswith(s) for s in stuck_statuses)
                  and all(d in done_ids for d in t.deps)]
         if stuck:
-            # Лимит авто-retry: считаем прогоны по логам
+            # Лимит авто-retry: считаем run_count по логам
             max_auto_retries = 3
             retryable_stuck = []
             for t in stuck:
                 attempt_logs = list(cfg.log_dir.glob(f"{t.id.lower()}-*-attempt*.log"))
-                prогоны = len(set(f.name.split("-attempt")[0] for f in attempt_logs)) if attempt_logs else 0
-                if прогоны < max_auto_retries * cfg.max_retries:
+                run_count = len(set(f.name.split("-attempt")[0] for f in attempt_logs)) if attempt_logs else 0
+                if run_count < max_auto_retries * cfg.max_retries:
                     retryable_stuck.append(t)
                 else:
-                    log.warning(f"[{t.id}] ⚠ Превышен лимит авто-retry ({прогоны} попыток) — пропускаю. Исправь задачу вручную.")
+                    log.warning(f"[{t.id}] ⚠ Превышен лимит авто-retry ({run_count} попыток) — пропускаю. Исправь задачу вручную.")
             if retryable_stuck:
                 log.info(f"Авто-retry застрявших: {[t.id for t in retryable_stuck]}")
                 for t in retryable_stuck:
