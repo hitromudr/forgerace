@@ -444,8 +444,11 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
     reply = "".join(reply_lines).strip()
     if not reply:
         stderr = proc.stderr.read() if proc.stderr else ""
+        rc = proc.returncode
         if stderr:
-            print(f"\n[stderr: {stderr[:500]}]")
+            print(f"\n{_C['red']}[{agent_type} stderr: {stderr[:300]}]{R}")
+        if rc and rc != 0:
+            print(f"{_C['red']}[{agent_type} exit code: {rc}]{R}")
         reply = "(пустой ответ)"
     print()
 
