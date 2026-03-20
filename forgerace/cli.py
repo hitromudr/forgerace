@@ -342,6 +342,7 @@ def main():
     )
 
     log.info("ForgeRace завершён")
+    os._exit(0)  # force exit — daemon threads и zombie subprocesses не блокируют
 
 
 def main_with_signal_handling():
