@@ -1025,10 +1025,5 @@ def run_pipeline(
     tasks = parse_tasks()
     _print_next_steps(tasks, max_tasks, auto)
 
-    try:
-        os.system("stty sane 2>/dev/null")
-    except Exception:
-        pass
-
-    # Force exit — daemon threads и zombie subprocesses не блокируют
+    log.info("ForgeRace завершён")
     os._exit(0)

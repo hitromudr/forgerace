@@ -341,8 +341,7 @@ def main():
         auto=getattr(args, "auto", False),
     )
 
-    log.info("ForgeRace завершён")
-    os._exit(0)  # force exit — daemon threads и zombie subprocesses не блокируют
+    # os._exit(0) вызывается внутри run_pipeline
 
 
 def main_with_signal_handling():

@@ -142,6 +142,22 @@ class _ColorFormatter(logging.Formatter):
         (re.compile(r"(Доработка по замечаниям.*)"),
          lambda m: f"{C['yellow']}{m.group(1)}{R}"),
 
+        # --- Декомпозиция ---
+        (re.compile(r"(декомпозирована на \d+ подзадач.*)"),
+         lambda m: f"{C['magenta']}{C['bold']}{m.group(1)}{R}"),
+        (re.compile(r"(сложность: )(\d)/(\d)(.*)"),
+         lambda m: f"{m.group(1)}{C['bold']}{m.group(2)}{R}/{m.group(3)}{m.group(4)}"),
+        (re.compile(r"(Оценка сложности .+)"),
+         lambda m: f"{C['dim']}{m.group(1)}{R}"),
+        (re.compile(r"(Обновлена зависимость:.+)"),
+         lambda m: f"{C['magenta']}{m.group(1)}{R}"),
+        (re.compile(r"(→ .+)"),
+         lambda m: f"{C['dim']}{m.group(1)}{R}"),
+        (re.compile(r"(▶ готова|► готова)"),
+         lambda m: f"{C['green']}{m.group(1)}{R}"),
+        (re.compile(r"(⏸ ждёт .+)"),
+         lambda m: f"{C['dim']}{m.group(1)}{R}"),
+
         # --- Инфраструктура ---
         (re.compile(r"(Worktree создан:.+)"),
          lambda m: f"{C['dim']}{m.group(1)}{R}"),
