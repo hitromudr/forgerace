@@ -1020,7 +1020,7 @@ def run_pipeline(
     if status_diff.stdout.strip():
         run_cmd(["git", "add", "TASKS.md"], cwd=cfg.root_dir, check=False)
         run_cmd(["git", "commit", "-m", "update: статусы задач после прогона"], cwd=cfg.root_dir, check=False)
-        run_cmd(["git", "push"], cwd=cfg.root_dir, timeout=15, check=False)
+        # git push убран — пуш делает пользователь, не оркестратор
 
     tasks = parse_tasks()
     _print_next_steps(tasks, max_tasks, auto)
