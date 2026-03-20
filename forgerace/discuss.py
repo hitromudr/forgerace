@@ -116,7 +116,11 @@ def discuss_chat(topic: str):
         filepath.write_text(f"# {topic}\n", encoding="utf-8")
         print(f"Создана новая дискуссия: {topic}")
 
-    # readline убран — вызывал зависание input() и блокировал Ctrl+C
+    # readline для стрелок вверх/вниз (история ввода), без автокомплита
+    try:
+        import readline  # noqa: F811
+    except ImportError:
+        pass
 
     text = filepath.read_text(encoding="utf-8")
     if text.strip() != f"# {topic}":
