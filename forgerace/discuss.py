@@ -59,17 +59,8 @@ def discuss_reply(topic: str, agent_type: str):
 --- КОНЕЦ ---
 """
 
-    if agent_type == "gemini":
-        result = run_cmd(
-            ["gemini", "-p", prompt],
-            cwd=cfg.root_dir, timeout=cfg.agent_timeout, check=False,
-        )
-    else:
-        result = run_cmd(
-            ["claude", "-p", prompt, "--output-format", "text"],
-            cwd=cfg.root_dir, timeout=cfg.agent_timeout, check=False,
-        )
-    reply_text = (result.stdout or "").strip() or "(пустой ответ)"
+    from .agents import run_reviewer
+    reply_text = run_reviewer(agent_type, prompt) or "(пустой ответ)"
 
     _print_confidence(reply_text, agent_type)
     reply_text = re.sub(r"\n?CONFIDENCE:\s*\d+\s*%\s*$", "", reply_text).rstrip()
@@ -264,11 +255,8 @@ def _post_resolve(filepath: Path):
 """
 
     print("\n[Генерирую задачи из дискуссии...]")
-    result = subprocess.run(
-        ["claude", "-p", "-", "--output-format", "text", "--permission-mode", "auto"],
-        cwd=cfg.root_dir, input=prompt, capture_output=True, text=True, timeout=cfg.agent_timeout,
-    )
-    tasks_block = result.stdout.strip() if result.stdout else ""
+    from .agents import run_text_agent
+    tasks_block = run_text_agent(prompt, timeout=cfg.agent_timeout)
 
     if not tasks_block or tasks_block.startswith("Error:"):
         log.error(f"Не удалось сгенерировать задачи: {tasks_block or '(пустой ответ)'}")
@@ -277,7 +265,12 @@ def _post_resolve(filepath: Path):
     tasks_file = filepath.parent / f"{topic}-tasks.md"
     tasks_file.write_text(tasks_block + "\n", encoding="utf-8")
 
-    insert_tasks_into_tasksmd(tasks_block, linked_task_id)
+    # Очистка мусора из ответа Claude (может добавить пояснения перед задачами)
+    clean_block = re.sub(r"^.*?(?=### TASK-)", "", tasks_block, flags=re.DOTALL)
+    if not clean_block.strip():
+        clean_block = tasks_block  # fallback если regex не нашёл
+
+    insert_tasks_into_tasksmd(clean_block, linked_task_id)
 
     print(f"\n  ✓ Задачи сгенерированы и вставлены в TASKS.md")
     print(f"  ✓ Копия: {tasks_file}")
@@ -301,11 +294,8 @@ def _chat_auto_resolve(filepath: Path):
 """
 
     print("[Генерирую резолюцию...]")
-    result = subprocess.run(
-        ["claude", "-p", "-", "--output-format", "text", "--permission-mode", "auto"],
-        cwd=cfg.root_dir, input=prompt, capture_output=True, text=True, timeout=cfg.agent_timeout,
-    )
-    summary = result.stdout.strip() if result.stdout else "(не удалось сгенерировать)"
+    from .agents import run_text_agent
+    summary = run_text_agent(prompt, timeout=cfg.agent_timeout) or "(не удалось сгенерировать)"
     print(f"\n{summary}\n")
 
     _chat_append(filepath, "techlead", f"**РЕЗОЛЮЦИЯ (одобрено):**\n\n{summary}")

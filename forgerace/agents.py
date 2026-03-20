@@ -336,6 +336,33 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     return (result.stdout or "").strip()
 
 
+def run_text_agent(prompt: str, timeout: int = 300) -> str:
+    """Вызывает первого доступного агента в text mode. Для системных задач (декомпозиция, резолюция)."""
+    for name in cfg.agent_names:
+        acfg = cfg.agents.get(name)
+        if not acfg:
+            continue
+        try:
+            if name in ("claude", "qwen"):
+                cmd = [acfg.command] + acfg.review_args
+                result = subprocess.run(
+                    cmd, cwd=cfg.root_dir, input=prompt,
+                    capture_output=True, text=True, timeout=timeout,
+                )
+            else:
+                cmd = [acfg.command, "-p", prompt]
+                result = subprocess.run(
+                    cmd, cwd=cfg.root_dir,
+                    capture_output=True, text=True, timeout=timeout,
+                )
+            text = (result.stdout or "").strip()
+            if text:
+                return text
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            continue
+    return ""
+
+
 # --- Промпты ---
 
 def _load_project_claude_md() -> str:

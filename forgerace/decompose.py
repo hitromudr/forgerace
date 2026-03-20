@@ -96,11 +96,8 @@ COMPLEXITY: N
 """
 
     log.info(f"  🔍 Оценка сложности {task.id}...")
-    result = subprocess.run(
-        ["claude", "-p", "-", "--output-format", "text", "--permission-mode", "auto"],
-        cwd=cfg.root_dir, input=prompt, capture_output=True, text=True, timeout=120,
-    )
-    output = result.stdout.strip() if result.stdout else ""
+    from .agents import run_text_agent
+    output = run_text_agent(prompt, timeout=120)
 
     complexity_match = re.search(r"COMPLEXITY:\s*(\d)", output)
     if not complexity_match:

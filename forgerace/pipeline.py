@@ -666,11 +666,8 @@ def review_run_log():
 """
 
     try:
-        result = run_cmd(
-            ["claude", "-p", prompt, "--output-format", "text"],
-            cwd=cfg.root_dir, timeout=60, check=False,
-        )
-        review = (result.stdout or "").strip()
+        from .agents import run_text_agent
+        review = run_text_agent(prompt, timeout=60)
         if review:
             header = f"{C['yellow']}{C['bold']}📋 Ревью прогона:{R}"
             print(f"\n{header}\n{review}\n")
