@@ -157,7 +157,7 @@ def _run_agent_streaming(
     try:
         proc = subprocess.Popen(
             cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1,
+            stdin=subprocess.DEVNULL, text=True, bufsize=1,
         )
         while True:
             remaining = deadline - time.time()
