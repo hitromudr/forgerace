@@ -38,18 +38,23 @@ def _heartbeat_loop(interval: int = 15):
         for tag, (task_id, workdir, start_time) in agents.items():
             elapsed = int(time.time() - start_time)
             mins, secs = divmod(elapsed, 60)
-            result = subprocess.run(
-                ["git", "diff", "--name-only"],
-                cwd=workdir, capture_output=True, text=True, timeout=5,
-            )
-            files = [f.strip() for f in (result.stdout or "").strip().split("\n") if f.strip()]
-            if files:
-                files_str = ", ".join(f.rsplit("/", 1)[-1] for f in files[:5])
-                if len(files) > 5:
-                    files_str += f" (+{len(files) - 5})"
-                log.info(f"[{tag}] ⏳ {mins}m{secs:02d}s — правит: {files_str}")
-            else:
-                log.info(f"[{tag}] ⏳ {mins}m{secs:02d}s — читает код...")
+            try:
+                if not workdir.exists():
+                    continue
+                result = subprocess.run(
+                    ["git", "diff", "--name-only"],
+                    cwd=workdir, capture_output=True, text=True, timeout=5,
+                )
+                files = [f.strip() for f in (result.stdout or "").strip().split("\n") if f.strip()]
+                if files:
+                    files_str = ", ".join(f.rsplit("/", 1)[-1] for f in files[:5])
+                    if len(files) > 5:
+                        files_str += f" (+{len(files) - 5})"
+                    log.info(f"[{tag}] ⏳ {mins}m{secs:02d}s — правит: {files_str}")
+                else:
+                    log.info(f"[{tag}] ⏳ {mins}m{secs:02d}s — читает код...")
+            except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+                continue
 
 
 def _start_heartbeat():
@@ -292,6 +297,8 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
     passed = []
     cancel_event = threading.Event()  # сигнал отмены для проигравших
 
+    race_winner = None
+
     with ThreadPoolExecutor(max_workers=len(agent_names)) as pool:
         futures = {}
         for i, agent_name in enumerate(agent_names):
@@ -304,6 +311,9 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             agent_name = futures[future]
             result = future.result()
             all_results.append(result)
+
+            if race_winner:
+                continue  # уже есть победитель, просто собираем результаты
 
             if not result.success:
                 continue
@@ -324,18 +334,23 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             if rv["verdict"] == "APPROVED":
                 log.info(f"[{task.id}] ✅ Ревью пройдено: {result.agent_type}")
                 log.info(f"[{task.id}] 🏆 победитель: {result.agent_type}")
-                cancel_event.set()  # убиваем проигравших агентов
-                if merge_to_develop(result.branch, task.id):
-                    update_task_status(task.id, "done", agent=result.agent_type, branch=result.branch)
-                    log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
-                else:
-                    update_task_status(task.id, f"review:{result.agent_type}",
-                                      agent=result.agent_type, branch=result.branch)
-                    log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
-                cleanup_worktrees(all_results)
-                return True
+                cancel_event.set()  # сигнал остальным агентам на завершение
+                race_winner = result
 
             log.info(f"[{task.id}] ⏳ {result.agent_type} NEEDS_WORK, ждём второго...")
+
+    # Все futures завершены — безопасно работать с worktree
+
+    if race_winner:
+        if merge_to_develop(race_winner.branch, task.id):
+            update_task_status(task.id, "done", agent=race_winner.agent_type, branch=race_winner.branch)
+            log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
+        else:
+            update_task_status(task.id, f"review:{race_winner.agent_type}",
+                              agent=race_winner.agent_type, branch=race_winner.branch)
+            log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
+        cleanup_worktrees(all_results)
+        return True
 
     # Оба завершились, никто не получил APPROVED
     if not passed:
