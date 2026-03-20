@@ -20,7 +20,7 @@ C = {
     "blue":    "\033[34m",
     "red":     "\033[31m",
     "white":   "\033[97m",
-    "purple":  "\033[35;1m",
+    "purple":  "\033[38;5;141m",
 }
 
 R = C["reset"]  # shortcut
