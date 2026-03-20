@@ -843,6 +843,19 @@ def run_pipeline(
         _start_heartbeat()
 
     tasks = parse_tasks()
+
+    # Автозакрытие чекпоинт-задач если check_command проходит
+    if cfg.check_command:
+        for t in tasks:
+            if t.status != "done" and "make check" in (t.acceptance or "") and "чекпоинт" in t.name.lower():
+                check_result = run_cmd(["bash", "-c", cfg.check_command],
+                                       cwd=cfg.root_dir, timeout=cfg.build_timeout, check=False)
+                if check_result.returncode == 0:
+                    log.info(f"[{t.id}] ✅ check_command проходит — чекпоинт автозакрыт")
+                    update_task_status(t.id, "done", agent="auto-check")
+                break  # проверяем один раз
+
+    tasks = parse_tasks()
     done_count = sum(1 for t in tasks if t.status == "done")
     open_count = len(tasks) - done_count
     log.info(f"Задачи: {open_count} активных, {done_count} завершённых")
@@ -873,16 +886,30 @@ def run_pipeline(
                  if any(t.status.startswith(s) for s in stuck_statuses)
                  and all(d in done_ids for d in t.deps)]
         if stuck:
-            log.info(f"Авто-retry застрявших: {[t.id for t in stuck]}")
+            # Лимит авто-retry: считаем прогоны по логам
+            max_auto_retries = 3
+            retryable_stuck = []
             for t in stuck:
-                _cleanup_task_branches(t)
-                update_task_status(t.id, "open")
-                t.status = "open"
+                attempt_logs = list(cfg.log_dir.glob(f"{t.id.lower()}-*-attempt*.log"))
+                prогоны = len(set(f.name.split("-attempt")[0] for f in attempt_logs)) if attempt_logs else 0
+                if прогоны < max_auto_retries * cfg.max_retries:
+                    retryable_stuck.append(t)
+                else:
+                    log.warning(f"[{t.id}] ⚠ Превышен лимит авто-retry ({прогоны} попыток) — пропускаю. Исправь задачу вручную.")
+            if retryable_stuck:
+                log.info(f"Авто-retry застрявших: {[t.id for t in retryable_stuck]}")
+                for t in retryable_stuck:
+                    _cleanup_task_branches(t)
+                    update_task_status(t.id, "open")
+                    t.status = "open"
             tasks = parse_tasks()
 
         ready = find_ready_tasks(tasks)
         if not ready:
             retryable = find_retryable_tasks(tasks)
+            # Тот же лимит
+            retryable = [t for t in retryable
+                         if len(list(cfg.log_dir.glob(f"{t.id.lower()}-*-attempt*.log"))) < 3 * cfg.max_retries]
             if retryable:
                 log.info(f"Авто-retry незавершённых: {[t.id for t in retryable]}")
                 for t in retryable:
