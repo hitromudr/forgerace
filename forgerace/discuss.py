@@ -118,7 +118,7 @@ def discuss_chat(topic: str):
         print(f"Создана новая дискуссия: {topic}")
 
     # Автокомплит
-    _chat_commands = ["/claude", "/gemini", "/both", "/show", "/ok", "/resolve", "/help", "/exit"]
+    _chat_commands = ["/claude", "/gemini", "/qwen", "/both", "/all", "/show", "/ok", "/resolve", "/help", "/exit"]
 
     def _completer(text, state):
         buf = readline.get_line_buffer().lstrip()
