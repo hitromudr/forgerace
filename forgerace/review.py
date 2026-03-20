@@ -11,10 +11,22 @@ from .utils import log, run_cmd
 
 
 def get_diff(result: AgentResult, task: Task | None = None) -> str:
-    """Получает diff агента относительно develop (по файлам задачи)."""
-    paths = task_paths(task) if task else ["src/"]
+    """Получает diff агента относительно develop. Сначала по файлам задачи, fallback — весь diff."""
+    paths = task_paths(task) if task else []
+    if paths:
+        diff_result = run_cmd(
+            ["git", "diff", cfg.dev_branch, "--"] + paths,
+            cwd=result.workdir, check=False,
+        )
+        diff_text = (diff_result.stdout or "").strip()
+        if diff_text:
+            if len(diff_text) > 6000:
+                diff_text = diff_text[:6000] + "\n... (обрезано)"
+            return diff_text
+
+    # Fallback: полный diff (агент мог создать файлы вне task_paths)
     diff_result = run_cmd(
-        ["git", "diff", cfg.dev_branch, "--"] + paths,
+        ["git", "diff", cfg.dev_branch],
         cwd=result.workdir, check=False,
     )
     diff_text = (diff_result.stdout or "").strip()
@@ -25,9 +37,18 @@ def get_diff(result: AgentResult, task: Task | None = None) -> str:
 
 def get_changed_files(result: AgentResult, task: Task | None = None) -> list[str]:
     """Список изменённых файлов относительно develop."""
-    paths = task_paths(task) if task else ["src/"]
+    paths = task_paths(task) if task else []
+    if paths:
+        diff_result = run_cmd(
+            ["git", "diff", "--name-only", cfg.dev_branch, "--"] + paths,
+            cwd=result.workdir, check=False,
+        )
+        files = [f.strip() for f in (diff_result.stdout or "").strip().splitlines() if f.strip()]
+        if files:
+            return files
+    # Fallback: все изменённые файлы
     diff_result = run_cmd(
-        ["git", "diff", "--name-only", cfg.dev_branch, "--"] + paths,
+        ["git", "diff", "--name-only", cfg.dev_branch],
         cwd=result.workdir, check=False,
     )
     return [f.strip() for f in (diff_result.stdout or "").strip().splitlines() if f.strip()]

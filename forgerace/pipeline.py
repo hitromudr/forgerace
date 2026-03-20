@@ -170,11 +170,11 @@ def collect_metrics(workdir: Path, task: Task) -> dict:
             content = filepath.read_text(encoding="utf-8", errors="ignore")
             metrics["unsafe_count"] += content.count("unsafe")
 
-    paths = task_paths(task) if task else ["src/"]
-    diff_result = run_cmd(
-        ["git", "diff", "--numstat", cfg.dev_branch, "--"] + paths,
-        cwd=workdir, check=False,
-    )
+    paths = task_paths(task) if task else []
+    diff_cmd = ["git", "diff", "--numstat", cfg.dev_branch]
+    if paths:
+        diff_cmd += ["--"] + paths
+    diff_result = run_cmd(diff_cmd, cwd=workdir, check=False)
     if diff_result.returncode == 0:
         for line in diff_result.stdout.strip().splitlines():
             parts = line.split("\t")
