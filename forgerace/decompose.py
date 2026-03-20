@@ -212,16 +212,17 @@ def create_checkpoint_task(error_log: str):
                    for t in tasks if re.match(r"TASK-(\d+)", t.id)), default=0)
     next_id = f"TASK-{max_num + 1:03d}"
 
+    check_cmd = cfg.check_command or "make check"
     error_short = error_log[:200].replace("\n", " ").strip()
-    task_block = f"""### {next_id}: Чекпоинт — починить make check
+    task_block = f"""### {next_id}: Чекпоинт — починить check
 - **Статус**: open
 - **Приоритет**: P1
 - **Этап**: 4
 - **Зависимости**: —
-- **Файлы (новые)**: —
-- **Файлы (modify)**: src/
+- **Файлы (новые)**: Makefile
+- **Файлы (modify)**: —
 - **Интеграция**: —
-- **Описание**: `make check` не проходит. Ошибка: {error_short}. Исправить все проблемы.
+- **Описание**: `{check_cmd}` не проходит. Ошибка: {error_short}. Создать Makefile с таргетом check если его нет, исправить все проблемы.
 - **Критерий готовности**: `make check` проходит с exit code 0
 - **Дискуссия**: —
 - **Агент**: —

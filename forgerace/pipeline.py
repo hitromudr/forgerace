@@ -97,12 +97,13 @@ def check_already_done(task: Task) -> bool:
         log.info(f"[{task.id}] pre-check: все файлы существуют, сборка проходит")
         return True
 
-    # Проверяем критерий "make check"
-    if "make check" in (task.acceptance or ""):
-        result = run_cmd(["make", "check"], cwd=cfg.root_dir,
-                         timeout=cfg.build_timeout, check=False)
+    # Проверяем критерий через check_command из конфига
+    if "make check" in (task.acceptance or "") and cfg.check_command:
+        result = run_cmd(
+            ["bash", "-c", cfg.check_command], cwd=cfg.root_dir,
+            timeout=cfg.build_timeout, check=False)
         if result.returncode == 0:
-            log.info(f"[{task.id}] pre-check: make check проходит")
+            log.info(f"[{task.id}] pre-check: check_command проходит")
             return True
         return False
 
@@ -128,11 +129,13 @@ def verify_build(workdir: Path, task: Task | None = None) -> tuple[bool, str]:
     has_new_files = bool((status.stdout or "").strip())
 
     if not has_changes and not has_new_files:
-        if task and "make check" in (task.acceptance or ""):
-            result = run_cmd(["make", "check"], cwd=workdir, timeout=cfg.build_timeout, check=False)
+        if task and "make check" in (task.acceptance or "") and cfg.check_command:
+            result = run_cmd(
+                ["bash", "-c", cfg.check_command], cwd=workdir,
+                timeout=cfg.build_timeout, check=False)
             if result.returncode == 0:
                 return True, ""
-            return False, f"make check failed:\n{result.stderr}\n{result.stdout}"
+            return False, f"check_command failed:\n{result.stderr}\n{result.stdout}"
         return False, "Агент не внёс никаких изменений"
 
     for cmd in cfg.build_commands:
@@ -789,13 +792,15 @@ def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
         all_done = tasks and all(t.status == "done" for t in tasks)
         if all_done:
             print("\n  ✅ Все задачи выполнены!")
-            print("\n  🔍 Запускаю make check...")
-            check_result = run_cmd(["make", "check"], cwd=cfg.root_dir, timeout=300, check=False)
+            check_cmd = cfg.check_command or "make check"
+            print(f"\n  🔍 Запускаю {check_cmd}...")
+            check_result = run_cmd(
+                ["bash", "-c", check_cmd], cwd=cfg.root_dir, timeout=300, check=False)
             if check_result.returncode == 0:
-                print("  ✅ make check PASSED — этап закрыт")
+                print(f"  ✅ check PASSED — этап закрыт")
             else:
                 stderr = (check_result.stderr or check_result.stdout or "")[-500:]
-                print(f"  ❌ make check FAILED — создаю задачу на фикс...")
+                print(f"  ❌ check FAILED — создаю задачу на фикс...")
                 create_checkpoint_task(stderr)
         else:
             _print_flow_guide(tasks)
