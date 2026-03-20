@@ -170,19 +170,23 @@ def collect_metrics(workdir: Path, task: Task) -> dict:
             content = filepath.read_text(encoding="utf-8", errors="ignore")
             metrics["unsafe_count"] += content.count("unsafe")
 
+    # Считаем lines: сначала по файлам задачи, fallback — весь diff
     paths = task_paths(task) if task else []
-    diff_cmd = ["git", "diff", "--numstat", cfg.dev_branch]
-    if paths:
-        diff_cmd += ["--"] + paths
-    diff_result = run_cmd(diff_cmd, cwd=workdir, check=False)
-    if diff_result.returncode == 0:
-        for line in diff_result.stdout.strip().splitlines():
-            parts = line.split("\t")
-            if len(parts) == 3:
-                try:
-                    metrics["code_lines"] += int(parts[0])
-                except ValueError:
-                    pass
+    for attempt_paths in ([paths, []] if paths else [[]]):
+        diff_cmd = ["git", "diff", "--numstat", cfg.dev_branch]
+        if attempt_paths:
+            diff_cmd += ["--"] + attempt_paths
+        diff_result = run_cmd(diff_cmd, cwd=workdir, check=False)
+        if diff_result.returncode == 0:
+            for line in diff_result.stdout.strip().splitlines():
+                parts = line.split("\t")
+                if len(parts) == 3:
+                    try:
+                        metrics["code_lines"] += int(parts[0])
+                    except ValueError:
+                        pass
+        if metrics["code_lines"] > 0:
+            break
 
     target_dir = workdir / cfg.binary_glob_dir
     if target_dir.exists():
@@ -317,8 +321,6 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
 
             if not result.success:
                 continue
-            if not result.code_lines and not get_diff(result, task):
-                continue
 
             passed.append(result)
             log.info(f"[{task.id}/{result.agent_type}] unsafe={result.unsafe_count}, lines={result.code_lines}, bin={result.binary_size}")
@@ -419,11 +421,21 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             continue
 
         if len(passed) >= 2 and "reviews" in rv:
+            # Параллельная доработка — не ждём медленных
+            rework_items = []
             for agent_result in passed:
                 agent_comments = rv["reviews"].get(agent_result.agent_type, {}).get("comments", "")
                 if agent_comments.strip():
-                    log.info(f"[{task.id}/{agent_result.agent_type}] 🔧 отправлен на доработку")
-                    send_to_rework(agent_result, task, agent_comments)
+                    rework_items.append((agent_result, agent_comments))
+            if rework_items:
+                with ThreadPoolExecutor(max_workers=len(rework_items)) as rework_pool:
+                    rework_futures = {}
+                    for agent_result, agent_comments in rework_items:
+                        log.info(f"[{task.id}/{agent_result.agent_type}] 🔧 отправлен на доработку")
+                        f = rework_pool.submit(send_to_rework, agent_result, task, agent_comments)
+                        rework_futures[f] = agent_result.agent_type
+                    for f in as_completed(rework_futures):
+                        f.result()  # дождаться завершения
         else:
             comments = rv.get("comments", "")
             log.info(f"[{task.id}/{best_result.agent_type}] 🔧 отправлен на доработку")
@@ -475,12 +487,11 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     update_task_status(task.id, f"in_progress:{agent_type}")
 
     result = run_single_agent(task, task_idx, agent_type)
-    if not result.success or result.code_lines == 0:
-        if not result.success or not get_diff(result, task):
-            log.error(f"[{task.id}/{agent_type}] ✗ не написал код → BLOCKED")
-            update_task_status(task.id, "blocked")
-            cleanup_worktrees([result])
-            return False
+    if not result.success:
+        log.error(f"[{task.id}/{agent_type}] ✗ не написал код → BLOCKED")
+        update_task_status(task.id, "blocked")
+        cleanup_worktrees([result])
+        return False
 
     log.info(f"[{task.id}/{result.agent_type}] unsafe={result.unsafe_count}, lines={result.code_lines}, bin={result.binary_size}")
 
