@@ -1,5 +1,6 @@
 """Git worktree: создание и удаление рабочих директорий агентов."""
 
+import shutil
 from pathlib import Path
 
 from .config import cfg
@@ -13,7 +14,14 @@ def create_worktree(agent_num: int, branch: str) -> Path:
 
     if agent_dir.exists():
         log.warning(f"Worktree {agent_dir} уже существует, удаляю")
-        run_cmd(["git", "worktree", "remove", str(agent_dir), "--force"], cwd=cfg.root_dir)
+        run_cmd(["git", "worktree", "remove", str(agent_dir), "--force"],
+                cwd=cfg.root_dir, check=False)
+        # Если git worktree remove не справился — удаляем руками
+        if agent_dir.exists():
+            shutil.rmtree(agent_dir, ignore_errors=True)
+
+    # Чистим worktree list от мёртвых записей
+    run_cmd(["git", "worktree", "prune"], cwd=cfg.root_dir, check=False)
 
     # Удаляем старую ветку если есть — иначе worktree возьмёт устаревший код
     run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
@@ -24,8 +32,8 @@ def create_worktree(agent_num: int, branch: str) -> Path:
         cwd=cfg.root_dir,
     )
 
-    # Сбрасываем грязные файлы
-    run_cmd(["git", "checkout", "--", "orchestrator.py", "TASKS.md"], cwd=agent_dir, check=False)
+    # Сбрасываем грязные файлы (TASKS.md может быть modified)
+    run_cmd(["git", "checkout", "--", "TASKS.md"], cwd=agent_dir, check=False)
 
     log.info(f"Worktree создан: {agent_dir} → {branch}")
     return agent_dir
@@ -35,8 +43,14 @@ def remove_worktree(agent_num: int):
     """Удаляет worktree агента."""
     agent_dir = cfg.agents_dir / f"agent-{agent_num}"
     if agent_dir.exists():
-        run_cmd(["git", "worktree", "remove", str(agent_dir), "--force"], cwd=cfg.root_dir)
+        run_cmd(["git", "worktree", "remove", str(agent_dir), "--force"],
+                cwd=cfg.root_dir, check=False)
+        # Fallback: если git не справился
+        if agent_dir.exists():
+            shutil.rmtree(agent_dir, ignore_errors=True)
         log.info(f"Worktree удалён: {agent_dir}")
+    # Чистим мёртвые записи
+    run_cmd(["git", "worktree", "prune"], cwd=cfg.root_dir, check=False)
 
 
 def cleanup_worktrees(results: list) -> None:
