@@ -337,8 +337,11 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
 
 
 def run_text_agent(prompt: str, timeout: int = 300) -> str:
-    """Вызывает первого доступного агента в text mode. Для системных задач (декомпозиция, резолюция)."""
-    for name in cfg.agent_names:
+    """Вызывает рандомного доступного агента в text mode. Для системных задач (декомпозиция, резолюция)."""
+    import random
+    names = list(cfg.agent_names)
+    random.shuffle(names)
+    for name in names:
         acfg = cfg.agents.get(name)
         if not acfg:
             continue
