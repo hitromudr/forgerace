@@ -2,7 +2,6 @@
 
 import json
 import re
-import readline
 import select
 import subprocess
 import time
@@ -117,19 +116,7 @@ def discuss_chat(topic: str):
         filepath.write_text(f"# {topic}\n", encoding="utf-8")
         print(f"Создана новая дискуссия: {topic}")
 
-    # Автокомплит
-    _chat_commands = ["/claude", "/gemini", "/qwen", "/both", "/all", "/show", "/ok", "/resolve", "/help", "/exit"]
-
-    def _completer(text, state):
-        buf = readline.get_line_buffer().lstrip()
-        options = [c + " " for c in _chat_commands if c.startswith(buf)]
-        if state < len(options):
-            return options[state]
-        return None
-
-    readline.set_completer(_completer)
-    readline.set_completer_delims("")
-    readline.parse_and_bind("tab: complete")
+    # readline убран — вызывал зависание input() и блокировал Ctrl+C
 
     text = filepath.read_text(encoding="utf-8")
     if text.strip() != f"# {topic}":
