@@ -335,20 +335,20 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 log.info(f"[{task.id}] ✅ Ревью пройдено: {result.agent_type}")
                 log.info(f"[{task.id}] 🏆 победитель: {result.agent_type}")
                 cancel_event.set()  # сигнал остальным агентам на завершение
+                # Мержим СРАЗУ, не ждём остальных
+                if merge_to_develop(result.branch, task.id):
+                    update_task_status(task.id, "done", agent=result.agent_type, branch=result.branch)
+                    log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
+                else:
+                    update_task_status(task.id, f"review:{result.agent_type}",
+                                      agent=result.agent_type, branch=result.branch)
+                    log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
                 race_winner = result
+            else:
+                log.info(f"[{task.id}] ⏳ {result.agent_type} NEEDS_WORK, ждём следующего...")
 
-            log.info(f"[{task.id}] ⏳ {result.agent_type} NEEDS_WORK, ждём второго...")
-
-    # Все futures завершены — безопасно работать с worktree
-
+    # Все futures завершены — cleanup worktree безопасен
     if race_winner:
-        if merge_to_develop(race_winner.branch, task.id):
-            update_task_status(task.id, "done", agent=race_winner.agent_type, branch=race_winner.branch)
-            log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
-        else:
-            update_task_status(task.id, f"review:{race_winner.agent_type}",
-                              agent=race_winner.agent_type, branch=race_winner.branch)
-            log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
         cleanup_worktrees(all_results)
         return True
 
