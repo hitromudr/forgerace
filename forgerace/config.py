@@ -20,6 +20,7 @@ class AgentConfig:
     args: list[str] = field(default_factory=list)
     review_args: list[str] = field(default_factory=list)
     inactivity_timeout: int = 300
+    enabled: bool = True
 
 
 @dataclass
@@ -104,7 +105,7 @@ CONFIDENCE: XX%
 
     @property
     def agent_names(self) -> list[str]:
-        return list(self.agents.keys())
+        return [name for name, acfg in self.agents.items() if acfg.enabled]
 
 
 # Путь к конфигу, переданный через CLI (заполняется в init_config)
@@ -223,6 +224,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 args=acfg.get("args", []),
                 review_args=acfg.get("review_args", []),
                 inactivity_timeout=acfg.get("inactivity_timeout", 300),
+                enabled=acfg.get("enabled", True),
             )
 
     # [build]
