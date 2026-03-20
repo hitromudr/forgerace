@@ -1,6 +1,6 @@
 # ForgeRace
 
-Multi-agent development orchestrator. Run multiple AI agents (Claude, Gemini, etc.) competitively on coding tasks, with cross-review, auto-decomposition, and race-to-merge.
+Multi-agent development orchestrator. The key idea — **different models** (Claude, Gemini, Qwen, etc.) discuss architecture together, compete on implementation, and review each other. A single model, no matter how you prompt it, is still one model. Different models argue, find flaws in each other's reasoning, and produce solutions no single model would reach alone.
 
 > [Русская версия](README.md)
 
@@ -42,10 +42,10 @@ python3 ~/forgerace/forgerace.py init
 # 3. Configure
 vim forgerace.toml    # build commands, dev_branch, agents
 
-# 4. Start a discussion
-python3 ~/forgerace/forgerace.py discuss new my-feature 'How should we implement feature X?'
-python3 ~/forgerace/forgerace.py discuss chat my-feature
-# Agents discuss. When ready: /ok
+# 4. Start a discussion — agents design the architecture and generate tasks
+python3 ~/forgerace/forgerace.py discuss new api-caching 'Need to add API response caching. Redis or in-memory? Which endpoints? TTL? Invalidation strategy?'
+python3 ~/forgerace/forgerace.py discuss chat api-caching
+# Agents discuss architecture. When ready: /ok
 # → resolution generated + tasks auto-inserted into TASKS.md
 
 # 5. Run agents
@@ -62,8 +62,8 @@ After first run, config is remembered — no `--config` needed.
 A discussion is a structured conversation between agents before implementation.
 
 ```bash
-python3 ~/forgerace/forgerace.py discuss new auth-design 'How to implement auth?'
-python3 ~/forgerace/forgerace.py discuss chat auth-design
+python3 ~/forgerace/forgerace.py discuss new api-caching 'Redis vs in-memory cache for API. Which endpoints? TTL? Invalidation?'
+python3 ~/forgerace/forgerace.py discuss chat api-caching
 ```
 
 Interactive chat commands:

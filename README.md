@@ -1,6 +1,6 @@
 # ForgeRace
 
-Мультиагентный оркестратор разработки. Запускает несколько AI-агентов (Claude, Gemini и др.) параллельно на задачах кодирования, с кросс-ревью, авто-декомпозицией и race-to-merge.
+Мультиагентный оркестратор разработки. Ключевая идея — **разные модели** (Claude, Gemini, Qwen и др.) вместе проектируют архитектуру, конкурентно реализуют и ревьюят друг друга. Одна модель, как ни промптуй — это одна модель. Разные модели спорят, находят слабые места в рассуждениях друг друга и дают решения, которые одна модель не выдаст.
 
 > [English version](README.en.md)
 
@@ -42,10 +42,10 @@ python3 ~/forgerace/forgerace.py init
 # 3. Настрой конфиг
 vim forgerace.toml    # build-команды, dev_branch, агенты
 
-# 4. Запусти дискуссию
-python3 ~/forgerace/forgerace.py discuss new my-feature 'Как реализовать фичу X?'
-python3 ~/forgerace/forgerace.py discuss chat my-feature
-# Агенты обсуждают. Когда готово: /ok
+# 4. Запусти дискуссию — агенты разработают архитектуру и сгенерируют задачи
+python3 ~/forgerace/forgerace.py discuss new api-caching 'Нужно добавить кеширование ответов API. Redis или in-memory? Какие эндпоинты кешировать? TTL?'
+python3 ~/forgerace/forgerace.py discuss chat api-caching
+# Агенты обсуждают архитектуру. Когда готово: /ok
 # → генерируется резолюция + задачи автоматически вставляются в TASKS.md
 
 # 5. Запусти агентов
@@ -62,8 +62,8 @@ python3 ~/forgerace/forgerace.py status
 Дискуссия — это структурированное обсуждение между агентами перед реализацией.
 
 ```bash
-python3 ~/forgerace/forgerace.py discuss new auth-design 'Как реализовать авторизацию?'
-python3 ~/forgerace/forgerace.py discuss chat auth-design
+python3 ~/forgerace/forgerace.py discuss new api-caching 'Redis vs in-memory кеш для API. Какие эндпоинты? TTL? Инвалидация?'
+python3 ~/forgerace/forgerace.py discuss chat api-caching
 ```
 
 В интерактивном чате:
