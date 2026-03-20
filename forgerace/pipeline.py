@@ -966,42 +966,16 @@ def run_pipeline(
     batch = ready[:max_tasks]
     agent_names = cfg.agent_names
 
-    # Маршрутизация:
-    # - Одна задача → всегда конкурентный (модели безлимитные, race даёт лучшее качество)
-    # - Много задач → сложные конкурентно, простые распределённо (параллелизм важнее)
-    competitive = []
-    distributed = []
-    if len(batch) == 1:
-        competitive = list(batch)
-    else:
-        for t in batch:
-            task_prefix = t.id.lower()
-            has_failures = any(cfg.log_dir.glob(f"{task_prefix}-*-attempt*.log"))
-            score = has_failures * 2 + len((t.description or "")) // 500
-            if score >= cfg.max_task_complexity:
-                competitive.append(t)
-            else:
-                distributed.append(t)
-
-    total_procs = len(competitive) * len(agent_names) + len(distributed)
-    log.info(f"Запускаю: {len(competitive)} конкурентных + {len(distributed)} распределённых = {total_procs} процессов")
+    # Все задачи — конкурентный режим (все модели на каждую задачу)
+    total_procs = len(batch) * len(agent_names)
+    log.info(f"Запускаю: {len(batch)} задач × {len(agent_names)} агентов = {total_procs} процессов")
 
     with ThreadPoolExecutor(max_workers=max(total_procs, 1)) as pool:
         futures = {}
-        idx = 1
-
-        for task in competitive:
+        for idx, task in enumerate(batch, 1):
             log.info(f"  {task.id} → конкурентный ({' vs '.join(agent_names)})")
             future = pool.submit(execute_task_competitive, task, idx)
             futures[future] = task
-            idx += 1
-
-        for i, task in enumerate(distributed):
-            agent = agent_names[i % len(agent_names)]
-            log.info(f"  {task.id} → {agent}")
-            future = pool.submit(execute_task_single, task, idx, agent)
-            futures[future] = task
-            idx += 1
 
         for future in as_completed(futures):
             task = futures[future]
