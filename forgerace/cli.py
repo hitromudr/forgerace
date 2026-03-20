@@ -354,7 +354,10 @@ def main_with_signal_handling():
             pass
         os._exit(1)
 
-    os.setpgrp()
-    signal.signal(signal.SIGINT, _force_exit)
-    signal.signal(signal.SIGTERM, _force_exit)
+    # setpgrp + custom SIGINT только для run (discuss нужен нормальный Ctrl+C)
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    if cmd == "run":
+        os.setpgrp()
+        signal.signal(signal.SIGINT, _force_exit)
+        signal.signal(signal.SIGTERM, _force_exit)
     main()

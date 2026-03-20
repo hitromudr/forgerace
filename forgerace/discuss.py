@@ -128,7 +128,7 @@ def discuss_chat(topic: str):
 
     while True:
         try:
-            text = input("TechLead> ").strip()
+            text = input(f"{_C['green']}{_C['bold']}TechLead>{_C['reset']} ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nВыход.")
             break
@@ -397,18 +397,17 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
             proc.stdin.write(prompt)
             proc.stdin.close()
 
-        spin_idx = 0
         got_output = False
-        print(f"{label}> ", end="", flush=True)
+        last_progress = time.time()
+        print(f"{label}> {_C['dim']}думает...{R}", flush=True)
 
         while True:
-            ready, _, _ = select.select([proc.stdout], [], [], 0.15)
+            ready, _, _ = select.select([proc.stdout], [], [], 2.0)
             if ready:
                 line = proc.stdout.readline()
                 if not line:
                     break
                 if not got_output:
-                    print(f"\r{' ' * 50}\r{label}> ", end="", flush=True)
                     got_output = True
                 print(line, end="", flush=True)
                 reply_lines.append(line)
@@ -416,16 +415,16 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
                 if proc.poll() is not None:
                     for line in proc.stdout:
                         if not got_output:
-                            print(f"\r{' ' * 50}\r{label}> ", end="", flush=True)
                             got_output = True
                         print(line, end="", flush=True)
                         reply_lines.append(line)
                     break
                 if not got_output:
-                    ch = spinner_chars[spin_idx % len(spinner_chars)]
-                    elapsed = int(time.time() - start_time)
-                    print(f"\r{label}> {color}{ch}{R} {_C['dim']}думает... {elapsed}s{R}  ", end="", flush=True)
-                    spin_idx += 1
+                    now = time.time()
+                    elapsed = int(now - start_time)
+                    if now - last_progress >= 10:
+                        print(f"{_C['dim']}  ...{elapsed}s{R}", flush=True)
+                        last_progress = now
 
         proc.wait(timeout=cfg.agent_timeout)
     except subprocess.TimeoutExpired:
@@ -491,7 +490,7 @@ def _print_chat_help():
     print(f"  {DIM}(текст){R}   — ваш комментарий, сохраняется в дискуссию (агенты не вызываются)")
     print(f"  {Y}/claude{R}   — запросить ответ {_C['cyan']}Claude{R}")
     print(f"  {Y}/gemini{R}   — запросить ответ {_C['magenta']}Gemini{R}")
-    print(f"  {Y}/qwen{R}     — запросить ответ {_C['blue']}Qwen{R}")
+    print(f"  {Y}/qwen{R}     — запросить ответ {_agent_color('qwen')}Qwen{R}")
     print(f"  {Y}/both{R}     — Claude + Gemini")
     print(f"  {Y}/all{R}      — все агенты последовательно")
     print(f"  {Y}/claude{R} {DIM}(текст){R} — записать ваш комментарий, затем вызвать Claude")
