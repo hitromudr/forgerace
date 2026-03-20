@@ -143,7 +143,7 @@ NEEDS_WORK = нужны правки.
 
 
 def code_review(passed: list[AgentResult], task: Task) -> dict:
-    """Крест-на-крест ревью. Возвращает {verdict, best, reason, comments, full_text}."""
+    """Крест-на-крест ревью для N агентов. Каждый ревьюится другим (round-robin)."""
     diffs = {}
     files_map = {}
     for r in passed:
@@ -158,28 +158,30 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
     all_agent_names = cfg.agent_names
     author_names = list(diffs.keys())
 
-    if len(author_names) >= 2:
-        log.info(f"    Ревью крест-на-крест: {author_names[0]}→{author_names[1]}, {author_names[1]}→{author_names[0]}")
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = {
-                pool.submit(single_review, author_names[1], author_names[0],
-                            diffs[author_names[0]], task, build_passed=True,
-                            changed_files=files_map.get(author_names[0])): author_names[0],
-                pool.submit(single_review, author_names[0], author_names[1],
-                            diffs[author_names[1]], task, build_passed=True,
-                            changed_files=files_map.get(author_names[1])): author_names[1],
-            }
-            reviews = {}
-            for f in as_completed(futures):
-                author = futures[f]
-                reviews[author] = f.result()
-    else:
-        author = author_names[0]
-        reviewer = next((n for n in all_agent_names if n != author), author)
-        log.info(f"    Ревьюер: {reviewer} → {author}")
-        reviews = {author: single_review(reviewer, author, diffs[author], task,
-                                         build_passed=True,
-                                         changed_files=files_map.get(author))}
+    # Назначаем ревьюеров: каждый автор ревьюится следующим в списке (round-robin)
+    review_pairs = []
+    for i, author in enumerate(author_names):
+        # Ревьюер — следующий агент (циклически), пропуская себя
+        others = [n for n in author_names if n != author]
+        if not others:
+            others = [next((n for n in all_agent_names if n != author), author)]
+        reviewer = others[i % len(others)]
+        review_pairs.append((reviewer, author))
+
+    pairs_str = ", ".join(f"{rev}→{auth}" for rev, auth in review_pairs)
+    log.info(f"    Ревью крест-на-крест: {pairs_str}")
+
+    with ThreadPoolExecutor(max_workers=len(review_pairs)) as pool:
+        futures = {}
+        for reviewer, author in review_pairs:
+            f = pool.submit(single_review, reviewer, author,
+                            diffs[author], task, build_passed=True,
+                            changed_files=files_map.get(author))
+            futures[f] = author
+        reviews = {}
+        for f in as_completed(futures):
+            author = futures[f]
+            reviews[author] = f.result()
 
     # Логируем результаты
     full_text_parts = []
@@ -191,34 +193,31 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
 
     full_text = "\n\n".join(full_text_parts)
 
-    # Определяем лучшего
-    if len(reviews) >= 2:
-        a, b = list(reviews.keys())
-        rv_a, rv_b = reviews[a], reviews[b]
-        a_approved = rv_a["verdict"] == "APPROVED"
-        b_approved = rv_b["verdict"] == "APPROVED"
+    # Определяем лучшего: кто получил APPROVED
+    approved = [a for a, rv in reviews.items() if rv["verdict"] == "APPROVED"]
+    needs_work = [a for a, rv in reviews.items() if rv["verdict"] == "NEEDS_WORK"]
 
-        if a_approved and not b_approved:
-            best, verdict, reason = a, "APPROVED", f"{rv_b['reviewer']} нашёл проблемы в {b}, а {a} прошёл ревью"
-            comments = rv_b.get("comments", "")
-        elif b_approved and not a_approved:
-            best, verdict, reason = b, "APPROVED", f"{rv_a['reviewer']} нашёл проблемы в {a}, а {b} прошёл ревью"
-            comments = rv_a.get("comments", "")
-        elif a_approved and b_approved:
-            best, verdict = a, "APPROVED"
-            reason = f"Оба прошли ревью, выбран {a}"
-            comments = ""
-        else:
-            best = a
-            verdict, reason = "NEEDS_WORK", "Оба требуют доработки"
-            comments = reviews[best].get("comments", "")
+    if len(approved) == 1:
+        best = approved[0]
+        verdict = "APPROVED"
+        loser_comments = [reviews[a].get("comments", "") for a in needs_work]
+        reason = f"{best} прошёл ревью, остальные требуют доработки"
+        comments = "\n\n".join(loser_comments)
+    elif len(approved) > 1:
+        best = approved[0]  # первый из approved
+        verdict = "APPROVED"
+        reason = f"{len(approved)} прошли ревью, выбран {best}"
+        comments = ""
+    elif needs_work:
+        best = needs_work[0]
+        verdict = "NEEDS_WORK"
+        reason = "Все требуют доработки"
+        comments = reviews[best].get("comments", "")
     else:
-        author = list(reviews.keys())[0]
-        rv = reviews[author]
-        best = author if rv["verdict"] != "error" else "none"
-        verdict = rv["verdict"]
-        comments = rv.get("comments", "")
-        reason = rv.get("summary", "")
+        best = author_names[0]
+        verdict = reviews[best].get("verdict", "error")
+        reason = reviews[best].get("summary", "")
+        comments = reviews[best].get("comments", "")
 
     return {
         "full_text": full_text,
