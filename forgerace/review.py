@@ -179,15 +179,14 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
     all_agent_names = cfg.agent_names
     author_names = list(diffs.keys())
 
-    # Назначаем ревьюеров: каждый автор ревьюится следующим в списке (round-robin)
+    # Все против одного: каждый автор ревьюится ВСЕМИ остальными
     review_pairs = []
-    for i, author in enumerate(author_names):
-        # Ревьюер — следующий агент (циклически), пропуская себя
-        others = [n for n in author_names if n != author]
+    for author in author_names:
+        others = [n for n in all_agent_names if n != author]
         if not others:
-            others = [next((n for n in all_agent_names if n != author), author)]
-        reviewer = others[i % len(others)]
-        review_pairs.append((reviewer, author))
+            others = [author]
+        for reviewer in others:
+            review_pairs.append((reviewer, author))
 
     pairs_str = ", ".join(f"{rev}→{auth}" for rev, auth in review_pairs)
     log.info(f"    Ревью крест-на-крест: {pairs_str}")
@@ -198,47 +197,50 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
             f = pool.submit(single_review, reviewer, author,
                             diffs[author], task, build_passed=True,
                             changed_files=files_map.get(author))
-            futures[f] = author
-        reviews = {}
+            futures[f] = (reviewer, author)
+        # reviews_by_author: {author: [{reviewer, verdict, comments, ...}, ...]}
+        reviews_by_author: dict[str, list[dict]] = {a: [] for a in author_names}
+        reviews = {}  # backward compat: {author: last_review}
         for f in as_completed(futures):
-            author = futures[f]
-            reviews[author] = f.result()
+            reviewer, author = futures[f]
+            rv = f.result()
+            reviews_by_author[author].append(rv)
+            reviews[author] = rv  # для send_to_rework
 
     # Логируем результаты
     full_text_parts = []
-    for author, rv in reviews.items():
-        header = f"📋 {rv['reviewer']} ревьюит {author}: {rv['verdict']}"
-        log.info(f"    {header}")
-        log.info(f"    {rv.get('summary', rv.get('comments', '')[:200])}")
-        full_text_parts.append(f"=== {rv['reviewer']} ревьюит {author} ===\n{rv['full_text']}")
+    for author in author_names:
+        for rv in reviews_by_author[author]:
+            header = f"📋 {rv['reviewer']} ревьюит {author}: {rv['verdict']}"
+            log.info(f"    {header}")
+            log.info(f"    {rv.get('summary', rv.get('comments', '')[:200])}")
+            full_text_parts.append(f"=== {rv['reviewer']} ревьюит {author} ===\n{rv['full_text']}")
 
     full_text = "\n\n".join(full_text_parts)
 
-    # Определяем лучшего: кто получил APPROVED
-    approved = [a for a, rv in reviews.items() if rv["verdict"] == "APPROVED"]
-    needs_work = [a for a, rv in reviews.items() if rv["verdict"] == "NEEDS_WORK"]
+    # Определяем лучшего: APPROVED = ВСЕ ревьюеры одобрили
+    def _all_approved(author: str) -> bool:
+        return all(rv["verdict"] == "APPROVED" for rv in reviews_by_author[author])
 
-    if len(approved) == 1:
-        best = approved[0]
+    def _approval_count(author: str) -> int:
+        return sum(1 for rv in reviews_by_author[author] if rv["verdict"] == "APPROVED")
+
+    fully_approved = [a for a in author_names if _all_approved(a)]
+
+    if fully_approved:
+        best = fully_approved[0]
         verdict = "APPROVED"
-        loser_comments = [reviews[a].get("comments", "") for a in needs_work]
-        reason = f"{best} прошёл ревью, остальные требуют доработки"
-        comments = "\n\n".join(loser_comments)
-    elif len(approved) > 1:
-        best = approved[0]  # первый из approved
-        verdict = "APPROVED"
-        reason = f"{len(approved)} прошли ревью, выбран {best}"
+        reason = f"{best} одобрен всеми ревьюерами"
         comments = ""
-    elif needs_work:
-        best = needs_work[0]
-        verdict = "NEEDS_WORK"
-        reason = "Все требуют доработки"
-        comments = reviews[best].get("comments", "")
     else:
-        best = author_names[0]
-        verdict = reviews[best].get("verdict", "error")
-        reason = reviews[best].get("summary", "")
-        comments = reviews[best].get("comments", "")
+        # Никто не получил полного одобрения — берём с максимумом approve
+        best = max(author_names, key=_approval_count)
+        verdict = "NEEDS_WORK"
+        # Собираем замечания от тех кто не одобрил лучшего
+        nw_comments = [rv.get("comments", "") for rv in reviews_by_author[best]
+                       if rv["verdict"] != "APPROVED" and rv.get("comments", "").strip()]
+        comments = "\n\n".join(nw_comments)
+        reason = f"{best} получил {_approval_count(best)}/{len(reviews_by_author[best])} одобрений"
 
     return {
         "full_text": full_text,

@@ -328,15 +328,31 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             passed.append(result)
             log.info(f"[{task.id}/{result.agent_type}] unsafe={result.unsafe_count}, lines={result.code_lines}, bin={result.binary_size}")
 
-            # Race: первый финишировавший → ревью
-            reviewer = next((n for n in agent_names if n != result.agent_type), result.agent_type)
-            log.info(f"[{task.id}] 📝 Ревью: {reviewer} → {result.agent_type}")
-            rv = single_review(reviewer, result.agent_type, get_diff(result, task), task,
-                               build_passed=True, changed_files=get_changed_files(result, task))
-            log.info(f"[{task.id}] 📋 {reviewer} ревьюит {result.agent_type}: {rv['verdict']}")
-            log.info(f"[{task.id}] {rv.get('summary', rv.get('comments', '')[:200])}")
+            # Race: первый финишировавший → ревью ВСЕМИ остальными
+            reviewers = [n for n in agent_names if n != result.agent_type]
+            if not reviewers:
+                reviewers = [result.agent_type]
+            diff = get_diff(result, task)
+            changed = get_changed_files(result, task)
+            log.info(f"[{task.id}] 📝 Ревью: {', '.join(reviewers)} → {result.agent_type}")
 
-            if rv["verdict"] == "APPROVED":
+            with ThreadPoolExecutor(max_workers=len(reviewers)) as review_pool:
+                review_futures = {}
+                for rev in reviewers:
+                    f = review_pool.submit(single_review, rev, result.agent_type, diff, task,
+                                           build_passed=True, changed_files=changed)
+                    review_futures[f] = rev
+                verdicts = {}
+                for f in as_completed(review_futures):
+                    rev = review_futures[f]
+                    rv = f.result()
+                    verdicts[rev] = rv
+                    log.info(f"[{task.id}] 📋 {rev} ревьюит {result.agent_type}: {rv['verdict']}")
+                    log.info(f"[{task.id}] {rv.get('summary', rv.get('comments', '')[:200])}")
+
+            # APPROVED только если ВСЕ ревьюеры одобрили
+            all_approved = all(v["verdict"] == "APPROVED" for v in verdicts.values())
+            if all_approved:
                 log.info(f"[{task.id}] ✅ Ревью пройдено: {result.agent_type}")
                 log.info(f"[{task.id}] 🏆 победитель: {result.agent_type}")
                 cancel_event.set()  # сигнал остальным агентам на завершение
