@@ -402,16 +402,16 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
             proc.stdin.close()
 
         got_output = False
-        last_progress = time.time()
-        print(f"{label}> {_C['dim']}думает...{R}", flush=True)
+        print(f"{label}> {_C['dim']}думает...{R}", end="", flush=True)
 
         while True:
-            ready, _, _ = select.select([proc.stdout], [], [], 2.0)
+            ready, _, _ = select.select([proc.stdout], [], [], 3.0)
             if ready:
                 line = proc.stdout.readline()
                 if not line:
                     break
                 if not got_output:
+                    print(flush=True)  # новая строка после "думает...Xs"
                     got_output = True
                 print(line, end="", flush=True)
                 reply_lines.append(line)
@@ -419,16 +419,14 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
                 if proc.poll() is not None:
                     for line in proc.stdout:
                         if not got_output:
+                            print(flush=True)
                             got_output = True
                         print(line, end="", flush=True)
                         reply_lines.append(line)
                     break
                 if not got_output:
-                    now = time.time()
-                    elapsed = int(now - start_time)
-                    if now - last_progress >= 10:
-                        print(f"{_C['dim']}  ...{elapsed}s{R}", flush=True)
-                        last_progress = now
+                    elapsed = int(time.time() - start_time)
+                    print(f"\r{label}> {_C['dim']}думает... {elapsed}s{R}   ", end="", flush=True)
 
         proc.wait(timeout=cfg.agent_timeout)
     except subprocess.TimeoutExpired:
