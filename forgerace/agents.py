@@ -54,14 +54,16 @@ def _log_claude_event(tag: str, event: dict):
     elif etype == "result":
         turns = event.get("num_turns", "?")
         cost = event.get("total_cost_usd", 0)
-        duration = event.get("duration_ms", 0) // 1000
+        dur_s = event.get("duration_ms", 0) // 1000
+        mins, secs = divmod(dur_s, 60)
+        dur_str = f"{mins}m{secs:02d}s" if mins else f"{secs}s"
         usage = event.get("usage", {})
         in_tok = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
         out_tok = usage.get("output_tokens", 0)
         if cost:
-            log.info(f"[{tag}] 📊 {turns} turns, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out, ${cost:.2f}")
+            log.info(f"[{tag}] 📊 {turns} turns, {dur_str}, {in_tok // 1000}k in/{out_tok // 1000}k out, ${cost:.2f}")
         else:
-            log.info(f"[{tag}] 📊 {turns} turns, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out")
+            log.info(f"[{tag}] 📊 {turns} turns, {dur_str}, {in_tok // 1000}k in/{out_tok // 1000}k out")
 
 
 def _log_gemini_event(tag: str, event: dict):
@@ -144,6 +146,7 @@ def _run_agent_streaming(
     stdout_lines = []
     deadline = time.time() + cfg.agent_timeout
     last_activity = time.time()
+    initial_timeout = cfg.agent_timeout
     # Progress tracking: diff snapshot
     last_diff_snapshot = _get_diff_snapshot(workdir)
     last_diff_change = time.time()
@@ -204,6 +207,8 @@ def _run_agent_streaming(
                         event = json.loads(stripped)
                         if activity_check_fn(event):
                             last_activity = time.time()
+                            # Продлеваем дедлайн при активности — агент жив, не убивать
+                            deadline = time.time() + initial_timeout
                             # Early-abort: трекаем tool_calls без Write/Edit
                             tool_calls_since_edit += 1
                             if _event_has_productive_action(event):
