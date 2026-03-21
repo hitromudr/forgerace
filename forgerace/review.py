@@ -108,10 +108,12 @@ NEEDS_WORK = нужны правки.
 """
 
     try:
-        # Собираем контекст: diff + полные файлы
+        # Собираем контекст: полные файлы из worktree + diff
         files_content = ""
+
+        # Способ 1: читаем из worktree
         if workdir and workdir.exists() and changed_files:
-            for f in changed_files[:5]:  # макс 5 файлов
+            for f in changed_files[:5]:
                 fpath = workdir / f
                 if fpath.exists() and fpath.stat().st_size < 10000:
                     try:
@@ -120,14 +122,29 @@ NEEDS_WORK = нужны правки.
                     except Exception:
                         pass
 
+        # Способ 2: если worktree не сработал — извлекаем из git show
+        if not files_content and workdir and workdir.exists():
+            try:
+                name_result = run_cmd(
+                    ["git", "diff", "--name-only", cfg.dev_branch],
+                    cwd=workdir, check=False)
+                git_files = [f.strip() for f in (name_result.stdout or "").splitlines() if f.strip()]
+                for f in git_files[:5]:
+                    show_result = run_cmd(
+                        ["git", "show", f"HEAD:{f}"],
+                        cwd=workdir, check=False)
+                    if show_result.returncode == 0 and show_result.stdout:
+                        content = show_result.stdout
+                        if len(content) < 10000:
+                            files_content += f"\n### {f}\n```\n{content}\n```\n"
+            except Exception:
+                pass
+
         full_prompt = prompt
         if files_content:
-            full_prompt += f"\n## Полные файлы (для проверки что код реально применён)\n{files_content}"
-        else:
-            log.debug(f"[{reviewer}→{author}] Нет полных файлов: workdir={workdir}, changed_files={changed_files}")
+            full_prompt += f"\n## Полные файлы (код РЕАЛЬНО существует в репозитории)\n{files_content}"
         full_prompt += f"\n## Diff от {author}\n```diff\n{diff[:4000]}\n```"
 
-        log.debug(f"[{reviewer}→{author}] Промпт ревью: {len(full_prompt)} символов, файлов: {len(files_content) if files_content else 0}")
         review_text = run_reviewer(reviewer, full_prompt)
         if not review_text:
             return {"verdict": "error", "reviewer": reviewer, "author": author,
