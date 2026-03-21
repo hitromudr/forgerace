@@ -340,7 +340,8 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 review_futures = {}
                 for rev in reviewers:
                     f = review_pool.submit(single_review, rev, result.agent_type, diff, task,
-                                           build_passed=True, changed_files=changed)
+                                           build_passed=True, changed_files=changed,
+                                           workdir=result.workdir)
                     review_futures[f] = rev
                 verdicts = {}
                 for f in as_completed(review_futures):
@@ -530,7 +531,8 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         log.info(f"[{task.id}] 📝 Code review (раунд {review_round}/{cfg.max_review_rounds})...")
         log.info(f"[{task.id}] Ревьюер: {reviewer} → {agent_type}")
         rv = single_review(reviewer, agent_type, get_diff(best_result, task), task,
-                           build_passed=True, changed_files=get_changed_files(best_result, task))
+                           build_passed=True, changed_files=get_changed_files(best_result, task),
+                           workdir=best_result.workdir)
         log.info(f"[{task.id}] 📋 {reviewer} ревьюит {agent_type}: {rv['verdict']}")
         log.info(f"[{task.id}] {rv.get('summary', rv.get('comments', '')[:200])}")
 
@@ -561,7 +563,8 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     else:
         log.info(f"[{task.id}] 📝 Финальное ревью...")
         rv = single_review(reviewer, agent_type, get_diff(best_result, task), task,
-                           build_passed=True, changed_files=get_changed_files(best_result, task))
+                           build_passed=True, changed_files=get_changed_files(best_result, task),
+                           workdir=best_result.workdir)
         if rv["verdict"] != "APPROVED":
             log.error(f"[{task.id}] ✗ не прошёл ревью → BLOCKED")
             update_task_status(task.id, "blocked")

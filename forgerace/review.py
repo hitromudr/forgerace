@@ -71,55 +71,50 @@ def pick_reviewer(passed: list[AgentResult]) -> str:
 
 def single_review(reviewer: str, author: str, diff: str, task: Task,
                    build_passed: bool = True, build_log: str = "",
-                   changed_files: list[str] | None = None) -> dict:
-    """Один ревьюер проверяет одного автора. Возвращает parsed review."""
+                   changed_files: list[str] | None = None,
+                   workdir: "Path | None" = None) -> dict:
+    """Один ревьюер проверяет одного автора. Запускается как полноценный агент в worktree автора."""
+    from pathlib import Path
 
-    # Контекст сборки — ревьюер ДОЛЖЕН знать результат
-    build_section = ""
-    if build_passed:
-        build_section = "## Результат сборки\n✅ `cargo build` — PASSED\n✅ `cargo test` — PASSED\nКод компилируется и тесты проходят. НЕ пиши замечания о том что код не компилируется.\n"
-    elif build_log:
-        build_section = f"## Результат сборки\n❌ Сборка провалена:\n```\n{build_log[-1500:]}\n```\n"
+    prompt = f"""Ты ревьюер кода. Ты проверяешь реализацию агента {author} для задачи {task.id}.
 
-    # Список изменённых файлов — ревьюер видит полную картину
-    files_section = ""
-    if changed_files:
-        files_section = "## Изменённые файлы\n" + "\n".join(f"- {f}" for f in changed_files) + "\n"
-
-    prompt = f"""Ты ревьюер кода {cfg.project_context}. Ты проверяешь реализацию агента {author}.
-
-Задача: {task.id} — {task.name}
+## Задача
+{task.id} — {task.name}
 Описание: {task.description}
 Критерий готовности: {task.acceptance}
 
-{build_section}
-{files_section}
-Проверь:
-1. **Корректность**: баги, UB, гонки данных, use-after-free?
-2. **Соответствие задаче**: реализовано ли то, что нужно по описанию и критерию готовности?
-3. **Качество**: unsafe обоснован? Мёртвый код? Архитектура?
+## Что делать
+1. Прочитай изменённые файлы (используй Read/Grep/Glob).
+2. Проверь что код РЕАЛЬНО написан и соответствует задаче.
+3. Запусти тесты если нужно (используй Bash).
+4. Напиши вердикт.
 
-Формат ответа — строго:
+НЕ правь файлы. Только читай и проверяй.
+
+## Формат ответа — строго:
 VERDICT: APPROVED или NEEDS_WORK
-COMMENTS: <что конкретно проверено и какие проблемы найдены. При APPROVED — перечисли что проверил и почему ок. При NEEDS_WORK — конкретные замечания. ПУСТЫЕ КОММЕНТАРИИ ЗАПРЕЩЕНЫ.>
+COMMENTS: <что проверено и какие проблемы. При APPROVED — докажи что проверил. При NEEDS_WORK — конкретные замечания.>
 SUMMARY: <итог в 1-2 строки>
 
-APPROVED = код готов к мержу, ты ЛИЧНО проверил каждый пункт выше.
+APPROVED = код готов к мержу.
 NEEDS_WORK = нужны правки.
-ВАЖНО:
-- APPROVED без обоснования в COMMENTS будет отклонён. Ты должен доказать что проверил код.
-- Сборка и тесты уже проверены автоматически (см. "Результат сборки" выше). Не дублируй эту проверку — фокусируйся на логике, корректности и соответствии задаче.
-- Оценивай ТОЛЬКО то, что видишь в diff и контексте выше. Не додумывай.
-- Файлы из `.gitignore` (`.env`, `venv/`, `__pycache__/`) НЕ могут быть изменены агентом — не требуй их правки. Агент может править только tracked файлы (`.env.example`, `env_configs/`, и т.д.).
+- Файлы из `.gitignore` НЕ могут быть изменены — не требуй их правки.
 Пиши на русском.
-
-### Diff от {author}
-```diff
-{diff}
-```"""
+"""
 
     try:
-        review_text = run_reviewer(reviewer, prompt)
+        if workdir and workdir.exists():
+            # Полноценный агент — видит файлы, может запускать тесты
+            result = run_agent_process(reviewer, workdir, task, prompt)
+            review_text = (result.stdout or "").strip()
+            # Извлекаем текст из stream-json если нужно
+            if not review_text or review_text.startswith("{"):
+                from .agents import _claude_extract_result
+                review_text = _claude_extract_result(result.stdout.splitlines() if result.stdout else [])
+        else:
+            # Fallback: старый режим через текстовый промпт с diff
+            diff_prompt = prompt + f"\n### Diff от {author}\n```diff\n{diff}\n```"
+            review_text = run_reviewer(reviewer, diff_prompt)
         if not review_text:
             return {"verdict": "error", "reviewer": reviewer, "author": author,
                     "full_text": "", "comments": "", "summary": "Пустой ответ"}
@@ -167,11 +162,13 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
     """Крест-на-крест ревью для N агентов. Каждый ревьюится другим (round-robin)."""
     diffs = {}
     files_map = {}
+    workdir_map = {}
     for r in passed:
         diff = get_diff(r, task)
         if diff:
             diffs[r.agent_type] = diff
             files_map[r.agent_type] = get_changed_files(r, task)
+            workdir_map[r.agent_type] = r.workdir
 
     if not diffs:
         return {"verdict": "error", "reason": "Нет diff для ревью"}
@@ -196,7 +193,8 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
         for reviewer, author in review_pairs:
             f = pool.submit(single_review, reviewer, author,
                             diffs[author], task, build_passed=True,
-                            changed_files=files_map.get(author))
+                            changed_files=files_map.get(author),
+                            workdir=workdir_map.get(author))
             futures[f] = (reviewer, author)
         # reviews_by_author: {author: [{reviewer, verdict, comments, ...}, ...]}
         reviews_by_author: dict[str, list[dict]] = {a: [] for a in author_names}
@@ -218,9 +216,14 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
 
     full_text = "\n\n".join(full_text_parts)
 
-    # Определяем лучшего: APPROVED = ВСЕ ревьюеры одобрили
+    # Определяем лучшего: APPROVED = все НЕ-error ревьюеры одобрили
+    def _real_reviews(author: str) -> list[dict]:
+        """Ревью без ошибок (таймауты и т.п. не считаются)."""
+        return [rv for rv in reviews_by_author[author] if rv["verdict"] != "error"]
+
     def _all_approved(author: str) -> bool:
-        return all(rv["verdict"] == "APPROVED" for rv in reviews_by_author[author])
+        real = _real_reviews(author)
+        return len(real) > 0 and all(rv["verdict"] == "APPROVED" for rv in real)
 
     def _approval_count(author: str) -> int:
         return sum(1 for rv in reviews_by_author[author] if rv["verdict"] == "APPROVED")
