@@ -121,8 +121,11 @@ NEEDS_WORK = нужны правки.
         full_prompt = prompt
         if files_content:
             full_prompt += f"\n## Полные файлы (для проверки что код реально применён)\n{files_content}"
-        full_prompt += f"\n## Diff от {author}\n```diff\n{diff}\n```"
+        else:
+            log.debug(f"[{reviewer}→{author}] Нет полных файлов: workdir={workdir}, changed_files={changed_files}")
+        full_prompt += f"\n## Diff от {author}\n```diff\n{diff[:4000]}\n```"
 
+        log.debug(f"[{reviewer}→{author}] Промпт ревью: {len(full_prompt)} символов, файлов: {len(files_content) if files_content else 0}")
         review_text = run_reviewer(reviewer, full_prompt)
         if not review_text:
             return {"verdict": "error", "reviewer": reviewer, "author": author,
