@@ -106,38 +106,24 @@ NEEDS_WORK = нужны правки.
 """
 
     try:
-        if workdir and workdir.exists():
-            # Полноценный агент с ограниченными turns (ревью, не разработка)
-            # Временно подменяем max-turns на 15
-            acfg = cfg.agents.get(reviewer)
-            if acfg:
-                orig_args = list(acfg.args)
-                new_args = []
-                skip_next = False
-                for i, a in enumerate(orig_args):
-                    if skip_next:
-                        skip_next = False
-                        continue
-                    if a == "--max-turns" and i + 1 < len(orig_args):
-                        new_args.extend(["--max-turns", "15"])
-                        skip_next = True
-                    else:
-                        new_args.append(a)
-                if "--max-turns" not in orig_args:
-                    new_args.extend(["--max-turns", "15"])
-                acfg.args = new_args
-            result = run_agent_process(reviewer, workdir, task, prompt)
-            if acfg:
-                acfg.args = orig_args  # восстанавливаем
-            review_text = (result.stdout or "").strip()
-            # Извлекаем текст из stream-json если нужно
-            if not review_text or review_text.startswith("{"):
-                from .agents import _claude_extract_result
-                review_text = _claude_extract_result(result.stdout.splitlines() if result.stdout else [])
-        else:
-            # Fallback: старый режим через текстовый промпт с diff
-            diff_prompt = prompt + f"\n### Diff от {author}\n```diff\n{diff}\n```"
-            review_text = run_reviewer(reviewer, diff_prompt)
+        # Собираем контекст: diff + полные файлы
+        files_content = ""
+        if workdir and workdir.exists() and changed_files:
+            for f in changed_files[:5]:  # макс 5 файлов
+                fpath = workdir / f
+                if fpath.exists() and fpath.stat().st_size < 10000:
+                    try:
+                        content = fpath.read_text(encoding="utf-8", errors="ignore")
+                        files_content += f"\n### {f}\n```\n{content}\n```\n"
+                    except Exception:
+                        pass
+
+        full_prompt = prompt
+        if files_content:
+            full_prompt += f"\n## Полные файлы (для проверки что код реально применён)\n{files_content}"
+        full_prompt += f"\n## Diff от {author}\n```diff\n{diff}\n```"
+
+        review_text = run_reviewer(reviewer, full_prompt)
         if not review_text:
             return {"verdict": "error", "reviewer": reviewer, "author": author,
                     "full_text": "", "comments": "", "summary": "Пустой ответ"}
