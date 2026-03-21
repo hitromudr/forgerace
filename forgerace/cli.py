@@ -77,7 +77,7 @@ def _cmd_init():
     forgerace_py = Path(sys.argv[0]).resolve()
     fr_path = cwd / "fr"
     if not fr_path.exists():
-        fr_path.write_text(f"#!/bin/sh\npython3 {forgerace_py} \"$@\"\n", encoding="utf-8")
+        fr_path.write_text(f"#!/bin/sh\nexec python3 {forgerace_py} \"$@\"\n", encoding="utf-8")
         fr_path.chmod(0o755)
         created.append("fr")
 
