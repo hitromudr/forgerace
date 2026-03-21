@@ -86,10 +86,13 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
 ## Что делать
 1. Прочитай изменённые файлы (используй Read/Grep/Glob).
 2. Проверь что код РЕАЛЬНО написан и соответствует задаче.
-3. Запусти тесты если нужно (используй Bash).
+3. Если нужно — запусти тесты (Bash).
 4. Напиши вердикт.
 
-НЕ правь файлы. Только читай и проверяй.
+ВАЖНО:
+- НЕ правь файлы. Только читай и проверяй.
+- Максимум 10 tool calls. Не исследуй весь проект — сфокусируйся на изменениях.
+- ОБЯЗАТЕЛЬНО закончи выводом VERDICT/COMMENTS/SUMMARY.
 
 ## Формат ответа — строго:
 VERDICT: APPROVED или NEEDS_WORK
@@ -104,8 +107,28 @@ NEEDS_WORK = нужны правки.
 
     try:
         if workdir and workdir.exists():
-            # Полноценный агент — видит файлы, может запускать тесты
+            # Полноценный агент с ограниченными turns (ревью, не разработка)
+            # Временно подменяем max-turns на 15
+            acfg = cfg.agents.get(reviewer)
+            if acfg:
+                orig_args = list(acfg.args)
+                new_args = []
+                skip_next = False
+                for i, a in enumerate(orig_args):
+                    if skip_next:
+                        skip_next = False
+                        continue
+                    if a == "--max-turns" and i + 1 < len(orig_args):
+                        new_args.extend(["--max-turns", "15"])
+                        skip_next = True
+                    else:
+                        new_args.append(a)
+                if "--max-turns" not in orig_args:
+                    new_args.extend(["--max-turns", "15"])
+                acfg.args = new_args
             result = run_agent_process(reviewer, workdir, task, prompt)
+            if acfg:
+                acfg.args = orig_args  # восстанавливаем
             review_text = (result.stdout or "").strip()
             # Извлекаем текст из stream-json если нужно
             if not review_text or review_text.startswith("{"):
