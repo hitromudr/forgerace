@@ -286,9 +286,8 @@ def send_to_rework(result: AgentResult, task: Task, comments: str) -> bool:
     run_result = run_agent_process(result.agent_type, result.workdir, task, prompt)
     review_file.unlink(missing_ok=True)
 
-    # Коммитим правки
-    for p in task_paths(task):
-        run_cmd(["git", "add", p], cwd=result.workdir, check=False)
+    # Коммитим ВСЕ правки (агент мог создать файлы вне task_paths)
+    run_cmd(["git", "add", "-A"], cwd=result.workdir, check=False)
     diff = run_cmd(["git", "diff", "--cached", "--stat"], cwd=result.workdir, check=False)
     if diff.stdout.strip():
         run_cmd(

@@ -242,9 +242,9 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
             error_log = stderr
             continue
 
-        # Коммит
-        for p in task_paths(task):
-            run_cmd(["git", "add", p], cwd=workdir, check=False)
+        # Коммит — добавляем ВСЕ изменения, не только task_paths
+        # (агент мог создать файлы вне указанных путей)
+        run_cmd(["git", "add", "-A"], cwd=workdir, check=False)
         diff_stat = run_cmd(["git", "diff", "--cached", "--stat"], cwd=workdir, check=False)
         if diff_stat.stdout.strip():
             run_cmd(
