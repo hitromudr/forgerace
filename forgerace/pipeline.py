@@ -763,9 +763,20 @@ def _print_flow_guide(tasks: list[Task]):
             print(f"     {BOLD}{t.id}{R}: {t.name}")
         print(f"     {DIM}→{R} {hint} merge-pending")
 
-    if not failed and not in_progress and not review:
-        print(f"  {DIM}ℹ Все {len(done)} задач выполнены, но нет open-задач для запуска.{R}")
-        print(f"     Добавь новые задачи в TASKS.md и запусти:")
+    # Open задачи заблокированные зависимостями
+    open_blocked = by_status.get("open", [])
+    if open_blocked:
+        unmet = [(t, [d for d in t.deps if d not in done_ids]) for t in open_blocked]
+        unmet = [(t, deps) for t, deps in unmet if deps]
+        if unmet:
+            print(f"  {DIM}⏸ Open, ждут зависимости ({len(unmet)}):{R}")
+            for t, deps in unmet[:5]:
+                print(f"     {BOLD}{t.id}{R}: {t.name} {DIM}(ждёт: {', '.join(deps)}){R}")
+            if len(unmet) > 5:
+                print(f"     {DIM}...и ещё {len(unmet) - 5}{R}")
+
+    if not failed and not in_progress and not review and not open_blocked:
+        print(f"  {DIM}ℹ Все {len(done)} задач выполнены. Добавь новые в TASKS.md.{R}")
         print(f"     {DIM}→{R} {hint} run")
 
 

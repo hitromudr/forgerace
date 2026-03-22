@@ -1,14 +1,23 @@
 """Git worktree: создание и удаление рабочих директорий агентов."""
 
 import shutil
+import threading
 from pathlib import Path
 
 from .config import cfg
 from .utils import log, run_cmd
 
+_worktree_lock = threading.Lock()
+
 
 def create_worktree(agent_num: int, branch: str) -> Path:
-    """Создаёт worktree для агента, возвращает путь."""
+    """Создаёт worktree для агента, возвращает путь. Thread-safe."""
+    with _worktree_lock:
+        return _create_worktree_impl(agent_num, branch)
+
+
+def _create_worktree_impl(agent_num: int, branch: str) -> Path:
+    """Внутренняя реализация — вызывается под lock."""
     cfg.agents_dir.mkdir(parents=True, exist_ok=True)
     agent_dir = cfg.agents_dir / f"agent-{agent_num}"
 
