@@ -764,6 +764,7 @@ def _print_flow_guide(tasks: list[Task]):
         print(f"     {DIM}→{R} {hint} merge-pending")
 
     # Open задачи заблокированные зависимостями
+    done_ids = {t.id for t in tasks if t.status == "done"}
     open_blocked = by_status.get("open", [])
     if open_blocked:
         unmet = [(t, [d for d in t.deps if d not in done_ids]) for t in open_blocked]
