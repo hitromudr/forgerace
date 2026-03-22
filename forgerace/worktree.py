@@ -23,14 +23,22 @@ def create_worktree(agent_num: int, branch: str) -> Path:
     # Чистим worktree list от мёртвых записей
     run_cmd(["git", "worktree", "prune"], cwd=cfg.root_dir, check=False)
 
-    # Удаляем старую ветку если есть — иначе worktree возьмёт устаревший код
+    # Удаляем старую ветку — может быть залочена мёртвым worktree
     run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
+    # Если не удалилась (залочена) — ещё раз prune и retry
+    branch_check = run_cmd(["git", "branch", "--list", branch], cwd=cfg.root_dir, check=False)
+    if branch_check.stdout.strip():
+        run_cmd(["git", "worktree", "prune"], cwd=cfg.root_dir, check=False)
+        run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
 
     # Создаём новую ветку от develop
-    run_cmd(
+    result = run_cmd(
         ["git", "worktree", "add", str(agent_dir), "-b", branch, cfg.dev_branch],
-        cwd=cfg.root_dir,
+        cwd=cfg.root_dir, check=False,
     )
+    if result.returncode != 0:
+        log.error(f"Не удалось создать worktree: {result.stderr}")
+        raise RuntimeError(f"git worktree add failed: {result.stderr}")
 
     # Сбрасываем грязные файлы (TASKS.md может быть modified)
     run_cmd(["git", "checkout", "--", "TASKS.md"], cwd=agent_dir, check=False)

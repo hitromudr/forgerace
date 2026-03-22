@@ -210,7 +210,12 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
     slug = translate_slug(task.name)
     branch = f"task/{task.id.lower()}-{slug}-{agent_type}"
     run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
-    workdir = create_worktree(agent_num, branch)
+    try:
+        workdir = create_worktree(agent_num, branch)
+    except (RuntimeError, Exception) as e:
+        log.error(f"[{task.id}/{agent_type}] ✗ Не удалось создать worktree: {e}")
+        return AgentResult(agent_type=agent_type, branch=branch,
+                           workdir=cfg.agents_dir / f"agent-{agent_num}", success=False)
 
     tag = f"{task.id}/{agent_type}"
     log.info(f"  ▶ [{tag}] agent-{agent_num}")
