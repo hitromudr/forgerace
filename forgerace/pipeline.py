@@ -944,18 +944,21 @@ def run_pipeline(
                 discuss_create(topic, t.description, author="techlead")
                 link_task_discussion(t.id, topic)
                 log.info(f"  Создана дискуссия: {topic}")
-                print("[Claude думает...]")
-                discuss_reply(topic, "claude")
-                print("[Gemini думает...]")
-                discuss_reply(topic, "gemini")
+                for agent_name in cfg.agent_names:
+                    print(f"[{agent_name.capitalize()} думает...]")
+                    discuss_reply(topic, agent_name)
             print(f"\n{'═' * 60}")
             print(f"  {t.id}: {t.name}")
             print(f"  Обсуди подход и утверди через /ok")
             print(f"{'═' * 60}\n")
             discuss_chat(topic)
-            tasks = parse_tasks()
-            if is_task_approved(next((x for x in tasks if x.id == t.id), t)):
-                approved.append(t)
+
+        # После дискуссий — выходим. Пользователь запустит run отдельно.
+        log.info("Дискуссии завершены. Запусти ./fr run для выполнения задач.")
+        tasks = parse_tasks()
+        _print_next_steps(tasks, max_tasks, auto)
+        log.info("ForgeRace завершён")
+        os._exit(0)
 
     if not approved:
         log.info("Нет утверждённых задач для выполнения")

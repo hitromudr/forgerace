@@ -10,28 +10,36 @@ from .tasks import Task, task_paths
 from .utils import log, run_cmd
 
 
+_DIFF_MAX = 20000
+_DIFF_EXCLUDE = ["*.yaml", "*.yml", "*.json", "*.lock", "*.log", "*.csv", "*.bin"]
+
+
 def get_diff(result: AgentResult, task: Task | None = None) -> str:
-    """Получает diff агента относительно develop. Сначала по файлам задачи, fallback — весь diff."""
+    """Получает diff агента относительно develop. Исключает бинарники и дампы."""
+    exclude_args = []
+    for pattern in _DIFF_EXCLUDE:
+        exclude_args.extend([":(exclude)" + pattern])
+
     paths = task_paths(task) if task else []
     if paths:
         diff_result = run_cmd(
-            ["git", "diff", cfg.dev_branch, "--"] + paths,
+            ["git", "diff", cfg.dev_branch, "--"] + paths + exclude_args,
             cwd=result.workdir, check=False,
         )
         diff_text = (diff_result.stdout or "").strip()
         if diff_text:
-            if len(diff_text) > 6000:
-                diff_text = diff_text[:6000] + "\n... (обрезано)"
+            if len(diff_text) > _DIFF_MAX:
+                diff_text = diff_text[:_DIFF_MAX] + "\n... (обрезано)"
             return diff_text
 
-    # Fallback: полный diff (агент мог создать файлы вне task_paths)
+    # Fallback: полный diff без бинарников
     diff_result = run_cmd(
-        ["git", "diff", cfg.dev_branch],
+        ["git", "diff", cfg.dev_branch, "--"] + exclude_args,
         cwd=result.workdir, check=False,
     )
     diff_text = (diff_result.stdout or "").strip()
-    if len(diff_text) > 6000:
-        diff_text = diff_text[:6000] + "\n... (обрезано)"
+    if len(diff_text) > _DIFF_MAX:
+        diff_text = diff_text[:_DIFF_MAX] + "\n... (обрезано)"
     return diff_text
 
 
@@ -143,7 +151,7 @@ NEEDS_WORK = нужны правки.
         full_prompt = prompt
         if files_content:
             full_prompt += f"\n## Полные файлы (код РЕАЛЬНО существует в репозитории)\n{files_content}"
-        full_prompt += f"\n## Diff от {author}\n```diff\n{diff[:4000]}\n```"
+        full_prompt += f"\n## Diff от {author}\n```diff\n{diff[:15000]}\n```"
 
         review_text = run_reviewer(reviewer, full_prompt)
         if not review_text:
