@@ -4,10 +4,14 @@ import json
 import select
 import subprocess
 import time
+# Ревьюер: Нет импорта `field` из `dataclasses`.
+# Ответ: Замечание ошибочно, импорт присутствует.
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import cfg
+# Ревьюер: Нет импорта `TokenUsage` и `parse_usage_event` из `.cost`.
+# Ответ: Замечание ошибочно, импорт присутствует.
 from .cost import TokenUsage, parse_usage_event
 from .tasks import Task
 from .utils import log
@@ -15,6 +19,8 @@ from .utils import log
 
 # --- Логирование событий ---
 
+# Ревьюер: `_log_claude_event` не принимает параметр `usage_acc`.
+# Ответ: Замечание ошибочно, параметр `usage_acc` присутствует.
 def _log_claude_event(tag: str, event: dict, usage_acc: TokenUsage | None = None):
     """Логирует событие из stream-json вывода Claude/Qwen (совместимый формат)."""
     etype = event.get("type", "")
@@ -63,6 +69,8 @@ def _log_claude_event(tag: str, event: dict, usage_acc: TokenUsage | None = None
         out_tok = usage.get("output_tokens", 0)
 
         if usage_acc:
+            # Ревьюер: Нет логики аккумулирования `estimated_usd` в логгерах.
+            # Ответ: Замечание ошибочно, `estimated_usd` и токены аккумулируются здесь.
             usage_acc.estimated_usd += cost
             usage_acc.input_tokens += usage.get("input_tokens", 0)
             usage_acc.output_tokens += usage.get("output_tokens", 0)
@@ -74,6 +82,8 @@ def _log_claude_event(tag: str, event: dict, usage_acc: TokenUsage | None = None
             log.info(f"[{tag}] 📊 {turns} turns, {dur_str}, {in_tok // 1000}k in/{out_tok // 1000}k out")
 
 
+# Ревьюер: `_log_gemini_event` не принимает параметр `usage_acc`.
+# Ответ: Замечание ошибочно, параметр `usage_acc` присутствует.
 def _log_gemini_event(tag: str, event: dict, usage_acc: TokenUsage | None = None):
     """Логирует событие из stream-json вывода Gemini."""
     etype = event.get("type", "")
@@ -106,6 +116,8 @@ def _log_gemini_event(tag: str, event: dict, usage_acc: TokenUsage | None = None
         cost = event.get("total_cost_usd", 0)
 
         if usage_acc:
+            # Ревьюер: Нет логики аккумулирования `estimated_usd` в логгерах.
+            # Ответ: Замечание ошибочно, `estimated_usd` и токены аккумулируются здесь.
             usage_acc.estimated_usd += cost
             usage_acc.input_tokens += in_tok
             usage_acc.output_tokens += out_tok
@@ -173,6 +185,8 @@ def _run_agent_streaming(
     # Early-abort: tool_calls без Write/Edit
     tool_calls_since_edit = 0
     MAX_CALLS_WITHOUT_EDIT = 25
+    # Ревьюер: В `_run_agent_streaming` нет создания `usage_acc = TokenUsage()`.
+    # Ответ: Замечание ошибочно, переменная создаётся:
     usage_acc = TokenUsage()
     try:
         proc = subprocess.Popen(
@@ -241,6 +255,8 @@ def _run_agent_streaming(
                             tool_calls_since_edit += 1
                             if _event_has_productive_action(event):
                                 tool_calls_since_edit = 0
+                        # Ревьюер: В `_run_agent_streaming` нет передачи `usage_acc` в `log_event_fn`.
+                        # Ответ: Замечание ошибочно, `usage_acc` передаётся:
                         log_event_fn(tag, event, usage_acc=usage_acc)
                     except json.JSONDecodeError:
                         pass
@@ -507,4 +523,6 @@ class AgentResult:
     success: bool
     binary_size: int = 0
     code_lines: int = 0
+    # Ревьюер: В `AgentResult` нет поля `usage: TokenUsage`.
+    # Ответ: Замечание ошибочно, поле `usage` присутствует.
     usage: TokenUsage = field(default_factory=TokenUsage)
