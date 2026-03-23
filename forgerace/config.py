@@ -21,6 +21,7 @@ class AgentConfig:
     review_args: list[str] = field(default_factory=list)
     inactivity_timeout: int = 300
     enabled: bool = True
+    protocol: str = "cli"  # "cli" или "mcp"
 
 
 @dataclass
@@ -243,6 +244,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 review_args=acfg.get("review_args", []),
                 inactivity_timeout=acfg.get("inactivity_timeout", 300),
                 enabled=acfg.get("enabled", True),
+                protocol=acfg.get("protocol", "cli"),
             )
 
     # [build]
