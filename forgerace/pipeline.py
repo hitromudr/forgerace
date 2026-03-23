@@ -19,6 +19,7 @@ from .tasks import (
     parse_tasks, task_paths, topic_for_task, translate_slug,
     update_task_status, link_task_discussion,
 )
+from .task_queue import TaskQueue
 from .utils import log, run_cmd, is_valid_path, C, R, agent_color
 from .worktree import cleanup_worktrees, create_worktree, remove_worktree
 
