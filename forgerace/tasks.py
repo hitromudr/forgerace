@@ -160,7 +160,7 @@ def is_task_approved(task: Task) -> bool:
 
 def find_ready_tasks(tasks: list[Task]) -> list[Task]:
     """Находит задачи, которые можно взять (open + зависимости done)."""
-    done_ids = {t.id for t in tasks if t.status == "done"}
+    done_ids = {t.id for t in tasks if t.status in ("done", "skip")}
     ready = []
     for t in tasks:
         if t.status != "open":

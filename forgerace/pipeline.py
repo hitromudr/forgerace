@@ -957,7 +957,7 @@ def run_pipeline(
                 break  # проверяем один раз
 
     tasks = parse_tasks()
-    done_count = sum(1 for t in tasks if t.status == "done")
+    done_count = sum(1 for t in tasks if t.status in ("done", "skip"))
     open_count = len(tasks) - done_count
     log.info(f"Задачи: {open_count} активных, {done_count} завершённых")
 
