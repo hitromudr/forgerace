@@ -97,7 +97,7 @@ COMPLEXITY: N
 
     log.info(f"  🔍 Оценка сложности {task.id}...")
     from .agents import run_text_agent
-    output = run_text_agent(prompt, timeout=120)
+    output = run_text_agent(prompt, timeout=120, tag=task.id)
 
     complexity_match = re.search(r"COMPLEXITY:\s*(\d)", output)
     if not complexity_match:

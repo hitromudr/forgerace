@@ -408,7 +408,7 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     return (result.stdout or "").strip()
 
 
-def run_text_agent(prompt: str, timeout: int = 300) -> str:
+def run_text_agent(prompt: str, timeout: int = 300, tag: str = "") -> str:
     """Вызывает рандомного доступного агента в text mode. Для системных задач (декомпозиция, резолюция)."""
     import random
     names = list(cfg.agent_names)
@@ -432,6 +432,8 @@ def run_text_agent(prompt: str, timeout: int = 300) -> str:
                 )
             text = (result.stdout or "").strip()
             if text:
+                if tag:
+                    log.info(f"  [{tag}] → {name}")
                 return text
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             continue
