@@ -61,15 +61,15 @@ class Config:
     })
 
     # --- Команды сборки ---
-    build_commands: list[list[str]] = field(default_factory=lambda: [
-        ["cargo", "build"],
-        ["cargo", "test", "--no-run"],
-    ])
-    check_command: str = "make check"
+    build_commands: list[list[str]] = field(default_factory=list)
+    check_command: str = ""
 
     # --- Метрики: бинарники ---
-    binary_glob_dir: str = "target/x86_64-unknown-none/debug"
-    binary_globs: list[str] = field(default_factory=lambda: ["*.bin", "ethos*"])
+    binary_glob_dir: str = ""
+    binary_globs: list[str] = field(default_factory=list)
+
+    # --- Опции ---
+    review_run_log: bool = False
 
     # --- Текстовые контексты ---
     project_context: str = ""
@@ -241,6 +241,8 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     for key in ("max_parallel_tasks", "agent_timeout", "max_review_rounds", "max_task_complexity", "progress_timeout"):
         if key in limits:
             setattr(cfg, key, limits[key])
+    if "review_run_log" in limits:
+        cfg.review_run_log = limits["review_run_log"]
 
     # [rules]
     rules = data.get("rules", {})

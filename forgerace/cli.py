@@ -344,10 +344,16 @@ def main():
     # os._exit(0) вызывается внутри run_pipeline
 
 
+def _restore_terminal():
+    """Восстанавливает терминал после агентов, которые могут сломать stty."""
+    os.system("stty sane 2>/dev/null")
+
+
 def main_with_signal_handling():
     """Entry point с обработкой сигналов."""
     def _force_exit(*_):
         print("\nПрервано. Убиваю дочерние процессы...")
+        _restore_terminal()
         try:
             os.killpg(os.getpgid(os.getpid()), 9)
         except ProcessLookupError:
@@ -360,4 +366,7 @@ def main_with_signal_handling():
         signal.signal(signal.SIGINT, _force_exit)
         signal.signal(signal.SIGTERM, _force_exit)
         os.setpgrp()  # после handler — чтобы SIGINT между ними не потерялся
-    main()
+    try:
+        main()
+    finally:
+        _restore_terminal()

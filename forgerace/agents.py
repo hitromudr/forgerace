@@ -470,5 +470,4 @@ class AgentResult:
     workdir: Path
     success: bool
     binary_size: int = 0
-    unsafe_count: int = 0
     code_lines: int = 0

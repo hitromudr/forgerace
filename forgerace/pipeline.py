@@ -157,21 +157,7 @@ def verify_design_task(workdir: Path, task: Task) -> tuple[bool, str]:
 
 def collect_metrics(workdir: Path, task: Task) -> dict:
     """Собирает метрики реализации."""
-    metrics = {"binary_size": 0, "unsafe_count": 0, "code_lines": 0}
-
-    task_files = []
-    for files_str in (task.files_new, task.files_modify):
-        if files_str and files_str.strip() != "—":
-            for f in files_str.split(","):
-                f = re.sub(r"\s*\(.*?\)", "", f).strip()
-                if f and is_valid_path(f):
-                    task_files.append(f)
-
-    for f in task_files:
-        filepath = workdir / f
-        if filepath.exists() and filepath.is_file():
-            content = filepath.read_text(encoding="utf-8", errors="ignore")
-            metrics["unsafe_count"] += content.count("unsafe")
+    metrics = {"binary_size": 0, "code_lines": 0}
 
     # Считаем lines: сначала по файлам задачи, fallback — весь diff
     paths = task_paths(task) if task else []
@@ -191,8 +177,8 @@ def collect_metrics(workdir: Path, task: Task) -> dict:
         if metrics["code_lines"] > 0:
             break
 
-    target_dir = workdir / cfg.binary_glob_dir
-    if target_dir.exists():
+    target_dir = workdir / cfg.binary_glob_dir if cfg.binary_glob_dir else None
+    if target_dir and target_dir.exists():
         bins = []
         for pattern in cfg.binary_globs:
             bins.extend(target_dir.glob(pattern))
@@ -331,7 +317,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 continue
 
             passed.append(result)
-            log.info(f"[{task.id}/{result.agent_type}] unsafe={result.unsafe_count}, lines={result.code_lines}, bin={result.binary_size}")
+            log.info(f"[{task.id}/{result.agent_type}] lines={result.code_lines}, bin={result.binary_size}")
 
             # Race: первый финишировавший → ревью ВСЕМИ остальными
             reviewers = [n for n in agent_names if n != result.agent_type]
@@ -393,7 +379,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
         return False
 
     for r in passed:
-        log.info(f"[{task.id}/{r.agent_type}] unsafe={r.unsafe_count}, lines={r.code_lines}, bin={r.binary_size}")
+        log.info(f"[{task.id}/{r.agent_type}] lines={r.code_lines}, bin={r.binary_size}")
 
     # Цикл: ревью → доработка
     best_result = None
@@ -518,7 +504,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         cleanup_worktrees([result])
         return False
 
-    log.info(f"[{task.id}/{result.agent_type}] unsafe={result.unsafe_count}, lines={result.code_lines}, bin={result.binary_size}")
+    log.info(f"[{task.id}/{result.agent_type}] lines={result.code_lines}, bin={result.binary_size}")
 
     all_agent_names = cfg.agent_names
     reviewer = next((n for n in all_agent_names if n != agent_type), agent_type)
@@ -617,7 +603,7 @@ def _escalate_review_stall(task: Task, results: list, last_rv: dict):
     for r in results:
         color = agent_color(r.agent_type)
         print(f"  {color}{C['bold']}@{r.agent_type}{R}:")
-        print(f"    Файлов изменено: {r.code_lines} строк, unsafe={r.unsafe_count}")
+        print(f"    Файлов изменено: {r.code_lines} строк")
         if r.branch:
             print(f"    Ветка: {C['dim']}{r.branch}{R}")
 
@@ -1011,7 +997,7 @@ def run_pipeline(
         log.info("Нет задач для выполнения (все декомпозированы, ждут зависимости)")
         return
 
-    # Pre-check ДО параллелизации — последовательно, без конфликтов cargo lock
+    # Pre-check ДО параллелизации — последовательно
     actually_ready = []
     for t in ready:
         if check_already_done(t):
@@ -1053,7 +1039,8 @@ def run_pipeline(
                 log.error(f"■ {task.id} → ОШИБКА: {e}")
                 update_task_status(task.id, "blocked")
 
-    review_run_log()
+    if cfg.review_run_log:
+        review_run_log()
 
     # Коммитим статусы
     status_diff = run_cmd(["git", "diff", "--stat", "TASKS.md"], cwd=cfg.root_dir, check=False)
@@ -1066,4 +1053,5 @@ def run_pipeline(
     _print_next_steps(tasks, max_tasks, auto)
 
     log.info("ForgeRace завершён")
+    os.system("stty sane 2>/dev/null")
     os._exit(0)
