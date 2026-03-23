@@ -46,6 +46,9 @@ class Config:
     discuss_dir_rel: str = "docs/discuss"
     agents_dir_rel: str = ".agents"
 
+    # --- Режим ---
+    mode: str = "competitive"  # competitive | distributed
+
     # --- Лимиты ---
     max_retries: int = 3
     max_parallel_tasks: int = 10
@@ -271,6 +274,8 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
         cfg.tasks_file_rel = proj["tasks_file"]
     if "discuss_dir" in proj:
         cfg.discuss_dir_rel = proj["discuss_dir"]
+    if "mode" in proj:
+        cfg.mode = proj["mode"]
 
     # [agents.*]
     agents_data = data.get("agents", {})

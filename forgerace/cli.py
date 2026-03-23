@@ -218,10 +218,58 @@ def merge_pending_tasks():
 
 def _cmd_agents_list():
     """Показывает всех агентов и их статус."""
+    mode_color = C['cyan'] if cfg.mode == "competitive" else C['magenta']
+    print(f"  Режим: {mode_color}{C['bold']}{cfg.mode}{R}")
+    print()
     for name, acfg in cfg.agents.items():
         status = f"{C['green']}ON{R}" if acfg.enabled else f"{C['red']}OFF{R}"
         print(f"  {C['bold']}{name}{R}: {status}  ({acfg.command})")
     print(f"\n  Активные: {C['bold']}{cfg.agent_names}{R}")
+
+
+def _cmd_mode(mode_name: str):
+    """Переключает режим competitive/distributed в forgerace.toml."""
+    if mode_name not in ("competitive", "distributed"):
+        print(f"  {C['red']}Неизвестный режим '{mode_name}'. Доступные: competitive, distributed{R}")
+        return
+
+    toml_path = cfg.root_dir / "forgerace.toml"
+    if not toml_path.exists():
+        print(f"  {C['red']}forgerace.toml не найден{R}")
+        return
+
+    content = toml_path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+
+    # Ищем mode = ... в [project]
+    mode_idx = None
+    project_end = len(lines)
+    in_project = False
+    for i, line in enumerate(lines):
+        if line.strip() == "[project]":
+            in_project = True
+            continue
+        if in_project and line.strip().startswith("["):
+            project_end = i
+            break
+        if in_project and line.strip().startswith("mode"):
+            mode_idx = i
+
+    if mode_idx is not None:
+        lines[mode_idx] = f'mode = "{mode_name}"'
+    else:
+        # Вставляем перед концом [project]
+        lines.insert(project_end, f'mode = "{mode_name}"')
+
+    toml_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    init_config(config_path=toml_path)
+
+    mode_color = C['cyan'] if mode_name == "competitive" else C['magenta']
+    print(f"  Режим: {mode_color}{C['bold']}{mode_name}{R}")
+    if mode_name == "competitive":
+        print(f"  Все агенты на каждую задачу, race-to-merge")
+    else:
+        print(f"  Задачи распределяются по агентам round-robin")
 
 
 def _cmd_agent_toggle(agent_name: str, enable: bool):
@@ -303,10 +351,13 @@ def _print_full_help():
 
   Команды чата: /claude, /gemini, /qwen, /all, /both, /ok, /exit
 
-{C['yellow']}АГЕНТЫ:{R}
+{C['yellow']}АГЕНТЫ И РЕЖИМ:{R}
   ./fr agents                            Список агентов и статус (ON/OFF)
   ./fr agents off claude                 Выключить claude
   ./fr agents on claude                  Включить обратно
+  ./fr mode                              Текущий режим
+  ./fr mode competitive                  Все агенты на каждую задачу (race)
+  ./fr mode distributed                  Задачи раскидываются по агентам
 
 {C['yellow']}СТАТУС И МЕРЖ:{R}
   ./fr status                            Статус задач + граф зависимостей
@@ -392,6 +443,15 @@ def main():
     agents_off = agents_sub.add_parser("off", help="Выключить агента")
     agents_off.add_argument("agent_name", help="Имя агента (claude, gemini, qwen)")
 
+    # mode
+    mode_p = sub.add_parser("mode", help="Режим: competitive или distributed",
+        epilog="Примеры:\n"
+               "  ./fr mode                   показать текущий режим\n"
+               "  ./fr mode competitive       все агенты на каждую задачу\n"
+               "  ./fr mode distributed       задачи раскидываются по агентам\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    mode_p.add_argument("mode_name", nargs="?", help="competitive | distributed")
+
     # init
     sub.add_parser("init", help="Создать forgerace.toml и TASKS.md")
 
@@ -455,6 +515,15 @@ def main():
             _cmd_agent_toggle(args.agent_name, True)
         elif args.agents_cmd == "off":
             _cmd_agent_toggle(args.agent_name, False)
+        return
+
+    # mode
+    if args.command == "mode":
+        if args.mode_name:
+            _cmd_mode(args.mode_name)
+        else:
+            mode_color = C['cyan'] if cfg.mode == "competitive" else C['magenta']
+            print(f"  Режим: {mode_color}{C['bold']}{cfg.mode}{R}")
         return
 
     # merge-pending

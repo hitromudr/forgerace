@@ -1072,15 +1072,24 @@ def run_pipeline(
     batch = ready[:max_tasks]
     agent_names = cfg.agent_names
 
-    # Все задачи — конкурентный режим (все модели на каждую задачу)
-    total_procs = len(batch) * len(agent_names)
-    log.info(f"Запускаю: {len(batch)} задач × {len(agent_names)} агентов = {total_procs} процессов")
+    is_competitive = cfg.mode == "competitive"
+    if is_competitive:
+        total_procs = len(batch) * len(agent_names)
+        log.info(f"Режим: конкурентный — {len(batch)} задач × {len(agent_names)} агентов = {total_procs} процессов")
+    else:
+        total_procs = len(batch)
+        log.info(f"Режим: распределённый — {len(batch)} задач, агенты: {agent_names}")
 
     with ThreadPoolExecutor(max_workers=max(total_procs, 1)) as pool:
         futures = {}
         for idx, task in enumerate(batch, 1):
-            log.info(f"  {task.id} → конкурентный ({' vs '.join(agent_names)})")
-            future = pool.submit(execute_task_competitive, task, idx)
+            if is_competitive:
+                log.info(f"  {task.id} → конкурентный ({' vs '.join(agent_names)})")
+                future = pool.submit(execute_task_competitive, task, idx)
+            else:
+                agent = agent_names[(idx - 1) % len(agent_names)]
+                log.info(f"  {task.id} → {agent}")
+                future = pool.submit(execute_task_single, task, idx, agent)
             futures[future] = task
 
         for future in as_completed(futures):
