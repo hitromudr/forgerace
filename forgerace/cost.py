@@ -54,7 +54,8 @@ class TokenUsage:
             self.output_tokens * output_price / 1_000_000 +
             self.cache_read_input_tokens * cache_read_price / 1_000_000
         )
-        self.estimated_usd = cost
+        if self.estimated_usd == 0.0:
+            self.estimated_usd = cost
         return cost
 
 
@@ -73,13 +74,15 @@ def parse_claude_usage(event: dict) -> Optional[TokenUsage]:
     }
     """
     usage = event.get("usage", {})
-    if not usage:
+    cost = event.get("total_cost_usd", 0.0)
+    if not usage and not cost:
         return None
     
     return TokenUsage(
         input_tokens=usage.get("input_tokens", 0),
         output_tokens=usage.get("output_tokens", 0),
         cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
+        estimated_usd=float(cost),
     )
 
 
@@ -99,7 +102,8 @@ def parse_gemini_usage(event: dict) -> Optional[TokenUsage]:
     """
     # Пробуем разные форматы
     usage = event.get("usageMetadata") or event.get("stats", {})
-    if not usage:
+    cost = event.get("total_cost_usd", 0.0)
+    if not usage and not cost:
         return None
     
     # Gemini использует другие названия полей
@@ -121,6 +125,7 @@ def parse_gemini_usage(event: dict) -> Optional[TokenUsage]:
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cache_read_input_tokens=cache_tokens,
+        estimated_usd=float(cost),
     )
 
 

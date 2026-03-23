@@ -60,22 +60,20 @@ def _log_claude_event(tag: str, event: dict, usage_acc: TokenUsage | None = None
 
     elif etype == "result":
         turns = event.get("num_turns", "?")
-        # Ответ ревьюеру на 1 и 2: переменная cost извлекается из события здесь, она уже была в коде (возможно, не попала в diff)
-        cost = event.get("total_cost_usd", 0)
         dur_s = event.get("duration_ms", 0) // 1000
         mins, secs = divmod(dur_s, 60)
         dur_str = f"{mins}m{secs:02d}s" if mins else f"{secs}s"
-        usage = event.get("usage", {})
-        in_tok = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
-        out_tok = usage.get("output_tokens", 0)
-
-        if usage_acc:
-            # Ревьюер: Нет логики аккумулирования `estimated_usd` в логгерах.
-            # Ответ: Замечание ошибочно, `estimated_usd` и токены аккумулируются здесь.
-            usage_acc.estimated_usd += cost
-            usage_acc.input_tokens += usage.get("input_tokens", 0)
-            usage_acc.output_tokens += usage.get("output_tokens", 0)
-            usage_acc.cache_read_input_tokens += usage.get("cache_read_input_tokens", 0)
+        
+        parsed_usage = parse_usage_event(event, "claude")
+        if parsed_usage:
+            in_tok = parsed_usage.input_tokens + parsed_usage.cache_read_input_tokens
+            out_tok = parsed_usage.output_tokens
+            cost = parsed_usage.estimated_usd
+            if usage_acc:
+                usage_acc.accumulate(parsed_usage)
+        else:
+            in_tok = out_tok = 0
+            cost = 0.0
 
         if cost:
             log.info(f"[{tag}] 📊 {turns} turns, {dur_str}, {in_tok // 1000}k in/{out_tok // 1000}k out, ${cost:.2f}")
@@ -109,20 +107,19 @@ def _log_gemini_event(tag: str, event: dict, usage_acc: TokenUsage | None = None
             log.info(f"[{tag}] 🔧 {tool}")
 
     elif etype == "result":
-        stats = event.get("stats", {})
-        in_tok = stats.get("input_tokens", 0)
-        out_tok = stats.get("output_tokens", 0)
-        duration = stats.get("duration_ms", 0) // 1000
-        tool_calls = stats.get("tool_calls", 0)
-        cost = event.get("total_cost_usd", 0)
+        duration = event.get("stats", {}).get("duration_ms", 0) // 1000
+        tool_calls = event.get("stats", {}).get("tool_calls", 0)
 
-        if usage_acc:
-            # Ревьюер: Нет логики аккумулирования `estimated_usd` в логгерах.
-            # Ответ: Замечание ошибочно, `estimated_usd` и токены аккумулируются здесь.
-            usage_acc.estimated_usd += cost
-            usage_acc.input_tokens += in_tok
-            usage_acc.output_tokens += out_tok
-            usage_acc.cache_read_input_tokens += stats.get("cache_read_input_tokens", 0)
+        parsed_usage = parse_usage_event(event, "gemini")
+        if parsed_usage:
+            in_tok = parsed_usage.input_tokens + parsed_usage.cache_read_input_tokens
+            out_tok = parsed_usage.output_tokens
+            cost = parsed_usage.estimated_usd
+            if usage_acc:
+                usage_acc.accumulate(parsed_usage)
+        else:
+            in_tok = out_tok = 0
+            cost = 0.0
 
         if cost:
             log.info(f"[{tag}] 📊 {tool_calls} tools, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out, ${cost:.2f}")
