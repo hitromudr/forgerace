@@ -84,13 +84,23 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
     """Один ревьюер проверяет одного автора. Запускается как полноценный агент в worktree автора."""
     from pathlib import Path
 
+    # Предупреждение о раздутом diff
+    diff_lines = diff.count("\n")
+    bloat_warning = ""
+    if diff_lines > 300:
+        bloat_warning = f"""
+⚠ ВНИМАНИЕ: diff содержит {diff_lines} строк — это подозрительно много.
+Проверь: агент мог ПЕРЕПИСАТЬ файлы целиком вместо точечных правок.
+Если агент удалил/заменил существующий код без необходимости — это NEEDS_WORK.
+"""
+
     prompt = f"""Ты ревьюер кода. Ты проверяешь реализацию агента {author} для задачи {task.id}.
 
 ## Задача
 {task.id} — {task.name}
 Описание: {task.description}
 Критерий готовности: {task.acceptance}
-
+{bloat_warning}
 ## Что делать
 1. Прочитай изменённые файлы (используй Read/Grep/Glob).
 2. Проверь что код РЕАЛЬНО написан и соответствует задаче.

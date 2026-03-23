@@ -330,6 +330,8 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
 
             passed.append(result)
             log.info(f"[{task.id}/{result.agent_type}] lines={result.code_lines}, bin={result.binary_size}")
+            if result.code_lines > 500:
+                log.warning(f"[{task.id}/{result.agent_type}] ⚠ раздутый diff ({result.code_lines} строк) — возможно переписал файлы целиком")
 
             # Race: первый финишировавший → ревью ВСЕМИ остальными
             reviewers = [n for n in agent_names if n != result.agent_type]
