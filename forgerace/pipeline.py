@@ -11,6 +11,7 @@ from typing import Optional
 
 from .agents import AgentResult, build_prompt, run_agent_process
 from .config import cfg, run_hint, run_hook
+from .cost import TokenUsage
 from .decompose import assess_and_maybe_decompose, create_checkpoint_task
 from .merge import ensure_develop_branch, merge_to_develop
 from .review import code_review, get_changed_files, get_diff, send_to_rework, single_review
@@ -189,6 +190,25 @@ def collect_metrics(workdir: Path, task: Task) -> dict:
     return metrics
 
 
+def _get_usage_cost(usage: TokenUsage, agent_type: str) -> float:
+    """Считает стоимость в USD на основе типа агента."""
+    p = cfg.pricing
+    # Если стоимость уже посчитана (пришла из API), возвращаем её
+    if usage.estimated_usd > 0:
+        return usage.estimated_usd
+
+    # Иначе считаем по тарифам из конфига
+    if agent_type == "gemini":
+        return usage.calc_cost(p.gemini_input, p.gemini_output)
+    # Claude, Qwen and others
+    return usage.calc_cost(p.claude_input, p.claude_output)
+
+
+def _log_total_cost(task_id: str, results: list[AgentResult]):
+    total_cost = sum(_get_usage_cost(r.usage, r.agent_type) for r in results)
+    log.info(f"[{task_id}] Итоговая стоимость: ${total_cost:.2f}")
+
+
 # --- Запуск одного агента ---
 
 def run_single_agent(task: Task, agent_num: int, agent_type: str,
@@ -210,7 +230,6 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
 
     is_design = task.files_new.startswith("docs/")
     error_log = ""
-    from .cost import TokenUsage
     total_usage = TokenUsage()
 
     for attempt in range(1, cfg.max_retries + 1):
@@ -277,6 +296,8 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
             log.info(f"[{tag}] ✓ сборка пройдена")
             _unregister_agent(tag)
             metrics = collect_metrics(workdir, task)
+            cost = _get_usage_cost(total_usage, agent_type)
+            log.info(f"[{tag}] Стоимость: ${cost:.2f}")
             return AgentResult(
                 agent_type=agent_type, branch=branch, workdir=workdir,
                 success=True, usage=total_usage, **metrics,
@@ -287,9 +308,13 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
     # Проверяем: был ли агент отменён — тогда тихо выходим (уже залогировано в retry loop)
     if cancel_event and cancel_event.is_set():
         _unregister_agent(tag)
+        cost = _get_usage_cost(total_usage, agent_type)
+        log.info(f"[{tag}] Стоимость: ${cost:.2f}")
         return AgentResult(agent_type=agent_type, branch=branch, workdir=workdir, success=False, usage=total_usage)
     log.error(f"[{tag}] ✗ BLOCKED после {cfg.max_retries} попыток")
     _unregister_agent(tag)
+    cost = _get_usage_cost(total_usage, agent_type)
+    log.info(f"[{tag}] Стоимость: ${cost:.2f}")
     return AgentResult(agent_type=agent_type, branch=branch, workdir=workdir, success=False, usage=total_usage)
 
 
@@ -397,6 +422,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
 
     # Все futures завершены — cleanup worktree безопасен
     if race_winner:
+        _log_total_cost(task.id, all_results)
         cleanup_worktrees(all_results)
         return True
 
@@ -411,6 +437,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             log.error(f"[{task.id}] ✗ ни один агент не написал рабочий код → BLOCKED")
         update_task_status(task.id, "blocked")
         run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+        _log_total_cost(task.id, all_results)
         cleanup_worktrees(all_results)
         return False
 
@@ -429,6 +456,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             log.error(f"[{task.id}] ✗ Ревью не удалось: {rv.get('reason', '?')}")
             update_task_status(task.id, "blocked")
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+            _log_total_cost(task.id, all_results)
             cleanup_worktrees(all_results)
             return False
 
@@ -444,6 +472,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             log.error(f"[{task.id}] ✗ Ревьюер выбрал '{best_name}', но такого агента нет")
             update_task_status(task.id, "blocked")
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+            _log_total_cost(task.id, all_results)
             cleanup_worktrees(all_results)
             return False
 
@@ -460,6 +489,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 _escalate_review_stall(task, passed, rv)
                 update_task_status(task.id, "blocked")
                 run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+                _log_total_cost(task.id, all_results)
                 cleanup_worktrees(all_results)
                 return False
         else:
@@ -506,6 +536,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             log.error(f"[{task.id}] ✗ не прошёл ревью за {cfg.max_review_rounds}+1 раундов → BLOCKED")
             update_task_status(task.id, "blocked")
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+            _log_total_cost(task.id, all_results)
             cleanup_worktrees(all_results)
             return False
 
@@ -521,6 +552,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
         run_hook(cfg.hook_on_complete, task.id, f"review:{best_result.agent_type}", best_result.agent_type)
         log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
 
+    _log_total_cost(task.id, all_results)
     cleanup_worktrees(all_results)
     return True
 
@@ -545,6 +577,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         log.error(f"[{task.id}/{agent_type}] ✗ не написал код → BLOCKED")
         update_task_status(task.id, "blocked")
         run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+        _log_total_cost(task.id, [result])
         cleanup_worktrees([result])
         return False
 
@@ -557,6 +590,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         log.error(f"[{task.id}] ✗ пустой diff → BLOCKED")
         update_task_status(task.id, "blocked")
         run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+        _log_total_cost(task.id, [result])
         cleanup_worktrees([result])
         return False
 
@@ -585,6 +619,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
                 _escalate_review_stall(task, [best_result], rv)
                 update_task_status(task.id, "blocked")
                 run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+                _log_total_cost(task.id, [result])
                 cleanup_worktrees([result])
                 return False
         else:
@@ -606,6 +641,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
             log.error(f"[{task.id}] ✗ не прошёл ревью → BLOCKED")
             update_task_status(task.id, "blocked")
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+            _log_total_cost(task.id, [result])
             cleanup_worktrees([result])
             return False
         log.info(f"[{task.id}] ✅ Ревью пройдено (финал): {agent_type}")
@@ -621,6 +657,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         run_hook(cfg.hook_on_complete, task.id, f"review:{agent_type}", agent_type)
         log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
 
+    _log_total_cost(task.id, [result])
     cleanup_worktrees([result])
     return True
 
