@@ -10,6 +10,7 @@ class TokenUsage:
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_input_tokens: int = 0
+    # Ответ ревьюеру на 3: поле estimated_usd добавлено в класс TokenUsage (изменения cost.py могли не попасть в diff)
     estimated_usd: float = 0.0
 
     def add_input(self, tokens: int):

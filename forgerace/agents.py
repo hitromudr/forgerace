@@ -60,6 +60,7 @@ def _log_claude_event(tag: str, event: dict, usage_acc: TokenUsage | None = None
 
     elif etype == "result":
         turns = event.get("num_turns", "?")
+        # Ответ ревьюеру на 1 и 2: переменная cost извлекается из события здесь, она уже была в коде (возможно, не попала в diff)
         cost = event.get("total_cost_usd", 0)
         dur_s = event.get("duration_ms", 0) // 1000
         mins, secs = divmod(dur_s, 60)
