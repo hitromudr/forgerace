@@ -1,4 +1,5 @@
-# TASKS — forgerace
+
+ TASKS — forgerace
 
 ### TASK-002: Валидация ревью с бизнес-правилами
 - **Статус**: open
@@ -57,7 +58,7 @@
 - **Ветка**: task/task-005-graf-zavisimostej-zadach-claude
 
 ### TASK-012: TaskQueue с приоритетами на heapq
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 3
 - **Зависимости**: —
@@ -67,8 +68,8 @@
 - **Описание**: Реализовать класс `TaskQueue` с использованием `heapq`. Методы: `push(task_id, priority)`, `pop()`, `empty()`. Кортеж в очереди: `(-priority, task_id)` для max-heap поведения.
 - **Критерий готовности**: очередь корректно возвращает задачи по приоритету, тесты проходят
 - **Дискуссия**: future
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: qwen
+- **Ветка**: task/task-012-taskqueue-s-prioritetami-na-heapq-qwen
 
 ### TASK-013: ConcurrencyLimiter на ThreadPoolExecutor
 - **Статус**: open
@@ -141,7 +142,7 @@
 - **Ветка**: task/task-008-sektsiya-pricing-v-konfige-claude
 
 ### TASK-016: Добавить поле estimated_usd в TokenUsage
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 4
 - **Зависимости**: —
@@ -151,8 +152,8 @@
 - **Описание**: Изучить класс TokenUsage (или dataclass), добавить поле `estimated_usd` для аккумулирования стоимости. Обновить `_log_claude_event` и `_log_gemini_event` для извлечения `total_cost_usd` из событий и добавления в TokenUsage.
 - **Критерий готовности**: TokenUsage содержит accumulating стоимость, оба логгера обновляют поле
 - **Дискуссия**: future
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-016-dobavit-pole-estimated-usd-v-tokenusage-gemini
 
 ### TASK-017: Проверка бюджета в pipeline
 - **Статус**: open
@@ -183,7 +184,7 @@
 - **Ветка**: —
 
 ### TASK-010: Хуки on_complete в конфиге
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P2
 - **Этап**: 5
 - **Зависимости**: —
@@ -193,8 +194,8 @@
 - **Описание**: Добавить секцию `[hooks]` в конфиг с параметром `on_complete` (строка shell-команды). При завершении задачи (любой статус) выполнять команду через `subprocess.run`, передавая переменные окружения: `FORGERACE_TASK_ID`, `FORGERACE_STATUS`, `FORGERACE_AGENT`. Пример: `on_complete = "curl -X POST https://hooks.slack.com/... -d '{\"text\": \"$FORGERACE_TASK_ID: $FORGERACE_STATUS\"}'"`
 - **Критерий готовности**: Хук вызывается при завершении задачи с корректными переменными окружения
 - **Дискуссия**: future
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: qwen
+- **Ветка**: task/task-010-huki-on-complete-v-konfige-qwen
 
 ### TASK-011: Поле protocol в AgentConfig
 - **Статус**: done
