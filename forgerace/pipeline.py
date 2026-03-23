@@ -1027,14 +1027,17 @@ def run_pipeline(
             log.info(f"[DRY RUN] {t.id} ({t.name})")
         return
 
-    # Декомпозиция (мутирует TASKS.md — только при реальном запуске)
+    # Декомпозиция — параллельно для всех задач
     final_ready = []
     decomposed = False
-    for t in approved:
-        if assess_and_maybe_decompose(t):
-            decomposed = True
-        else:
-            final_ready.append(t)
+    with ThreadPoolExecutor(max_workers=len(approved)) as pool:
+        futures = {pool.submit(assess_and_maybe_decompose, t): t for t in approved}
+        for f in as_completed(futures):
+            t = futures[f]
+            if f.result():
+                decomposed = True
+            else:
+                final_ready.append(t)
 
     if decomposed:
         tasks = parse_tasks()
