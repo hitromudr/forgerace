@@ -1,5 +1,7 @@
 """Конфигурация ForgeRace — загрузка из TOML с дефолтами."""
 
+import os
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -91,6 +93,9 @@ class Config:
     # --- Опции ---
     review_run_log: bool = False
 
+    # --- Хуки ---
+    hook_on_complete: str = ""
+
     # --- Текстовые контексты ---
     project_context: str = ""
     discuss_context: str = ""
@@ -145,6 +150,40 @@ def run_hint() -> str:
     if _config_path:
         base += f" --config {_config_path}"
     return base + " run"
+
+
+def run_hook(hook_command: str, task_id: str, status: str, agent: str):
+    """Выполняет хук с переменными окружения FORGERACE_*.
+    
+    Args:
+        hook_command: shell-команда из конфига
+        task_id: ID задачи (например, TASK-001)
+        status: статус задачи (done, blocked, review:...)
+        agent: имя агента, выполнившего задачу
+    """
+    if not hook_command:
+        return
+    
+    env = {
+        **os.environ,
+        "FORGERACE_TASK_ID": task_id,
+        "FORGERACE_STATUS": status,
+        "FORGERACE_AGENT": agent,
+    }
+    
+    try:
+        subprocess.run(
+            hook_command,
+            shell=True,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        pass  # хук таймаутился — не блокируем пайплайн
+    except Exception:
+        pass  # ошибка хука — логгируем, но не блокируем
 
 
 _LAST_CONFIG_FILE = Path.home() / ".forgerace-last"
@@ -288,6 +327,11 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
         cfg.binary_glob_dir = metrics["binary_glob_dir"]
     if "binary_globs" in metrics:
         cfg.binary_globs = metrics["binary_globs"]
+
+    # [hooks]
+    hooks = data.get("hooks", {})
+    if "on_complete" in hooks:
+        cfg.hook_on_complete = hooks["on_complete"]
 
     return cfg
 
