@@ -202,6 +202,8 @@ def _get_usage_cost(usage: TokenUsage, agent_type: str) -> float:
         return usage.calc_cost(p.gemini_input, p.gemini_output)
     if agent_type == "qwen":
         return usage.calc_cost(p.qwen_input, p.qwen_output)
+    if agent_type == "codex":
+        return usage.calc_cost(p.codex_input, p.codex_output)
     return usage.calc_cost(p.claude_input, p.claude_output)
 
 

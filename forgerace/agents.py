@@ -127,6 +127,80 @@ def _log_gemini_event(tag: str, event: dict, usage_acc: TokenUsage | None = None
             log.info(f"[{tag}] 📊 {tool_calls} tools, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out")
 
 
+def _log_codex_event(tag: str, event: dict, usage_acc: TokenUsage | None = None):
+    """Логирует событие из --json вывода Codex CLI."""
+    etype = event.get("type", "")
+
+    if etype == "item.started":
+        item = event.get("item", {})
+        itype = item.get("type", "")
+        if itype == "commandExecution":
+            cmd = item.get("command", "?")[:120]
+            log.info(f"[{tag}] 💻 Bash: {cmd}")
+        elif itype == "fileChange":
+            changes = item.get("changes", [])
+            files = [c.get("path", "?").rsplit("/", 1)[-1] for c in changes[:3]]
+            log.info(f"[{tag}] ✏️  Edit {', '.join(files)}")
+        elif itype == "webSearch":
+            query = item.get("query", "?")[:80]
+            log.info(f"[{tag}] 🌐 Search: {query}")
+        elif itype == "mcpToolCall":
+            tool = item.get("tool", "?")
+            log.info(f"[{tag}] 🔧 MCP: {tool}")
+        elif itype == "agentMessage":
+            pass  # шум
+        elif itype == "reasoning":
+            pass
+        else:
+            log.info(f"[{tag}] 🔧 {itype}")
+
+    elif etype == "item.completed":
+        item = event.get("item", {})
+        itype = item.get("type", "")
+        if itype == "commandExecution":
+            exit_code = item.get("exitCode", "?")
+            dur = item.get("durationMs", 0) // 1000
+            if exit_code != 0:
+                log.info(f"[{tag}] 💻 exit={exit_code} ({dur}s)")
+
+    elif etype == "turn.completed":
+        usage = event.get("usage", {})
+        in_tok = usage.get("input_tokens", 0) + usage.get("cached_input_tokens", 0)
+        out_tok = usage.get("output_tokens", 0)
+        if usage_acc:
+            parsed = TokenUsage(
+                input_tokens=usage.get("input_tokens", 0),
+                output_tokens=out_tok,
+                cache_read_input_tokens=usage.get("cached_input_tokens", 0),
+            )
+            usage_acc.accumulate(parsed)
+        log.info(f"[{tag}] 📊 turn done, {in_tok // 1000}k in/{out_tok // 1000}k out")
+
+
+def _codex_activity_check(event: dict) -> bool:
+    etype = event.get("type", "")
+    if etype in ("item.started", "item.completed"):
+        itype = event.get("item", {}).get("type", "")
+        return itype in ("commandExecution", "fileChange", "mcpToolCall")
+    return False
+
+
+def _codex_extract_result(stdout_lines: list[str]) -> str:
+    for raw in reversed(stdout_lines):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            ev = json.loads(raw)
+            if ev.get("type") == "item.completed":
+                item = ev.get("item", {})
+                if item.get("type") == "agentMessage":
+                    return item.get("text", "")
+        except json.JSONDecodeError:
+            continue
+    return ""
+
+
 # --- Запуск агентов ---
 
 _PRODUCTIVE_TOOLS = {"Write", "Edit", "Bash", "write_file", "edit", "run_shell_command"}
@@ -366,6 +440,12 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
             _log_gemini_event, _gemini_activity_check, _gemini_extract_result,
             cancel_event=cancel_event,
         )
+    elif agent_name == "codex":
+        return _run_agent_streaming(
+            final_cmd, workdir, tag, acfg.inactivity_timeout,
+            _log_codex_event, _codex_activity_check, _codex_extract_result,
+            cancel_event=cancel_event,
+        )
     else:
         # Qwen и другие CLI с Claude-совместимым stream-json
         return _run_agent_streaming(
@@ -402,9 +482,21 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
             cmd, cwd=cfg.root_dir, input=prompt,
             capture_output=True, text=True, timeout=300,
         )
+    elif reviewer_type == "codex":
+        # codex: промпт как позиционный аргумент
+        cmd = [acfg.command, "exec", "--full-auto", prompt]
+        result = subprocess.run(
+            cmd, cwd=cfg.root_dir,
+            capture_output=True, text=True, timeout=300,
+        )
     else:
-        # Универсальный: попробовать stdin
-        cmd = [acfg.command] + acfg.review_args
+        # Универсальный: попробовать review_args с {prompt} подстановкой
+        cmd = [acfg.command]
+        for arg in acfg.review_args:
+            if arg == "{prompt}":
+                cmd.append(prompt)
+            else:
+                cmd.append(arg)
         result = subprocess.run(
             cmd, cwd=cfg.root_dir, input=prompt,
             capture_output=True, text=True, timeout=300,
@@ -436,6 +528,12 @@ def run_text_agent(prompt: str, timeout: int = 300, tag: str = "") -> str:
                 cmd = [acfg.command] + acfg.review_args
                 result = subprocess.run(
                     cmd, cwd=cfg.root_dir, input=prompt,
+                    capture_output=True, text=True, timeout=timeout,
+                )
+            elif name == "codex":
+                cmd = [acfg.command, "exec", "--full-auto", prompt]
+                result = subprocess.run(
+                    cmd, cwd=cfg.root_dir,
                     capture_output=True, text=True, timeout=timeout,
                 )
             else:

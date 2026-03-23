@@ -35,6 +35,8 @@ class PricingConfig:
     gemini_output: float = 10.0 / 1_000_000  # $10 per 1M tokens
     qwen_input: float = 2.0 / 1_000_000     # $2 per 1M tokens
     qwen_output: float = 8.0 / 1_000_000    # $8 per 1M tokens
+    codex_input: float = 2.0 / 1_000_000    # $2 per 1M tokens (GPT-5.4 estimate)
+    codex_output: float = 8.0 / 1_000_000   # $8 per 1M tokens
 
 
 @dataclass
@@ -85,6 +87,13 @@ class Config:
             args=["-p", "--approval-mode", "yolo", "--output-format", "stream-json"],
             review_args=["-p", "-", "--approval-mode", "yolo"],
             inactivity_timeout=180,
+        ),
+        "codex": AgentConfig(
+            command="codex",
+            args=["exec", "--json", "--full-auto", "{prompt}"],
+            review_args=["exec", "--json", "--full-auto", "{prompt}"],
+            inactivity_timeout=300,
+            enabled=True,
         ),
     })
 
