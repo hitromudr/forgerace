@@ -7,15 +7,18 @@ from typing import Any, Callable, Optional
 
 class TaskQueue:
     """
-    Очередь задач с приоритетами (max-heap).
-    
+    Очередь задач с приоритетами (max-heap) + ConcurrencyLimiter.
+
     Использует heapq с инверсией приоритета (-priority),
     чтобы задачи с большим priority извлекались первыми.
+    При указании max_concurrent создаёт ConcurrencyLimiter для
+    ограничения параллельного выполнения задач.
     """
-    
-    def __init__(self):
+
+    def __init__(self, max_concurrent: int = 3):
         self._heap: list[tuple[int, str]] = []
         self._counter = 0  # для стабильной сортировки при равных приоритетах
+        self.limiter = ConcurrencyLimiter(max_concurrent)
     
     def push(self, task_id: str, priority: int) -> None:
         """
@@ -73,6 +76,13 @@ class ConcurrencyLimiter:
         self._executor = ThreadPoolExecutor(max_workers=max_concurrent)
         self._futures: list[Future] = []
 
+    def _remove_done(self, future: Future) -> None:
+        """Callback: убирает завершённую future из списка."""
+        try:
+            self._futures.remove(future)
+        except ValueError:
+            pass
+
     def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> Future:
         """Поставить задачу в очередь. Запуск — по мере освобождения слотов.
 
@@ -86,6 +96,7 @@ class ConcurrencyLimiter:
         """
         future = self._executor.submit(fn, *args, **kwargs)
         self._futures.append(future)
+        future.add_done_callback(self._remove_done)
         return future
 
     @property
