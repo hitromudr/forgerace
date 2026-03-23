@@ -1,7 +1,8 @@
-"""Очередь задач с приоритетами на основе heapq."""
+"""Очередь задач с приоритетами на основе heapq + ConcurrencyLimiter."""
 
 import heapq
-from typing import Optional
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Any, Callable, Optional
 
 
 class TaskQueue:
@@ -56,3 +57,56 @@ class TaskQueue:
     def __bool__(self) -> bool:
         """Возвращает True, если очередь не пуста."""
         return bool(self._heap)
+
+
+class ConcurrencyLimiter:
+    """Ограничитель параллельности на основе ThreadPoolExecutor.
+
+    Не более max_concurrent задач выполняются одновременно.
+    submit() ставит задачу в пул, запуск — по мере освобождения слотов.
+    """
+
+    def __init__(self, max_concurrent: int = 3):
+        if max_concurrent < 1:
+            raise ValueError("max_concurrent must be >= 1")
+        self.max_concurrent = max_concurrent
+        self._executor = ThreadPoolExecutor(max_workers=max_concurrent)
+        self._futures: list[Future] = []
+
+    def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> Future:
+        """Поставить задачу в очередь. Запуск — по мере освобождения слотов.
+
+        Args:
+            fn: Вызываемая функция.
+            *args: Позиционные аргументы.
+            **kwargs: Именованные аргументы.
+
+        Returns:
+            Future для отслеживания результата.
+        """
+        future = self._executor.submit(fn, *args, **kwargs)
+        self._futures.append(future)
+        return future
+
+    @property
+    def active_count(self) -> int:
+        """Количество выполняющихся (не завершённых) задач."""
+        return sum(1 for f in self._futures if f.running())
+
+    @property
+    def pending_count(self) -> int:
+        """Количество задач, ожидающих запуска или выполняющихся."""
+        return sum(1 for f in self._futures if not f.done())
+
+    def shutdown(self, wait: bool = True, cancel_pending: bool = False) -> None:
+        """Завершить работу пула.
+
+        Args:
+            wait: Ждать завершения текущих задач.
+            cancel_pending: Отменить незапущенные задачи.
+        """
+        if cancel_pending:
+            for f in self._futures:
+                f.cancel()
+        self._executor.shutdown(wait=wait)
+        self._futures.clear()
