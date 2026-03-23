@@ -198,7 +198,7 @@
 - **Ветка**: task/task-016-dobavit-pole-estimated-usd-v-tokenusage-gemini
 
 ### TASK-017: Проверка бюджета в pipeline
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 4
 - **Зависимости**: TASK-016
