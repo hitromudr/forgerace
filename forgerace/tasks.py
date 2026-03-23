@@ -194,3 +194,91 @@ def task_paths(task: Task) -> list[str]:
     if not paths:
         paths.add("src/")
     return sorted(paths)
+
+
+# --- Граф зависимостей ---
+
+class DependencyGraph:
+    """Граф зависимостей задач: строится из deps полей, поддерживает
+    транзитивные зависимые, детекцию циклов и приоритизацию."""
+
+    def __init__(self, tasks: list[Task]):
+        # depends_on: task_id -> set of task_ids it depends on
+        self.depends_on: dict[str, set[str]] = {}
+        # dependents: task_id -> set of task_ids that depend on it
+        self.dependents: dict[str, set[str]] = {}
+        self._all_ids: set[str] = set()
+
+        for t in tasks:
+            self._all_ids.add(t.id)
+            self.depends_on.setdefault(t.id, set())
+            self.dependents.setdefault(t.id, set())
+
+        for t in tasks:
+            for dep in t.deps:
+                if dep in self._all_ids:
+                    self.depends_on[t.id].add(dep)
+                    self.dependents[dep].add(t.id)
+
+    def get_transitive_dependents(self, task_id: str) -> set[str]:
+        """Все задачи, которые (транзитивно) зависят от task_id."""
+        visited: set[str] = set()
+        stack = [task_id]
+        while stack:
+            node = stack.pop()
+            for dep in self.dependents.get(node, ()):
+                if dep not in visited:
+                    visited.add(dep)
+                    stack.append(dep)
+        return visited
+
+    def detect_cycles(self) -> list[str] | None:
+        """Топологическая сортировка (Kahn's algorithm).
+        Возвращает None если циклов нет, иначе — список task_id в цикле."""
+        in_degree: dict[str, int] = {tid: 0 for tid in self._all_ids}
+        for tid, deps in self.depends_on.items():
+            in_degree[tid] = len(deps)
+
+        queue = [tid for tid, deg in in_degree.items() if deg == 0]
+        sorted_count = 0
+
+        while queue:
+            node = queue.pop()
+            sorted_count += 1
+            for dependent in self.dependents.get(node, ()):
+                in_degree[dependent] -= 1
+                if in_degree[dependent] == 0:
+                    queue.append(dependent)
+
+        if sorted_count == len(self._all_ids):
+            return None
+
+        # Задачи, оставшиеся с in_degree > 0, участвуют в цикле
+        return sorted(tid for tid, deg in in_degree.items() if deg > 0)
+
+    def topological_order(self) -> list[str]:
+        """Возвращает задачи в топологическом порядке.
+        Raises ValueError при наличии циклов."""
+        cycle = self.detect_cycles()
+        if cycle is not None:
+            raise ValueError(f"Cycle detected involving: {', '.join(cycle)}")
+
+        in_degree: dict[str, int] = {tid: len(deps) for tid, deps in self.depends_on.items()}
+        queue = sorted(tid for tid, deg in in_degree.items() if deg == 0)
+        result: list[str] = []
+
+        while queue:
+            node = queue.pop(0)
+            result.append(node)
+            for dependent in sorted(self.dependents.get(node, ())):
+                in_degree[dependent] -= 1
+                if in_degree[dependent] == 0:
+                    queue.append(dependent)
+
+        return result
+
+
+def compute_priority(task_id: str, graph: DependencyGraph) -> int:
+    """Приоритет задачи = количество транзитивных зависимых.
+    Чем больше задач зависят от task_id, тем выше приоритет."""
+    return len(graph.get_transitive_dependents(task_id))

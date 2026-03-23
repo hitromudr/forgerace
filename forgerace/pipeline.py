@@ -225,10 +225,16 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
 
         if result.returncode != 0:
             stderr = result.stderr or result.stdout or "Агент упал без вывода"
+            combined = f"{result.stdout or ''}\n{stderr}".lower()
             log.warning(f"[{tag}] Агент завершился с ошибкой (код {result.returncode})")
             # NO_EDIT_ABORT / CANCELLED — не ретраим, агент зацикливается
             if stderr in ("NO_EDIT_ABORT", "CANCELLED", "PROGRESS_TIMEOUT"):
                 log.error(f"[{tag}] ✗ {stderr} — прекращаю попытки")
+                break
+            # Quota/auth — ретрай бесполезен
+            if any(kw in combined for kw in ("quota exceeded", "rate limit", "unauthorized",
+                                              "authentication", "api key", "401", "429")):
+                log.error(f"[{tag}] ✗ Квота/авторизация — пропускаю агента")
                 break
             error_log = stderr
             continue
@@ -251,6 +257,12 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
         if not ok and "не внёс никаких изменений" in error_log:
             stdout_tail = (result.stdout or "")[-500:].strip()
             stderr_tail = (result.stderr or "")[-300:].strip()
+            # Quota/auth в stdout — не ретраить
+            combined = f"{stdout_tail}\n{stderr_tail}".lower()
+            if any(kw in combined for kw in ("quota exceeded", "rate limit", "unauthorized",
+                                              "authentication", "api key", "401", "429")):
+                log.error(f"[{tag}] ✗ Квота/авторизация — пропускаю агента")
+                break
             if stdout_tail:
                 log.warning(f"[{tag}] stdout (хвост): {stdout_tail[:200]}")
             if stderr_tail:

@@ -1,5 +1,5 @@
 """ForgeRace — Multi-agent development orchestrator."""
 
-__version__ = "0.1.0"
+from . import cost
 
-from .config import cfg, init_config
+__version__ = "0.1.0"

@@ -24,6 +24,15 @@ class AgentConfig:
 
 
 @dataclass
+class PricingConfig:
+    """Цены за токен (USD) по провайдерам."""
+    claude_input: float = 15.0 / 1_000_000   # $15 per 1M tokens
+    claude_output: float = 75.0 / 1_000_000  # $75 per 1M tokens
+    gemini_input: float = 1.25 / 1_000_000   # $1.25 per 1M tokens
+    gemini_output: float = 10.0 / 1_000_000  # $10 per 1M tokens
+
+
+@dataclass
 class Config:
     """Глобальная конфигурация оркестратора."""
 
@@ -36,12 +45,16 @@ class Config:
 
     # --- Лимиты ---
     max_retries: int = 3
-    max_parallel_tasks: int = 4
+    max_parallel_tasks: int = 10
     agent_timeout: int = 900
     build_timeout: int = 120
     max_review_rounds: int = 3
     max_task_complexity: int = 3
     progress_timeout: int = 600  # kill агента если diff не меняется N секунд (10 мин)
+    budget_per_task_usd: Optional[float] = None
+
+    # --- Pricing ---
+    pricing: PricingConfig = field(default_factory=PricingConfig)
 
     # --- Агенты ---
     agents: dict[str, AgentConfig] = field(default_factory=lambda: {
@@ -122,7 +135,6 @@ def run_hint() -> str:
     """Возвращает команду запуска для подсказок пользователю."""
     import sys
     script = sys.argv[0]
-    # Короткая форма: python3 forgerace.py или просто forgerace
     if script.endswith("forgerace.py"):
         base = f"python3 {script}"
     elif script.endswith("__main__.py") or "-m" in sys.orig_argv:
@@ -244,11 +256,22 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
 
     # [limits]
     limits = data.get("limits", {})
-    for key in ("max_parallel_tasks", "agent_timeout", "max_review_rounds", "max_task_complexity", "progress_timeout"):
+    for key in ("max_parallel_tasks", "agent_timeout", "max_review_rounds",
+                "max_task_complexity", "progress_timeout", "budget_per_task_usd"):
         if key in limits:
             setattr(cfg, key, limits[key])
     if "review_run_log" in limits:
         cfg.review_run_log = limits["review_run_log"]
+
+    # [pricing]
+    pricing_data = data.get("pricing", {})
+    if pricing_data:
+        cfg.pricing = PricingConfig(
+            claude_input=pricing_data.get("claude_input", cfg.pricing.claude_input),
+            claude_output=pricing_data.get("claude_output", cfg.pricing.claude_output),
+            gemini_input=pricing_data.get("gemini_input", cfg.pricing.gemini_input),
+            gemini_output=pricing_data.get("gemini_output", cfg.pricing.gemini_output),
+        )
 
     # [rules]
     rules = data.get("rules", {})
