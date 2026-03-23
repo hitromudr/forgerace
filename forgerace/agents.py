@@ -344,7 +344,11 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
     final_cmd = [acfg.command]
     for arg in acfg.args:
         if arg == "-p":
+            # -p — маркер: вставить [-p, prompt] (Claude/Gemini/Qwen)
             final_cmd.extend(["-p", prompt])
+        elif arg == "{prompt}":
+            # {prompt} — universal placeholder для агентов с другим синтаксисом
+            final_cmd.append(prompt)
         else:
             final_cmd.append(arg)
 
