@@ -408,11 +408,21 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     return (result.stdout or "").strip()
 
 
+_text_agent_counter = 0
+_text_agent_lock = __import__("threading").Lock()
+
+
 def run_text_agent(prompt: str, timeout: int = 300, tag: str = "") -> str:
-    """Вызывает рандомного доступного агента в text mode. Для системных задач (декомпозиция, резолюция)."""
-    import random
+    """Вызывает агента в text mode round-robin. Для системных задач (декомпозиция, резолюция)."""
+    global _text_agent_counter
     names = list(cfg.agent_names)
-    random.shuffle(names)
+    if not names:
+        return ""
+    with _text_agent_lock:
+        start = _text_agent_counter % len(names)
+        _text_agent_counter += 1
+    # Ротация: каждый вызов начинает с другого агента
+    names = names[start:] + names[:start]
     for name in names:
         acfg = cfg.agents.get(name)
         if not acfg:

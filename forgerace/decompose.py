@@ -113,8 +113,10 @@ COMPLEXITY: N
 
     # Декомпозиция
     tasks_block = output[complexity_match.end():].strip()
-    if "TASK-" not in tasks_block:
-        log.error(f"  ✗ Сложность {complexity} но подзадачи не сгенерированы")
+    new_task_ids = re.findall(r"### (TASK-\d+):", tasks_block)
+    if not new_task_ids:
+        log.warning(f"  ⚠ Сложность {complexity} но подзадачи не сгенерированы — запускаю как есть")
+        _assessed_tasks.add(task.id)
         return False
 
     # Сохраняем копию
@@ -122,7 +124,6 @@ COMPLEXITY: N
     decompose_file.write_text(tasks_block + "\n", encoding="utf-8")
 
     # Принудительно подставляем дискуссию родителя в подзадачи
-    # (LLM может проигнорировать и написать "—")
     if task.discussion and task.discussion != "—":
         tasks_block = re.sub(
             r"(\*\*Дискуссия\*\*:\s*).*",
@@ -132,9 +133,6 @@ COMPLEXITY: N
 
     # Вставляем в TASKS.md
     insert_tasks_into_tasksmd(tasks_block, task.id)
-
-    # Обновляем зависимости
-    new_task_ids = re.findall(r"### (TASK-\d+):", tasks_block)
     if new_task_ids:
         last_subtask = new_task_ids[-1]
         content = cfg.tasks_file.read_text(encoding="utf-8")
