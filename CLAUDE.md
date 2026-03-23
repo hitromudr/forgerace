@@ -39,7 +39,7 @@ python3 forgerace.py merge-pending
 
 ## Архитектура
 
-Рефакторинг из монолита завершён. Модули в `forgerace/`:
+Рефакторинг из монолита завершён. `orchestrator_monolith.py` УДАЛЁН — НЕ создавать и НЕ править его. Весь код в `forgerace/`:
 
 - **config.py** — `Config` (dataclass) + загрузка из `forgerace.toml`. Глобальный `cfg` обновляется in-place через `init_config()`, чтобы все модули видели изменения через `from .config import cfg`.
 - **tasks.py** — парсер `TASKS.md`, модель `Task`, `update_task_status`, `find_ready_tasks`.

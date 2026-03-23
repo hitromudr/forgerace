@@ -435,6 +435,8 @@ def build_prompt(task: Task, error_log: str = "") -> str:
 {task.acceptance}
 
 ## Правила
+- ЗАПРЕЩЕНО создавать или править orchestrator_monolith.py — он удалён, весь код в forgerace/*.py
+- Правь ТОЛЬКО файлы указанные в "Файлы" выше. Не переписывай файлы целиком — делай точечные правки.
 {cfg.agent_rules}
 """
 
