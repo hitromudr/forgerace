@@ -48,7 +48,7 @@ commands = []
 check_command = ""
 
 [limits]
-max_parallel_tasks = 4
+max_parallel_tasks = 10
 agent_timeout = 900
 max_review_rounds = 3
 '''
