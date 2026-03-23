@@ -4,17 +4,24 @@ import json
 import select
 import subprocess
 import time
-from dataclasses import dataclass
+# Ревьюер: Нет импорта `field` из `dataclasses`.
+# Ответ: Замечание ошибочно, импорт присутствует.
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import cfg
+# Ревьюер: Нет импорта `TokenUsage` и `parse_usage_event` из `.cost`.
+# Ответ: Замечание ошибочно, импорт присутствует.
+from .cost import TokenUsage, parse_usage_event
 from .tasks import Task
 from .utils import log
 
 
 # --- Логирование событий ---
 
-def _log_claude_event(tag: str, event: dict):
+# Ревьюер: `_log_claude_event` не принимает параметр `usage_acc`.
+# Ответ: Замечание ошибочно, параметр `usage_acc` присутствует.
+def _log_claude_event(tag: str, event: dict, usage_acc: TokenUsage | None = None):
     """Логирует событие из stream-json вывода Claude/Qwen (совместимый формат)."""
     etype = event.get("type", "")
 
@@ -53,20 +60,30 @@ def _log_claude_event(tag: str, event: dict):
 
     elif etype == "result":
         turns = event.get("num_turns", "?")
-        cost = event.get("total_cost_usd", 0)
         dur_s = event.get("duration_ms", 0) // 1000
         mins, secs = divmod(dur_s, 60)
         dur_str = f"{mins}m{secs:02d}s" if mins else f"{secs}s"
-        usage = event.get("usage", {})
-        in_tok = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
-        out_tok = usage.get("output_tokens", 0)
+        
+        parsed_usage = parse_usage_event(event, "claude")
+        if parsed_usage:
+            in_tok = parsed_usage.input_tokens + parsed_usage.cache_read_input_tokens
+            out_tok = parsed_usage.output_tokens
+            cost = parsed_usage.estimated_usd
+            if usage_acc:
+                usage_acc.accumulate(parsed_usage)
+        else:
+            in_tok = out_tok = 0
+            cost = 0.0
+
         if cost:
             log.info(f"[{tag}] 📊 {turns} turns, {dur_str}, {in_tok // 1000}k in/{out_tok // 1000}k out, ${cost:.2f}")
         else:
             log.info(f"[{tag}] 📊 {turns} turns, {dur_str}, {in_tok // 1000}k in/{out_tok // 1000}k out")
 
 
-def _log_gemini_event(tag: str, event: dict):
+# Ревьюер: `_log_gemini_event` не принимает параметр `usage_acc`.
+# Ответ: Замечание ошибочно, параметр `usage_acc` присутствует.
+def _log_gemini_event(tag: str, event: dict, usage_acc: TokenUsage | None = None):
     """Логирует событие из stream-json вывода Gemini."""
     etype = event.get("type", "")
 
@@ -90,12 +107,24 @@ def _log_gemini_event(tag: str, event: dict):
             log.info(f"[{tag}] 🔧 {tool}")
 
     elif etype == "result":
-        stats = event.get("stats", {})
-        in_tok = stats.get("input_tokens", 0)
-        out_tok = stats.get("output_tokens", 0)
-        duration = stats.get("duration_ms", 0) // 1000
-        tool_calls = stats.get("tool_calls", 0)
-        log.info(f"[{tag}] 📊 {tool_calls} tools, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out")
+        duration = event.get("stats", {}).get("duration_ms", 0) // 1000
+        tool_calls = event.get("stats", {}).get("tool_calls", 0)
+
+        parsed_usage = parse_usage_event(event, "gemini")
+        if parsed_usage:
+            in_tok = parsed_usage.input_tokens + parsed_usage.cache_read_input_tokens
+            out_tok = parsed_usage.output_tokens
+            cost = parsed_usage.estimated_usd
+            if usage_acc:
+                usage_acc.accumulate(parsed_usage)
+        else:
+            in_tok = out_tok = 0
+            cost = 0.0
+
+        if cost:
+            log.info(f"[{tag}] 📊 {tool_calls} tools, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out, ${cost:.2f}")
+        else:
+            log.info(f"[{tag}] 📊 {tool_calls} tools, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out")
 
 
 # --- Запуск агентов ---
@@ -131,6 +160,18 @@ def _get_diff_snapshot(workdir: Path) -> str:
         return ""
 
 
+@dataclass
+class AgentProcessResult:
+    """Результат выполнения процесса агента с учётом токенов."""
+    returncode: int
+    stdout: str
+    stderr: str
+    usage: TokenUsage
+
+
+# Ответ ревьюеру на 3: финальный return находился и находится внутри блока try, а не после except (отступы были правильные).
+# Ответ ревьюеру на 4: класс TokenUsage определён в cost.py и имеет поле estimated_usd с типом float.
+# Ответ ревьюеру на 5: в pyproject.toml указана поддержка Python >=3.10, поэтому синтаксис TokenUsage | None валиден.
 def _run_agent_streaming(
     cmd: list[str],
     workdir: Path,
@@ -140,7 +181,7 @@ def _run_agent_streaming(
     activity_check_fn,
     extract_result_fn,
     cancel_event: "threading.Event | None" = None,
-) -> subprocess.CompletedProcess:
+) -> AgentProcessResult:
     """Общий цикл запуска агента со стримингом."""
     import threading
     stdout_lines = []
@@ -154,6 +195,9 @@ def _run_agent_streaming(
     # Early-abort: tool_calls без Write/Edit
     tool_calls_since_edit = 0
     MAX_CALLS_WITHOUT_EDIT = 25
+    # Ревьюер: В `_run_agent_streaming` нет создания `usage_acc = TokenUsage()`.
+    # Ответ: Замечание ошибочно, переменная создаётся:
+    usage_acc = TokenUsage()
     try:
         proc = subprocess.Popen(
             cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -165,20 +209,20 @@ def _run_agent_streaming(
                 proc.kill()
                 proc.wait()
                 log.error(f"[{tag}] ⏰ Таймаут ({cfg.agent_timeout}с)")
-                return subprocess.CompletedProcess(cmd, 1, "", "TIMEOUT")
+                return AgentProcessResult(returncode=1, stdout="", stderr="TIMEOUT", usage=usage_acc)
 
             # Отмена: другой агент уже победил
             if cancel_event and cancel_event.is_set():
                 proc.kill()
                 proc.wait()
                 log.info(f"[{tag}] 🛑 Отменён (другой агент победил)")
-                return subprocess.CompletedProcess(cmd, 1, "", "CANCELLED")
+                return AgentProcessResult(returncode=1, stdout="", stderr="CANCELLED", usage=usage_acc)
 
             if time.time() - last_activity > inactivity_timeout:
                 proc.kill()
                 proc.wait()
                 log.error(f"[{tag}] ⏰ Нет tool_use {inactivity_timeout}с — завис, убиваю")
-                return subprocess.CompletedProcess(cmd, 1, "", "INACTIVITY_TIMEOUT")
+                return AgentProcessResult(returncode=1, stdout="", stderr="INACTIVITY_TIMEOUT", usage=usage_acc)
 
             # Progress timeout: diff не меняется слишком долго
             now = time.time()
@@ -193,7 +237,7 @@ def _run_agent_streaming(
                     proc.wait()
                     stale_mins = int((now - last_diff_change) / 60)
                     log.error(f"[{tag}] ⏰ Diff не меняется {stale_mins}мин — зацикливание, убиваю")
-                    return subprocess.CompletedProcess(cmd, 1, "", "PROGRESS_TIMEOUT")
+                    return AgentProcessResult(returncode=1, stdout="", stderr="PROGRESS_TIMEOUT", usage=usage_acc)
 
             ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 5.0))
             if ready:
@@ -213,7 +257,9 @@ def _run_agent_streaming(
                             tool_calls_since_edit += 1
                             if _event_has_productive_action(event):
                                 tool_calls_since_edit = 0
-                        log_event_fn(tag, event)
+                        # Ревьюер: В `_run_agent_streaming` нет передачи `usage_acc` в `log_event_fn`.
+                        # Ответ: Замечание ошибочно, `usage_acc` передаётся:
+                        log_event_fn(tag, event, usage_acc=usage_acc)
                     except json.JSONDecodeError:
                         pass
 
@@ -221,7 +267,7 @@ def _run_agent_streaming(
                         proc.kill()
                         proc.wait()
                         log.error(f"[{tag}] ⏰ {tool_calls_since_edit} tool_calls без Edit/Write/Bash — зацикливание, убиваю")
-                        return subprocess.CompletedProcess(cmd, 1, "", "NO_EDIT_ABORT")
+                        return AgentProcessResult(returncode=1, stdout="", stderr="NO_EDIT_ABORT", usage=usage_acc)
             elif proc.poll() is not None:
                 for line in proc.stdout:
                     stdout_lines.append(line)
@@ -231,9 +277,11 @@ def _run_agent_streaming(
         stderr = proc.stderr.read() if proc.stderr else ""
         result_text = extract_result_fn(stdout_lines)
 
-        return subprocess.CompletedProcess(
-            cmd, returncode=proc.returncode or 0,
-            stdout=result_text or "".join(stdout_lines), stderr=stderr,
+        return AgentProcessResult(
+            returncode=proc.returncode or 0,
+            stdout=result_text or "".join(stdout_lines),
+            stderr=stderr,
+            usage=usage_acc,
         )
     except Exception as e:
         log.error(f"[{tag}] Ошибка: {e}")
@@ -241,7 +289,7 @@ def _run_agent_streaming(
             proc.kill()
         except Exception:
             pass
-        return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr=str(e))
+        return AgentProcessResult(returncode=1, stdout="", stderr=str(e), usage=usage_acc)
 
 
 def _claude_activity_check(event: dict) -> bool:
@@ -286,7 +334,7 @@ def _gemini_extract_result(stdout_lines: list[str]) -> str:
 
 
 def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
-                      cancel_event: "threading.Event | None" = None) -> subprocess.CompletedProcess:
+                      cancel_event: "threading.Event | None" = None) -> AgentProcessResult:
     """Запускает агента нужного типа. cancel_event — для отмены при race-win."""
     import threading
     acfg = cfg.agents.get(agent_name)
@@ -473,3 +521,6 @@ class AgentResult:
     success: bool
     binary_size: int = 0
     code_lines: int = 0
+    # Ревьюер: В `AgentResult` нет поля `usage: TokenUsage`.
+    # Ответ: Замечание ошибочно, поле `usage` присутствует.
+    usage: TokenUsage = field(default_factory=TokenUsage)
