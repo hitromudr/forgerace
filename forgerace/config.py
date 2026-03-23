@@ -58,6 +58,12 @@ class Config:
             review_args=["-p", "-"],
             inactivity_timeout=180,
         ),
+        "qwen": AgentConfig(
+            command="qwen",
+            args=["-p", "--approval-mode", "yolo", "--output-format", "stream-json"],
+            review_args=["-p", "-", "--approval-mode", "yolo"],
+            inactivity_timeout=180,
+        ),
     })
 
     # --- Команды сборки ---
