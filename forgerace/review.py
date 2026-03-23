@@ -311,7 +311,8 @@ def send_to_rework(result: AgentResult, task: Task, comments: str) -> bool:
     from .pipeline import verify_build  # lazy import to avoid circular
 
     tag = f"{task.id}/{result.agent_type}"
-    log.info(f"[{tag}] 🔧 Доработка по замечаниям ревью")
+    tag_rework = f"{task.id}/{result.agent_type}/доработка"
+    log.info(f"[{tag_rework}] правки по замечаниям ревью")
 
     review_file = result.workdir / "REVIEW_COMMENTS.md"
     review_file.write_text(comments, encoding="utf-8")

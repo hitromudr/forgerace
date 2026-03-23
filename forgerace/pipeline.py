@@ -391,7 +391,9 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                     rv = f.result()
                     verdicts[rev] = rv
                     log.info(f"[{task.id}/{rev}/ревью] → {result.agent_type}: {rv['verdict']}")
-                    log.info(f"[{task.id}] {rv.get('summary', rv.get('comments', '')[:200])}")
+                    summary = rv.get('summary', rv.get('comments', '')[:200])
+                    if summary:
+                        log.info(f"[{task.id}/{rev}/ревью] {summary}")
                     # Собираем замечания для доработки
                     if rv["verdict"] != "APPROVED":
                         comments = rv.get("comments", rv.get("summary", ""))
@@ -462,7 +464,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             cleanup_worktrees(all_results)
             return False
 
-        log.info(f"[{task.id}] 📝 Результат ревью:\n{rv.get('full_text', rv.get('reason', ''))}")
+        log.info(f"[{task.id}/ревью] результат:\n{rv.get('full_text', rv.get('reason', ''))}")
 
         best_name = rv.get("best")
         if not best_name or best_name == "none":
@@ -527,7 +529,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
         # Финальное ревью
         log.info(f"[{task.id}] 📝 Финальное ревью после {cfg.max_review_rounds} раундов...")
         rv = code_review(passed, task)
-        log.info(f"[{task.id}] 📝 Результат ревью:\n{rv.get('full_text', rv.get('reason', ''))}")
+        log.info(f"[{task.id}/ревью] результат:\n{rv.get('full_text', rv.get('reason', ''))}")
 
         best_name = rv.get("best")
         if best_name and best_name != "none":
@@ -600,24 +602,25 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     prev_summary = None
     repeat_count = 0
     for review_round in range(1, cfg.max_review_rounds + 1):
-        log.info(f"[{task.id}/ревью] раунд {review_round}/{cfg.max_review_rounds}")
-        log.info(f"[{task.id}] Ревьюер: {reviewer} → {agent_type}")
+        log.info(f"[{task.id}/{reviewer}/ревью] раунд {review_round}/{cfg.max_review_rounds}, проверяет {agent_type}")
         rv = single_review(reviewer, agent_type, get_diff(best_result, task), task,
                            build_passed=True, changed_files=get_changed_files(best_result, task),
                            workdir=best_result.workdir)
-        log.info(f"[{task.id}] 📋 {reviewer} ревьюит {agent_type}: {rv['verdict']}")
-        log.info(f"[{task.id}] {rv.get('summary', rv.get('comments', '')[:200])}")
+        log.info(f"[{task.id}/{reviewer}/ревью] → {agent_type}: {rv['verdict']}")
+        summary = rv.get('summary', rv.get('comments', '')[:200])
+        if summary:
+            log.info(f"[{task.id}/{reviewer}/ревью] {summary}")
 
         if rv["verdict"] == "APPROVED":
-            log.info(f"[{task.id}] ✅ Ревью пройдено: {agent_type}")
+            log.info(f"[{task.id}/{agent_type}/ревью] ✅ одобрено")
             break
 
-        # Детекция зацикливания: одинаковое замечание 2 раунда подряд → эскалация
+        # Детекция зацикливания
         cur_summary = rv.get("summary", "").strip()
         if cur_summary and cur_summary == prev_summary:
             repeat_count += 1
             if repeat_count >= 1:
-                log.warning(f"[{task.id}] ⚠ Ревьюер зациклился (одно замечание {repeat_count + 1} раунда подряд) → эскалация")
+                log.warning(f"[{task.id}/{reviewer}/ревью] ⚠ зациклился ({repeat_count + 1} раунда одно замечание)")
                 _escalate_review_stall(task, [best_result], rv)
                 update_task_status(task.id, "blocked")
                 run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
@@ -630,26 +633,26 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
 
         comments = rv.get("comments", "")
         if not comments.strip() or rv.get("verdict") == "error":
-            log.warning(f"[{task.id}] ⚠ Ревью без замечаний или ошибка — пропускаю")
+            log.warning(f"[{task.id}/{reviewer}/ревью] ⚠ без замечаний или ошибка — пропускаю")
             continue
         log.info(f"[{task.id}/{agent_type}/доработка] отправлен на исправление")
         send_to_rework(best_result, task, comments)
     else:
-        log.info(f"[{task.id}] 📝 Финальное ревью...")
+        log.info(f"[{task.id}/{reviewer}/ревью] финальный раунд")
         rv = single_review(reviewer, agent_type, get_diff(best_result, task), task,
                            build_passed=True, changed_files=get_changed_files(best_result, task),
                            workdir=best_result.workdir)
         if rv["verdict"] != "APPROVED":
-            log.error(f"[{task.id}] ✗ не прошёл ревью → BLOCKED")
+            log.error(f"[{task.id}/{agent_type}/ревью] ✗ не прошёл → BLOCKED")
             update_task_status(task.id, "blocked")
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, [result])
             cleanup_worktrees([result])
             return False
-        log.info(f"[{task.id}] ✅ Ревью пройдено (финал): {agent_type}")
+        log.info(f"[{task.id}/{agent_type}/ревью] ✅ одобрено (финал)")
 
     # Мерж
-    log.info(f"[{task.id}] 🏆 победитель: {agent_type}")
+    log.info(f"[{task.id}/{agent_type}/мерж] 🏆 победитель")
     if merge_to_develop(best_result.branch, task.id):
         update_task_status(task.id, "done", agent=agent_type, branch=best_result.branch)
         run_hook(cfg.hook_on_complete, task.id, "done", agent_type)
