@@ -277,10 +277,52 @@ def _cmd_agent_toggle(agent_name: str, enable: bool):
     print(f"  Активные: {C['bold']}{cfg.agent_names}{R}")
 
 
+def _print_full_help():
+    """Полная справка с примерами."""
+    print(f"""{C['bold']}ForgeRace{R} — мультиагентный оркестратор разработки
+
+{C['yellow']}БЫСТРЫЙ СТАРТ:{R}
+  ./fr init                              Создать forgerace.toml и TASKS.md
+  ./fr discuss new auth 'Как сделать авторизацию?'
+  ./fr discuss chat auth                 Обсуждение → /all → /ok → задачи
+  ./fr run                               Запустить все готовые задачи
+
+{C['yellow']}ЗАПУСК ЗАДАЧ:{R}
+  ./fr run                               Все готовые задачи (конкурентно)
+  ./fr run --task TASK-032               Конкретная задача
+  ./fr run --retry                       Перезапуск упавших (blocked → open)
+  ./fr run --auto --max-tasks 4          Авто-цикл: разблокированные → запуск
+  ./fr run --dry-run                     Показать что запустится (без запуска)
+
+{C['yellow']}ДИСКУССИИ:{R}
+  ./fr discuss new <тема> '<вопрос>'     Создать дискуссию
+  ./fr discuss chat <тема>               Интерактивный чат (Claude/Gemini/Qwen)
+  ./fr discuss list                      Список дискуссий
+  ./fr discuss show <тема>               Показать дискуссию целиком
+  ./fr discuss regen <тема>              Перегенерировать задачи из резолюции
+
+  Команды чата: /claude, /gemini, /qwen, /all, /both, /ok, /exit
+
+{C['yellow']}АГЕНТЫ:{R}
+  ./fr agents                            Список агентов и статус (ON/OFF)
+  ./fr agents off claude                 Выключить claude
+  ./fr agents on claude                  Включить обратно
+
+{C['yellow']}СТАТУС И МЕРЖ:{R}
+  ./fr status                            Статус задач + граф зависимостей
+  ./fr merge-pending                     Промержить review-задачи в develop
+
+{C['yellow']}ОПЦИИ:{R}
+  --config PATH                          Путь к forgerace.toml
+  --root PATH                            Корневая директория проекта
+  --verbose                              Подробный вывод
+""")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="ForgeRace — мультиагентный оркестратор",
-        usage="forgerace [--config CONFIG] [--root ROOT] [--verbose] <command> ...",
+        usage="forgerace <command> [options] (./fr help для справки)",
     )
     parser.add_argument("--config", type=Path, help="Путь к forgerace.toml")
     parser.add_argument("--root", type=Path, help="Корневая директория проекта")
@@ -291,40 +333,58 @@ def main():
     parser.format_help = lambda: _orig_format_help().replace("commands:\n  \n", "commands:\n")
 
     # run
-    run_p = sub.add_parser("run", help="Запустить задачи из TASKS.md")
+    run_p = sub.add_parser("run", help="Запустить задачи",
+        epilog="Примеры:\n"
+               "  ./fr run                    все готовые задачи\n"
+               "  ./fr run --task TASK-032     конкретная задача\n"
+               "  ./fr run --retry            перезапуск упавших\n"
+               "  ./fr run --auto             авто-цикл разблокированных\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     run_p.add_argument("--task", help="Конкретная задача (TASK-032)")
-    run_p.add_argument("--retry", action="store_true", help="Перезапустить упавшие")
-    run_p.add_argument("--dry-run", action="store_true")
-    run_p.add_argument("--auto", action="store_true", help="Автозапуск разблокированных")
+    run_p.add_argument("--retry", action="store_true", help="Перезапустить упавшие (blocked → open)")
+    run_p.add_argument("--dry-run", action="store_true", help="Показать что запустится, без запуска")
+    run_p.add_argument("--auto", action="store_true", help="Авто-цикл: разблокированные → запуск")
     run_p.add_argument("--max-tasks", type=int, default=None,
-                        help="Макс. задач параллельно")
+                        help="Макс. задач параллельно (дефолт из TOML)")
 
     # discuss
-    disc_p = sub.add_parser("discuss", help="Управление дискуссиями")
+    disc_p = sub.add_parser("discuss", help="Дискуссии",
+        epilog="Примеры:\n"
+               "  ./fr discuss new auth 'Как реализовать авторизацию?'\n"
+               "  ./fr discuss chat auth      интерактивный чат\n"
+               "  ./fr discuss list           список дискуссий\n"
+               "  ./fr discuss show auth      показать целиком\n"
+               "  ./fr discuss regen auth     перегенерировать задачи\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     disc_sub = disc_p.add_subparsers(dest="disc_cmd")
 
     disc_new = disc_sub.add_parser("new", help="Создать дискуссию")
-    disc_new.add_argument("topic", help="Имя темы")
+    disc_new.add_argument("topic", help="Имя темы (латиницей, без пробелов)")
     disc_new.add_argument("question", help="Вопрос / начальное сообщение")
-    disc_new.add_argument("--author", default="techlead")
+    disc_new.add_argument("--author", default="techlead", help="Автор (дефолт: techlead)")
 
     disc_reply = disc_sub.add_parser("reply", help="Агент отвечает в дискуссии")
-    disc_reply.add_argument("topic", help="Имя темы")
-    disc_reply.add_argument("--agent", required=True)
+    disc_reply.add_argument("topic")
+    disc_reply.add_argument("--agent", required=True, help="Имя агента")
 
     disc_sub.add_parser("list", help="Список дискуссий")
 
-    disc_show = disc_sub.add_parser("show", help="Показать дискуссию")
-    disc_show.add_argument("topic", help="Имя темы")
+    disc_show = disc_sub.add_parser("show", help="Показать дискуссию целиком")
+    disc_show.add_argument("topic")
 
-    disc_chat_p = disc_sub.add_parser("chat", help="Интерактивный чат")
-    disc_chat_p.add_argument("topic", help="Имя темы")
+    disc_chat_p = disc_sub.add_parser("chat", help="Интерактивный чат (/claude /gemini /all /ok /exit)")
+    disc_chat_p.add_argument("topic")
 
-    disc_regen = disc_sub.add_parser("regen", help="Перегенерировать задачи из дискуссии")
-    disc_regen.add_argument("topic", help="Имя темы")
+    disc_regen = disc_sub.add_parser("regen", help="Перегенерировать задачи из резолюции")
+    disc_regen.add_argument("topic")
 
     # agents
-    agents_p = sub.add_parser("agents", help="Управление агентами (вкл/выкл/список)")
+    agents_p = sub.add_parser("agents", help="Агенты (вкл/выкл)",
+        epilog="Примеры:\n"
+               "  ./fr agents                 список и статус\n"
+               "  ./fr agents off claude      выключить claude\n"
+               "  ./fr agents on claude       включить обратно\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     agents_sub = agents_p.add_subparsers(dest="agents_cmd")
     agents_sub.add_parser("list", help="Показать агентов и их статус")
     agents_on = agents_sub.add_parser("on", help="Включить агента")
@@ -333,21 +393,21 @@ def main():
     agents_off.add_argument("agent_name", help="Имя агента (claude, gemini, qwen)")
 
     # init
-    sub.add_parser("init", help="Создать forgerace.toml и TASKS.md в текущей директории")
+    sub.add_parser("init", help="Создать forgerace.toml и TASKS.md")
 
     # merge-pending
-    sub.add_parser("merge-pending", help="Промержить review-задачи в develop")
+    sub.add_parser("merge-pending", help="Промержить review → develop")
 
     # status
-    sub.add_parser("status", help="Статус задач")
+    sub.add_parser("status", help="Статус задач + граф зависимостей")
 
     # help
-    sub.add_parser("help", help="Показать справку")
+    sub.add_parser("help", help="Полная справка с примерами")
 
     args = parser.parse_args()
 
     if args.command == "help" or args.command is None:
-        parser.print_help()
+        _print_full_help()
         return
 
     # init — создаёт файлы в CWD, --config не имеет смысла
