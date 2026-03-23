@@ -97,25 +97,46 @@ COMPLEXITY: N
 
     log.info(f"  🔍 Оценка сложности {task.id}...")
     from .agents import run_text_agent
-    output = run_text_agent(prompt, timeout=120, tag=task.id)
 
-    complexity_match = re.search(r"COMPLEXITY:\s*(\d)", output)
-    if not complexity_match:
-        log.warning(f"  ⚠ Не удалось оценить сложность {task.id}, пропускаю")
-        return False
+    # Пробуем всех агентов по очереди (round-robin) до успешной декомпозиции
+    agent_names = cfg.agent_names
+    complexity = None
+    tasks_block = ""
+    new_task_ids = []
 
-    complexity = int(complexity_match.group(1))
-    log.info(f"  📊 {task.id} сложность: {complexity}/5 (порог: {cfg.max_task_complexity})")
+    for attempt_num in range(len(agent_names)):
+        output = run_text_agent(prompt, timeout=120, tag=task.id)
+        if not output:
+            continue
 
-    if complexity <= cfg.max_task_complexity:
-        _assessed_tasks.add(task.id)
-        return False
+        complexity_match = re.search(r"COMPLEXITY:\s*(\d)", output)
+        if not complexity_match:
+            log.warning(f"  ⚠ [{task.id}] Агент не вернул COMPLEXITY, пробую следующего...")
+            continue
 
-    # Декомпозиция
-    tasks_block = output[complexity_match.end():].strip()
-    new_task_ids = re.findall(r"### (TASK-\d+):", tasks_block)
+        complexity = int(complexity_match.group(1))
+        log.info(f"  📊 {task.id} сложность: {complexity}/5 (порог: {cfg.max_task_complexity})")
+
+        if complexity <= cfg.max_task_complexity:
+            _assessed_tasks.add(task.id)
+            return False
+
+        # Сложность высокая — проверяем наличие подзадач
+        tasks_block = output[complexity_match.end():].strip()
+        # Логируем обоснование (текст до первого ### TASK-)
+        reasoning = tasks_block.split("### TASK-")[0].strip()
+        if reasoning:
+            log.info(f"  [{task.id}] Обоснование: {reasoning[:300]}")
+
+        new_task_ids = re.findall(r"### (TASK-\d+):", tasks_block)
+        if new_task_ids:
+            break  # Успешная декомпозиция
+        else:
+            log.warning(f"  ⚠ [{task.id}] Сложность {complexity} но подзадачи не сгенерированы, пробую другого агента...")
+
     if not new_task_ids:
-        log.warning(f"  ⚠ Сложность {complexity} но подзадачи не сгенерированы — запускаю как есть")
+        if complexity and complexity > cfg.max_task_complexity:
+            log.error(f"  ✗ [{task.id}] Ни один агент не смог декомпозировать (сложность {complexity}) — запускаю как есть")
         _assessed_tasks.add(task.id)
         return False
 
