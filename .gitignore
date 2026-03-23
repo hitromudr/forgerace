@@ -8,3 +8,4 @@ docs/discuss/
 *.egg-info/
 dist/
 build/
+fr

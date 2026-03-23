@@ -1,0 +1,29 @@
+# ForgeRace configuration
+# Docs: https://github.com/hitromudr/forgerace
+
+[project]
+name = "forgerace"
+root = "."
+dev_branch = "develop"
+
+[agents.claude]
+command = "claude"
+args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSearch",
+        "--max-turns", "50", "--output-format", "stream-json", "--verbose"]
+review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+inactivity_timeout = 300
+
+[agents.gemini]
+command = "gemini"
+args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
+review_args = ["-p", "-"]
+inactivity_timeout = 180
+
+[build]
+commands = []
+check_command = ""
+
+[limits]
+max_parallel_tasks = 4
+agent_timeout = 900
+max_review_rounds = 3
