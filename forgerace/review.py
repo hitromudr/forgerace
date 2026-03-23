@@ -349,9 +349,10 @@ def send_to_rework(result: AgentResult, task: Task, comments: str) -> bool:
         )
 
     ok, error = verify_build(result.workdir, task)
+    tag_rework = f"{task.id}/{result.agent_type}/доработка"
     if not ok:
-        log.warning(f"[{tag}] ✗ сборка после доработки: {error[-300:]}")
+        log.warning(f"[{tag_rework}] ✗ сборка провалена: {error[-300:]}")
         return False
 
-    log.info(f"[{tag}] ✓ сборка после доработки пройдена")
+    log.info(f"[{tag_rework}] ✓ сборка ок")
     return True

@@ -421,7 +421,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 if all_comments:
                     log.info(f"[{task.id}/{result.agent_type}/доработка] отправлен на исправление")
                     send_to_rework(result, task, all_comments)
-                log.info(f"[{task.id}/{result.agent_type}/ревью] ✗ NEEDS_WORK → доработка")
+                log.info(f"[{task.id}/{result.agent_type}/ревью] ✗ код {result.agent_type} не принят → доработка")
 
     # Все futures завершены — cleanup worktree безопасен
     if race_winner:
