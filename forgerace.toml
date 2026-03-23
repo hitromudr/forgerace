@@ -6,7 +6,7 @@ name = "forgerace"
 root = "."
 dev_branch = "develop"
 
-mode = "competitive"
+mode = "distributed"
 [agents.claude]
 command = "claude"
 args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSearch",
