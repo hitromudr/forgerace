@@ -215,14 +215,15 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
     all_agent_names = cfg.agent_names
     author_names = list(diffs.keys())
 
-    # Все против одного: каждый автор ревьюится ВСЕМИ остальными
+    # Round-robin: каждый автор ревьюится ОДНИМ другим агентом (не N²)
     review_pairs = []
-    for author in author_names:
+    for i, author in enumerate(author_names):
         others = [n for n in all_agent_names if n != author]
         if not others:
             others = [author]
-        for reviewer in others:
-            review_pairs.append((reviewer, author))
+        # Один ревьюер на автора — round-robin по списку
+        reviewer = others[i % len(others)]
+        review_pairs.append((reviewer, author))
 
     pairs_str = ", ".join(f"{rev}→{auth}" for rev, auth in review_pairs)
     log.info(f"    Ревью крест-на-крест: {pairs_str}")
