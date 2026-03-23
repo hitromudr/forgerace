@@ -236,7 +236,7 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
     total_usage = TokenUsage()
 
     for attempt in range(1, cfg.max_retries + 1):
-        log.info(f"[{tag}] Попытка {attempt}/{cfg.max_retries}")
+        log.info(f"[{tag}] 🔨 КОД: попытка {attempt}/{cfg.max_retries}")
 
         prompt = build_prompt(task, error_log)
         result = run_agent_process(agent_type, workdir, task, prompt,
@@ -296,7 +296,7 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
                 log.warning(f"[{tag}] stderr: {stderr_tail[:200]}")
 
         if ok:
-            log.info(f"[{tag}] ✓ сборка пройдена")
+            log.info(f"[{tag}] 🔨 КОД: ✓ сборка пройдена, ожидаем ревью")
             _unregister_agent(tag)
             metrics = collect_metrics(workdir, task)
             cost = _get_usage_cost(total_usage, agent_type)
@@ -306,7 +306,7 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
                 success=True, usage=total_usage, **metrics,
             )
         else:
-            log.warning(f"[{tag}] ✗ сборка провалена:\n{error_log[-500:]}")
+            log.warning(f"[{tag}] 🔨 КОД: ✗ сборка провалена:\n{error_log[-500:]}")
 
     # Проверяем: был ли агент отменён — тогда тихо выходим (уже залогировано в retry loop)
     if cancel_event and cancel_event.is_set():
@@ -373,7 +373,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 reviewers = [result.agent_type]
             diff = get_diff(result, task)
             changed = get_changed_files(result, task)
-            log.info(f"[{task.id}] 📝 Ревью: {', '.join(reviewers)} → {result.agent_type}")
+            log.info(f"[{task.id}] 📝 РЕВЬЮ: {', '.join(reviewers)} проверяют {result.agent_type}")
 
             # Ревью параллельно, доработка начинается сразу при NEEDS_WORK
             rework_comments = []
@@ -390,7 +390,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                     rev = review_futures[f]
                     rv = f.result()
                     verdicts[rev] = rv
-                    log.info(f"[{task.id}] 📋 {rev} ревьюит {result.agent_type}: {rv['verdict']}")
+                    log.info(f"[{task.id}] 📝 РЕВЬЮ: {rev} → {result.agent_type}: {rv['verdict']}")
                     log.info(f"[{task.id}] {rv.get('summary', rv.get('comments', '')[:200])}")
                     # Собираем замечания для доработки
                     if rv["verdict"] != "APPROVED":
@@ -401,8 +401,8 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             # APPROVED только если ВСЕ ревьюеры одобрили
             all_approved = all(v["verdict"] == "APPROVED" for v in verdicts.values())
             if all_approved:
-                log.info(f"[{task.id}] ✅ Ревью пройдено: {result.agent_type}")
-                log.info(f"[{task.id}] 🏆 победитель: {result.agent_type}")
+                log.info(f"[{task.id}] 📝 РЕВЬЮ: ✅ одобрено — {result.agent_type}")
+                log.info(f"[{task.id}] 🏆 МЕРЖ: победитель — {result.agent_type}")
                 cancel_event.set()  # сигнал остальным агентам на завершение
                 # Мержим СРАЗУ, не ждём остальных
                 if merge_to_develop(result.branch, task.id):
@@ -419,9 +419,9 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 # Сразу отправляем на доработку — не ждём других агентов
                 all_comments = "\n\n".join(rework_comments)
                 if all_comments:
-                    log.info(f"[{task.id}/{result.agent_type}] 🔧 отправлен на доработку сразу")
+                    log.info(f"[{task.id}/{result.agent_type}] 🔧 ДОРАБОТКА: отправлен на исправление")
                     send_to_rework(result, task, all_comments)
-                log.info(f"[{task.id}] ⏳ {result.agent_type} NEEDS_WORK, доработка запущена")
+                log.info(f"[{task.id}] 📝 РЕВЬЮ: ✗ {result.agent_type} NEEDS_WORK → доработка")
 
     # Все futures завершены — cleanup worktree безопасен
     if race_winner:
@@ -452,7 +452,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
     prev_summary = None
     repeat_count = 0
     for review_round in range(1, cfg.max_review_rounds + 1):
-        log.info(f"[{task.id}] 📝 Code review (раунд {review_round}/{cfg.max_review_rounds})...")
+        log.info(f"[{task.id}] 📝 РЕВЬЮ: раунд {review_round}/{cfg.max_review_rounds}")
         rv = code_review(passed, task)
 
         if rv["verdict"] == "error":
@@ -480,7 +480,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             return False
 
         if rv["verdict"] == "APPROVED":
-            log.info(f"[{task.id}] ✅ Ревью пройдено: {best_result.agent_type}")
+            log.info(f"[{task.id}] 📝 РЕВЬЮ: ✅ одобрено — {best_result.agent_type}")
             break
 
         # Детекция зацикливания: одинаковое замечание 2 раунда подряд → эскалация
@@ -514,14 +514,14 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 with ThreadPoolExecutor(max_workers=len(rework_items)) as rework_pool:
                     rework_futures = {}
                     for agent_result, agent_comments in rework_items:
-                        log.info(f"[{task.id}/{agent_result.agent_type}] 🔧 отправлен на доработку")
+                        log.info(f"[{task.id}/{agent_result.agent_type}] 🔧 ДОРАБОТКА: отправлен на исправление")
                         f = rework_pool.submit(send_to_rework, agent_result, task, agent_comments)
                         rework_futures[f] = agent_result.agent_type
                     for f in as_completed(rework_futures):
                         f.result()  # дождаться завершения
         else:
             comments = rv.get("comments", "")
-            log.info(f"[{task.id}/{best_result.agent_type}] 🔧 отправлен на доработку")
+            log.info(f"[{task.id}/{best_result.agent_type}] 🔧 ДОРАБОТКА: отправлен на исправление")
             send_to_rework(best_result, task, comments)
             passed = [best_result]
     else:
@@ -534,7 +534,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
         if best_name and best_name != "none":
             best_result = next((r for r in passed if r.agent_type.lower() == best_name), None)
         if best_result and rv.get("verdict") == "APPROVED":
-            log.info(f"[{task.id}] ✅ Ревью пройдено (финал): {best_result.agent_type}")
+            log.info(f"[{task.id}] 📝 РЕВЬЮ: ✅ одобрено (финал) — {best_result.agent_type}")
         else:
             log.error(f"[{task.id}] ✗ не прошёл ревью за {cfg.max_review_rounds}+1 раундов → BLOCKED")
             update_task_status(task.id, "blocked")
@@ -544,7 +544,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             return False
 
     # Мерж
-    log.info(f"[{task.id}] 🏆 победитель: {best_result.agent_type}")
+    log.info(f"[{task.id}] 🏆 МЕРЖ: победитель — {best_result.agent_type}")
     if merge_to_develop(best_result.branch, task.id):
         update_task_status(task.id, "done", agent=best_result.agent_type, branch=best_result.branch)
         run_hook(cfg.hook_on_complete, task.id, "done", best_result.agent_type)
@@ -601,7 +601,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     prev_summary = None
     repeat_count = 0
     for review_round in range(1, cfg.max_review_rounds + 1):
-        log.info(f"[{task.id}] 📝 Code review (раунд {review_round}/{cfg.max_review_rounds})...")
+        log.info(f"[{task.id}] 📝 РЕВЬЮ: раунд {review_round}/{cfg.max_review_rounds}")
         log.info(f"[{task.id}] Ревьюер: {reviewer} → {agent_type}")
         rv = single_review(reviewer, agent_type, get_diff(best_result, task), task,
                            build_passed=True, changed_files=get_changed_files(best_result, task),
@@ -633,7 +633,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         if not comments.strip() or rv.get("verdict") == "error":
             log.warning(f"[{task.id}] ⚠ Ревью без замечаний или ошибка — пропускаю")
             continue
-        log.info(f"[{task.id}/{agent_type}] 🔧 отправлен на доработку")
+        log.info(f"[{task.id}/{agent_type}] 🔧 ДОРАБОТКА: отправлен на исправление")
         send_to_rework(best_result, task, comments)
     else:
         log.info(f"[{task.id}] 📝 Финальное ревью...")
