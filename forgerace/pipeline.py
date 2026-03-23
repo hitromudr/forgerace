@@ -339,6 +339,8 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             changed = get_changed_files(result, task)
             log.info(f"[{task.id}] 📝 Ревью: {', '.join(reviewers)} → {result.agent_type}")
 
+            # Ревью параллельно, доработка начинается сразу при NEEDS_WORK
+            rework_comments = []
             with ThreadPoolExecutor(max_workers=len(reviewers)) as review_pool:
                 review_futures = {}
                 for rev in reviewers:
@@ -347,12 +349,18 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                                            workdir=result.workdir)
                     review_futures[f] = rev
                 verdicts = {}
+                rework_started = False
                 for f in as_completed(review_futures):
                     rev = review_futures[f]
                     rv = f.result()
                     verdicts[rev] = rv
                     log.info(f"[{task.id}] 📋 {rev} ревьюит {result.agent_type}: {rv['verdict']}")
                     log.info(f"[{task.id}] {rv.get('summary', rv.get('comments', '')[:200])}")
+                    # Собираем замечания для доработки
+                    if rv["verdict"] != "APPROVED":
+                        comments = rv.get("comments", rv.get("summary", ""))
+                        if comments:
+                            rework_comments.append(comments)
 
             # APPROVED только если ВСЕ ревьюеры одобрили
             all_approved = all(v["verdict"] == "APPROVED" for v in verdicts.values())
@@ -370,7 +378,12 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                     log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
                 race_winner = result
             else:
-                log.info(f"[{task.id}] ⏳ {result.agent_type} NEEDS_WORK, ждём следующего...")
+                # Сразу отправляем на доработку — не ждём других агентов
+                all_comments = "\n\n".join(rework_comments)
+                if all_comments:
+                    log.info(f"[{task.id}/{result.agent_type}] 🔧 отправлен на доработку сразу")
+                    send_to_rework(result, task, all_comments)
+                log.info(f"[{task.id}] ⏳ {result.agent_type} NEEDS_WORK, доработка запущена")
 
     # Все futures завершены — cleanup worktree безопасен
     if race_winner:
