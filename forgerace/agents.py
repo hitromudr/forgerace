@@ -4,17 +4,18 @@ import json
 import select
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import cfg
+from .cost import TokenUsage, parse_usage_event
 from .tasks import Task
 from .utils import log
 
 
 # --- Логирование событий ---
 
-def _log_claude_event(tag: str, event: dict):
+def _log_claude_event(tag: str, event: dict, usage_acc: TokenUsage | None = None):
     """Логирует событие из stream-json вывода Claude/Qwen (совместимый формат)."""
     etype = event.get("type", "")
 
@@ -60,13 +61,20 @@ def _log_claude_event(tag: str, event: dict):
         usage = event.get("usage", {})
         in_tok = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
         out_tok = usage.get("output_tokens", 0)
+
+        if usage_acc:
+            usage_acc.estimated_usd += cost
+            usage_acc.input_tokens += usage.get("input_tokens", 0)
+            usage_acc.output_tokens += usage.get("output_tokens", 0)
+            usage_acc.cache_read_input_tokens += usage.get("cache_read_input_tokens", 0)
+
         if cost:
             log.info(f"[{tag}] 📊 {turns} turns, {dur_str}, {in_tok // 1000}k in/{out_tok // 1000}k out, ${cost:.2f}")
         else:
             log.info(f"[{tag}] 📊 {turns} turns, {dur_str}, {in_tok // 1000}k in/{out_tok // 1000}k out")
 
 
-def _log_gemini_event(tag: str, event: dict):
+def _log_gemini_event(tag: str, event: dict, usage_acc: TokenUsage | None = None):
     """Логирует событие из stream-json вывода Gemini."""
     etype = event.get("type", "")
 
@@ -95,7 +103,18 @@ def _log_gemini_event(tag: str, event: dict):
         out_tok = stats.get("output_tokens", 0)
         duration = stats.get("duration_ms", 0) // 1000
         tool_calls = stats.get("tool_calls", 0)
-        log.info(f"[{tag}] 📊 {tool_calls} tools, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out")
+        cost = event.get("total_cost_usd", 0)
+
+        if usage_acc:
+            usage_acc.estimated_usd += cost
+            usage_acc.input_tokens += in_tok
+            usage_acc.output_tokens += out_tok
+            usage_acc.cache_read_input_tokens += stats.get("cache_read_input_tokens", 0)
+
+        if cost:
+            log.info(f"[{tag}] 📊 {tool_calls} tools, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out, ${cost:.2f}")
+        else:
+            log.info(f"[{tag}] 📊 {tool_calls} tools, {duration}s, {in_tok // 1000}k in/{out_tok // 1000}k out")
 
 
 # --- Запуск агентов ---
@@ -154,6 +173,7 @@ def _run_agent_streaming(
     # Early-abort: tool_calls без Write/Edit
     tool_calls_since_edit = 0
     MAX_CALLS_WITHOUT_EDIT = 25
+    usage_acc = TokenUsage()
     try:
         proc = subprocess.Popen(
             cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -165,20 +185,26 @@ def _run_agent_streaming(
                 proc.kill()
                 proc.wait()
                 log.error(f"[{tag}] ⏰ Таймаут ({cfg.agent_timeout}с)")
-                return subprocess.CompletedProcess(cmd, 1, "", "TIMEOUT")
+                res = subprocess.CompletedProcess(cmd, 1, "", "TIMEOUT")
+                res.usage = usage_acc
+                return res
 
             # Отмена: другой агент уже победил
             if cancel_event and cancel_event.is_set():
                 proc.kill()
                 proc.wait()
                 log.info(f"[{tag}] 🛑 Отменён (другой агент победил)")
-                return subprocess.CompletedProcess(cmd, 1, "", "CANCELLED")
+                res = subprocess.CompletedProcess(cmd, 1, "", "CANCELLED")
+                res.usage = usage_acc
+                return res
 
             if time.time() - last_activity > inactivity_timeout:
                 proc.kill()
                 proc.wait()
                 log.error(f"[{tag}] ⏰ Нет tool_use {inactivity_timeout}с — завис, убиваю")
-                return subprocess.CompletedProcess(cmd, 1, "", "INACTIVITY_TIMEOUT")
+                res = subprocess.CompletedProcess(cmd, 1, "", "INACTIVITY_TIMEOUT")
+                res.usage = usage_acc
+                return res
 
             # Progress timeout: diff не меняется слишком долго
             now = time.time()
@@ -193,7 +219,9 @@ def _run_agent_streaming(
                     proc.wait()
                     stale_mins = int((now - last_diff_change) / 60)
                     log.error(f"[{tag}] ⏰ Diff не меняется {stale_mins}мин — зацикливание, убиваю")
-                    return subprocess.CompletedProcess(cmd, 1, "", "PROGRESS_TIMEOUT")
+                    res = subprocess.CompletedProcess(cmd, 1, "", "PROGRESS_TIMEOUT")
+                    res.usage = usage_acc
+                    return res
 
             ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 5.0))
             if ready:
@@ -213,7 +241,7 @@ def _run_agent_streaming(
                             tool_calls_since_edit += 1
                             if _event_has_productive_action(event):
                                 tool_calls_since_edit = 0
-                        log_event_fn(tag, event)
+                        log_event_fn(tag, event, usage_acc=usage_acc)
                     except json.JSONDecodeError:
                         pass
 
@@ -221,7 +249,9 @@ def _run_agent_streaming(
                         proc.kill()
                         proc.wait()
                         log.error(f"[{tag}] ⏰ {tool_calls_since_edit} tool_calls без Edit/Write/Bash — зацикливание, убиваю")
-                        return subprocess.CompletedProcess(cmd, 1, "", "NO_EDIT_ABORT")
+                        res = subprocess.CompletedProcess(cmd, 1, "", "NO_EDIT_ABORT")
+                        res.usage = usage_acc
+                        return res
             elif proc.poll() is not None:
                 for line in proc.stdout:
                     stdout_lines.append(line)
@@ -231,17 +261,21 @@ def _run_agent_streaming(
         stderr = proc.stderr.read() if proc.stderr else ""
         result_text = extract_result_fn(stdout_lines)
 
-        return subprocess.CompletedProcess(
+        res = subprocess.CompletedProcess(
             cmd, returncode=proc.returncode or 0,
             stdout=result_text or "".join(stdout_lines), stderr=stderr,
         )
+        res.usage = usage_acc
+        return res
     except Exception as e:
         log.error(f"[{tag}] Ошибка: {e}")
         try:
             proc.kill()
         except Exception:
             pass
-        return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr=str(e))
+        res = subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr=str(e))
+        res.usage = usage_acc
+        return res
 
 
 def _claude_activity_check(event: dict) -> bool:
@@ -473,3 +507,4 @@ class AgentResult:
     success: bool
     binary_size: int = 0
     code_lines: int = 0
+    usage: TokenUsage = field(default_factory=TokenUsage)
