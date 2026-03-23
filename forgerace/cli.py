@@ -216,6 +216,67 @@ def merge_pending_tasks():
     show_status()
 
 
+def _cmd_agents_list():
+    """Показывает всех агентов и их статус."""
+    for name, acfg in cfg.agents.items():
+        status = f"{C['green']}ON{R}" if acfg.enabled else f"{C['red']}OFF{R}"
+        print(f"  {C['bold']}{name}{R}: {status}  ({acfg.command})")
+    print(f"\n  Активные: {C['bold']}{cfg.agent_names}{R}")
+
+
+def _cmd_agent_toggle(agent_name: str, enable: bool):
+    """Включает/выключает агента в forgerace.toml."""
+    if agent_name not in cfg.agents:
+        print(f"  {C['red']}Агент '{agent_name}' не найден. Доступные: {list(cfg.agents.keys())}{R}")
+        return
+
+    toml_path = cfg.root_dir / "forgerace.toml"
+    if not toml_path.exists():
+        print(f"  {C['red']}forgerace.toml не найден{R}")
+        return
+
+    content = toml_path.read_text(encoding="utf-8")
+    section = f"[agents.{agent_name}]"
+    if section not in content:
+        print(f"  {C['red']}Секция {section} не найдена в forgerace.toml{R}")
+        return
+
+    # Ищем enabled в секции агента или добавляем
+    lines = content.splitlines()
+    section_idx = next(i for i, l in enumerate(lines) if l.strip() == section)
+
+    # Найдём конец секции (следующая [секция] или EOF)
+    end_idx = len(lines)
+    for i in range(section_idx + 1, len(lines)):
+        if lines[i].strip().startswith("["):
+            end_idx = i
+            break
+
+    # Ищем enabled = ... в секции
+    enabled_idx = None
+    for i in range(section_idx + 1, end_idx):
+        if lines[i].strip().startswith("enabled"):
+            enabled_idx = i
+            break
+
+    value = "true" if enable else "false"
+    if enabled_idx is not None:
+        lines[enabled_idx] = f"enabled = {value}"
+    else:
+        # Вставляем перед концом секции
+        lines.insert(end_idx, f"enabled = {value}")
+
+    toml_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # Перечитаем конфиг
+    init_config(config_path=toml_path)
+
+    action = "включён" if enable else "выключен"
+    color = C['green'] if enable else C['red']
+    print(f"  {color}{agent_name} {action}{R}")
+    print(f"  Активные: {C['bold']}{cfg.agent_names}{R}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="ForgeRace — мультиагентный оркестратор",
@@ -261,6 +322,15 @@ def main():
 
     disc_regen = disc_sub.add_parser("regen", help="Перегенерировать задачи из дискуссии")
     disc_regen.add_argument("topic", help="Имя темы")
+
+    # agents
+    agents_p = sub.add_parser("agents", help="Управление агентами (вкл/выкл/список)")
+    agents_sub = agents_p.add_subparsers(dest="agents_cmd")
+    agents_sub.add_parser("list", help="Показать агентов и их статус")
+    agents_on = agents_sub.add_parser("on", help="Включить агента")
+    agents_on.add_argument("agent_name", help="Имя агента (claude, gemini, qwen)")
+    agents_off = agents_sub.add_parser("off", help="Выключить агента")
+    agents_off.add_argument("agent_name", help="Имя агента (claude, gemini, qwen)")
 
     # init
     sub.add_parser("init", help="Создать forgerace.toml и TASKS.md в текущей директории")
@@ -315,6 +385,16 @@ def main():
                 _post_resolve(filepath)
         else:
             disc_p.print_help()
+        return
+
+    # agents
+    if args.command == "agents":
+        if args.agents_cmd == "list" or args.agents_cmd is None:
+            _cmd_agents_list()
+        elif args.agents_cmd == "on":
+            _cmd_agent_toggle(args.agent_name, True)
+        elif args.agents_cmd == "off":
+            _cmd_agent_toggle(args.agent_name, False)
         return
 
     # merge-pending

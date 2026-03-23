@@ -13,6 +13,7 @@ args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSear
 review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
 inactivity_timeout = 300
 
+enabled = true
 [agents.gemini]
 command = "gemini"
 args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
