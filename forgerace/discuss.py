@@ -403,7 +403,7 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
                 if not got_output:
                     print(flush=True)  # новая строка после "думает...Xs"
                     got_output = True
-                print(line, end="", flush=True)
+                print(_colorize_line(line.rstrip()), flush=True)
                 reply_lines.append(line)
             else:
                 if proc.poll() is not None:
@@ -411,7 +411,7 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
                         if not got_output:
                             print(flush=True)
                             got_output = True
-                        print(line, end="", flush=True)
+                        print(_colorize_line(line.rstrip()), flush=True)
                         reply_lines.append(line)
                     break
                 if not got_output:
@@ -448,14 +448,44 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
     _chat_append(filepath, agent_type, reply)
 
 
+def _colorize_line(line: str) -> str:
+    """Подсвечивает inline markdown: **bold**, `code`, @agent."""
+    R = _C["reset"]
+    BOLD = _C["bold"]
+    CYAN = _C["cyan"]
+    GREEN = _C["green"]
+    # **bold** → жирный
+    line = re.sub(r"\*\*(.+?)\*\*", rf"{BOLD}\1{R}", line)
+    # `code` → cyan
+    line = re.sub(r"`([^`]+)`", rf"{CYAN}\1{R}", line)
+    # @agent → цвет агента
+    def _color_agent(m):
+        name = m.group(1)
+        return f"{_agent_color(name)}@{name}{R}"
+    line = re.sub(r"@(\w+)", _color_agent, line)
+    return line
+
+
 def _format_discussion(text: str) -> str:
     """Форматирует markdown дискуссии для терминала с цветами."""
     R = _C["reset"]
     DIM = _C["dim"]
     BOLD = _C["bold"]
+    YELLOW = _C["yellow"]
+    GREEN = _C["green"]
+    in_code_block = False
     lines = text.splitlines()
     result = []
     for line in lines:
+        # Блоки кода — без подсветки
+        if line.strip().startswith("```"):
+            in_code_block = not in_code_block
+            result.append(f"{DIM}{line}{R}")
+            continue
+        if in_code_block:
+            result.append(f"{DIM}{line}{R}")
+            continue
+
         m = re.match(r"^## @(\w+)\s*(.*)$", line)
         if m:
             agent = m.group(1)
@@ -465,13 +495,19 @@ def _format_discussion(text: str) -> str:
             result.append(f"  {color}{BOLD}@{agent}{R} {DIM}{meta}{R}")
             result.append(f"{DIM}{'═' * 60}{R}")
         elif line.startswith("# ") and not line.startswith("## "):
-            result.append(f"\n{_C['yellow']}{'━' * 60}{R}")
-            result.append(f"  {_C['yellow']}{BOLD}{line[2:]}{R}")
-            result.append(f"{_C['yellow']}{'━' * 60}{R}")
+            result.append(f"\n{YELLOW}{'━' * 60}{R}")
+            result.append(f"  {YELLOW}{BOLD}{line[2:]}{R}")
+            result.append(f"{YELLOW}{'━' * 60}{R}")
+        elif re.match(r"^###\s+", line):
+            # ### заголовок
+            result.append(f"\n{GREEN}{BOLD}{line}{R}")
         elif re.match(r"^CONFIDENCE:\s*\d+\s*%", line.strip()):
             continue
+        elif line.strip().startswith("- "):
+            # Списки — подсветка содержимого
+            result.append(f"  {_colorize_line(line)}")
         else:
-            result.append(line)
+            result.append(_colorize_line(line))
     return "\n".join(result)
 
 
