@@ -49,10 +49,11 @@ class TokenUsage:
         if cache_read_price is None:
             cache_read_price = input_price
         
+        # input_price/output_price уже в USD за 1 токен (PricingConfig делит на 1M)
         cost = (
-            self.input_tokens * input_price / 1_000_000 +
-            self.output_tokens * output_price / 1_000_000 +
-            self.cache_read_input_tokens * cache_read_price / 1_000_000
+            self.input_tokens * input_price +
+            self.output_tokens * output_price +
+            self.cache_read_input_tokens * cache_read_price
         )
         if self.estimated_usd == 0.0:
             self.estimated_usd = cost
@@ -145,4 +146,5 @@ def parse_usage_event(event: dict, provider: str) -> Optional[TokenUsage]:
     elif provider == "gemini":
         return parse_gemini_usage(event)
     else:
-        return None
+        # Qwen и другие — Claude-совместимый формат
+        return parse_claude_usage(event)

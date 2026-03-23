@@ -33,6 +33,8 @@ class PricingConfig:
     claude_output: float = 75.0 / 1_000_000  # $75 per 1M tokens
     gemini_input: float = 1.25 / 1_000_000   # $1.25 per 1M tokens
     gemini_output: float = 10.0 / 1_000_000  # $10 per 1M tokens
+    qwen_input: float = 2.0 / 1_000_000     # $2 per 1M tokens
+    qwen_output: float = 8.0 / 1_000_000    # $8 per 1M tokens
 
 
 @dataclass
@@ -319,6 +321,8 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
             claude_output=pricing_data.get("claude_output", cfg.pricing.claude_output),
             gemini_input=pricing_data.get("gemini_input", cfg.pricing.gemini_input),
             gemini_output=pricing_data.get("gemini_output", cfg.pricing.gemini_output),
+            qwen_input=pricing_data.get("qwen_input", cfg.pricing.qwen_input),
+            qwen_output=pricing_data.get("qwen_output", cfg.pricing.qwen_output),
         )
 
     # [rules]
