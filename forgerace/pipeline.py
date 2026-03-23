@@ -651,7 +651,9 @@ def preflight_check() -> bool:
     src_dir = cfg.root_dir / "src"
     search_dir = "src/" if src_dir.exists() else "."
     marker = "<" + "<<<<<<"  # split to avoid self-match
-    result = run_cmd(["grep", "-rlI", marker, search_dir], cwd=cfg.root_dir, check=False)
+    result = run_cmd(["grep", "-rlI", "--exclude-dir=.agents", "--exclude-dir=.git",
+                       "--exclude-dir=__pycache__", marker, search_dir],
+                      cwd=cfg.root_dir, check=False)
     if result.stdout.strip():
         conflicted = result.stdout.strip().split("\n")
         log.error(f"⚠ Merge conflict маркеры в: {conflicted}")
