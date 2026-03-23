@@ -1,6 +1,7 @@
 """Очередь задач с приоритетами на основе heapq + ConcurrencyLimiter."""
 
 import heapq
+import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
@@ -13,6 +14,10 @@ class TaskQueue:
     чтобы задачи с большим priority извлекались первыми.
     При указании max_concurrent создаёт ConcurrencyLimiter для
     ограничения параллельного выполнения задач.
+
+    Приоритетная очередь и limiter — разделённые ответственности:
+    очередь определяет порядок извлечения (pop), limiter ограничивает
+    параллельность (submit). Caller делает pop() → submit(fn).
     """
 
     def __init__(self, max_concurrent: int = 3):
@@ -61,6 +66,14 @@ class TaskQueue:
         """Возвращает True, если очередь не пуста."""
         return bool(self._heap)
 
+    def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> Future:
+        """Proxy к limiter.submit() для удобства."""
+        return self.limiter.submit(fn, *args, **kwargs)
+
+    def shutdown(self, wait: bool = True, cancel_pending: bool = False) -> None:
+        """Proxy к limiter.shutdown()."""
+        self.limiter.shutdown(wait=wait, cancel_pending=cancel_pending)
+
 
 class ConcurrencyLimiter:
     """Ограничитель параллельности на основе ThreadPoolExecutor.
@@ -74,14 +87,16 @@ class ConcurrencyLimiter:
             raise ValueError("max_concurrent must be >= 1")
         self.max_concurrent = max_concurrent
         self._executor = ThreadPoolExecutor(max_workers=max_concurrent)
+        self._lock = threading.Lock()
         self._futures: list[Future] = []
 
     def _remove_done(self, future: Future) -> None:
         """Callback: убирает завершённую future из списка."""
-        try:
-            self._futures.remove(future)
-        except ValueError:
-            pass
+        with self._lock:
+            try:
+                self._futures.remove(future)
+            except ValueError:
+                pass
 
     def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> Future:
         """Поставить задачу в очередь. Запуск — по мере освобождения слотов.
@@ -95,19 +110,22 @@ class ConcurrencyLimiter:
             Future для отслеживания результата.
         """
         future = self._executor.submit(fn, *args, **kwargs)
-        self._futures.append(future)
+        with self._lock:
+            self._futures.append(future)
         future.add_done_callback(self._remove_done)
         return future
 
     @property
     def active_count(self) -> int:
         """Количество выполняющихся (не завершённых) задач."""
-        return sum(1 for f in self._futures if f.running())
+        with self._lock:
+            return sum(1 for f in self._futures if f.running())
 
     @property
     def pending_count(self) -> int:
         """Количество задач, ожидающих запуска или выполняющихся."""
-        return sum(1 for f in self._futures if not f.done())
+        with self._lock:
+            return sum(1 for f in self._futures if not f.done())
 
     def shutdown(self, wait: bool = True, cancel_pending: bool = False) -> None:
         """Завершить работу пула.
@@ -116,8 +134,10 @@ class ConcurrencyLimiter:
             wait: Ждать завершения текущих задач.
             cancel_pending: Отменить незапущенные задачи.
         """
-        if cancel_pending:
-            for f in self._futures:
-                f.cancel()
+        with self._lock:
+            if cancel_pending:
+                for f in self._futures:
+                    f.cancel()
         self._executor.shutdown(wait=wait)
-        self._futures.clear()
+        with self._lock:
+            self._futures.clear()
