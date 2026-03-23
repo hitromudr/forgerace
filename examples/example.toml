@@ -1,0 +1,65 @@
+# ForgeRace configuration example
+# Copy this file to your project root as forgerace.toml and adjust values.
+
+[project]
+name = "my-project"
+context = "a web application with REST API and PostgreSQL backend"
+root = "."
+dev_branch = "develop"
+tasks_file = "TASKS.md"
+discuss_dir = "docs/discuss"
+
+[agents.claude]
+command = "claude"
+args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob", "--max-turns", "50", "--output-format", "stream-json", "--verbose"]
+review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+inactivity_timeout = 300
+
+[agents.gemini]
+command = "gemini"
+args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
+review_args = ["-p", "-"]
+inactivity_timeout = 180
+
+[agents.qwen]
+command = "qwen"
+args = ["-p", "--allowed-tools", "read_file,write_file,edit,run_shell_command,grep_search,glob,list_directory,web_fetch",
+        "--output-format", "stream-json", "--approval-mode", "yolo"]
+review_args = ["-p", "--output-format", "text", "--approval-mode", "yolo"]
+inactivity_timeout = 300
+
+[build]
+commands = [
+    ["make", "build"],
+    ["make", "test"],
+]
+check_command = "make check"
+timeout = 120
+
+[limits]
+max_parallel_tasks = 4
+agent_timeout = 900
+max_review_rounds = 3
+max_task_complexity = 3
+progress_timeout = 600
+
+[rules]
+agent_rules = """
+FORBIDDEN (violation = task failure):
+- git stash, git checkout, git reset, git clean — any git commands except git add/commit/diff/status/log
+- cd into other directories, absolute paths to /home/
+
+RULES:
+1. Only touch files listed in the "Files" section above.
+2. Integration should only be done in files from "Files (modify)".
+3. Do NOT implement functionality from other tasks.
+4. Read existing code to understand context, but do NOT modify it beyond your task scope.
+5. NEVER delete existing code unrelated to the task.
+"""
+test_instruction = """
+Tests run via `make test` or `make check`.
+- Success = exit code 0. Failure = exit code != 0.
+- Do NOT parse test stdout (grep, tail, etc.) — check ONLY the exit code.
+- Do NOT run tests more than 2 times. If the build passes — keep writing code.
+- Your job is to WRITE CODE. If tests fail for environment reasons — finish your work, the orchestrator will handle it.
+"""

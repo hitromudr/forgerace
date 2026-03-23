@@ -1,97 +1,200 @@
 # ForgeRace
 
-Multi-agent development orchestrator. Run multiple AI agents (Claude, Gemini, etc.) competitively on coding tasks, with cross-review, auto-decomposition, and race-to-merge.
+Мультиагентный оркестратор разработки. Ключевая идея — **разные модели** (Claude, Gemini, Qwen и др.) вместе проектируют архитектуру, конкурентно реализуют и ревьюят друг друга. Одна модель, как ни промптуй — это одна модель. Разные модели спорят, находят слабые места в рассуждениях друг друга и дают решения, которые одна модель не выдаст.
 
-## Features
+> [English version](README.en.md)
 
-- **Competitive mode**: Multiple agents solve the same task, cross-review each other, best wins
-- **Distributed mode**: Different tasks assigned to different agents for parallelism
-- **Race model**: First agent to pass review gets merged immediately
-- **Auto-decomposition**: Complex tasks split into subtasks via LLM complexity assessment
-- **Cross-review**: Each agent reviews the other's code (not self-review)
-- **Streaming**: Real-time tool call events from agents (Read, Write, Bash, etc.)
-- **Auto-checkpoint**: `make check` runs automatically when all tasks are done
-- **Discussion system**: Structured architecture discussions before implementation
+## Как это работает
 
-## Supported Agents
+```
+  discuss new → discuss chat → /ok → TASKS.md → run → done
+       ↑                                          ↓
+       └── run сам создаёт дискуссию если задача не утверждена
+```
 
-- **Claude Code** (`claude` CLI) — with stream-json event parsing
-- **Gemini CLI** (`gemini` CLI) — with stream-json event parsing
-- Extensible: add new agents in config
+1. Создаёшь дискуссию — агенты обсуждают архитектуру
+2. `/ok` в чате — генерируется резолюция и задачи автоматически попадают в `TASKS.md`
+3. `run` — агенты конкурентно решают задачи, кросс-ревьюят друг друга, первый прошедший мержится
 
-## Quick Start
+Можно и без дискуссии: написать задачи в `TASKS.md` вручную. Но тогда при `run` оркестратор сам откроет дискуссию для каждой неутверждённой задачи.
+
+## Требования
+
+- Python 3.10+
+- Git
+- Хотя бы один агентский CLI, установленный и авторизованный:
+  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` CLI)
+  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini` CLI)
+
+**Важно:** ForgeRace использует официальные CLI агентов, а не API напрямую. Способ авторизации зависит от конкретного CLI — см. документацию каждого.
+
+## Быстрый старт
 
 ```bash
-# 1. Create TASKS.md with your tasks
-# 2. Configure forgerace.toml
-# 3. Run
-python3 forgerace.py run
+# 1. Клонируй ForgeRace
+git clone https://github.com/hitromudr/forgerace.git ~/forgerace
 
-# Or with discussion first
-python3 forgerace.py discuss new my-feature 'How should we implement X?'
-python3 forgerace.py discuss chat my-feature
-python3 forgerace.py run
+# 2. Перейди в свой проект и инициализируй
+cd ~/work/my-project
+python3 ~/forgerace/forgerace.py init
+# Создаст forgerace.toml и TASKS.md
+
+# 3. Настрой конфиг
+vim forgerace.toml    # build-команды, dev_branch, агенты
+
+# 4. Запусти дискуссию — агенты разработают архитектуру и сгенерируют задачи
+python3 ~/forgerace/forgerace.py discuss new api-caching 'Нужно добавить кеширование ответов API. Redis или in-memory? Какие эндпоинты кешировать? TTL?'
+python3 ~/forgerace/forgerace.py discuss chat api-caching
+# Агенты обсуждают архитектуру. Когда готово: /ok
+# → генерируется резолюция + задачи автоматически вставляются в TASKS.md
+
+# 5. Запусти агентов
+python3 ~/forgerace/forgerace.py run
+
+# Статус и граф зависимостей
+python3 ~/forgerace/forgerace.py status
 ```
 
-## Task Format (TASKS.md)
+После первого запуска конфиг запоминается — `--config` не нужен.
+
+## Флоу дискуссий
+
+Дискуссия — это структурированное обсуждение между агентами перед реализацией.
+
+```bash
+python3 ~/forgerace/forgerace.py discuss new api-caching 'Redis vs in-memory кеш для API. Какие эндпоинты? TTL? Инвалидация?'
+python3 ~/forgerace/forgerace.py discuss chat api-caching
+```
+
+В интерактивном чате:
+- **текст** — твой комментарий (агенты не вызываются)
+- **/claude**, **/gemini**, **/both** — вызвать агента(ов)
+- **/both текст** — записать комментарий и вызвать обоих
+- **/ok** — утвердить и закрыть → генерация задач
+- **/resolve текст** — закрыть с ручной резолюцией
+- **/show** — показать всю дискуссию
+- **/exit** — выйти без закрытия
+
+### Что делает `/ok`
+
+1. Финальный раунд — оба агента высказывают последние замечания
+2. Claude генерирует краткую резолюцию (3-5 строк)
+3. Резолюция записывается в файл дискуссии (слово `РЕЗОЛЮЦИЯ` — маркер утверждения)
+4. Claude парсит дискуссию и генерирует задачи → вставляются в `TASKS.md`
+
+После `/ok` задачи считаются утверждёнными и `run` запустит агентов.
+
+### Что если задача без дискуссии?
+
+Если написать задачу в `TASKS.md` вручную без поля `Дискуссия`, то при `run` оркестратор:
+1. Автоматически создаст дискуссию
+2. Запросит ответы от всех агентов
+3. Откроет интерактивный чат — ждёт `/ok` от techlead
+
+Исключение: задачи с критерием готовности `make check` утверждаются автоматически.
+
+## Режимы выполнения
+
+### Конкурентный (одна задача → все агенты)
+
+Все агенты решают одну задачу параллельно, каждый в своём git worktree. Первый финишировавший отправляется на кросс-ревью другому агенту. Прошёл — мержится в develop, остальные отменяются.
+
+### Распределённый (много задач → по агенту на задачу)
+
+Когда в батче несколько задач, простые распределяются: каждый агент берёт свою. Ревью — другим агентом.
+
+### Ревью-цикл
+
+После реализации агент получает ревью от оппонента:
+- **APPROVED** → мерж в develop
+- **NEEDS_WORK** → агент дорабатывает по замечаниям (до `max_review_rounds` раундов)
+- Одинаковое замечание 2 раунда подряд → эскалация techlead'у
+
+## Авто-декомпозиция
+
+Перед запуском агентов каждая задача оценивается на сложность (1-5). Если выше порога (`max_task_complexity`, по умолчанию 3) — Claude автоматически разбивает на подзадачи и вставляет в `TASKS.md`.
+
+## Возможности
+
+- **Race-to-merge** — первый прошедший ревью мержится немедленно
+- **Кросс-ревью** — агенты проверяют код друг друга, не свой
+- **Система дискуссий** — обсуждение → `/ok` → автогенерация задач
+- **Авто-декомпозиция** — сложные задачи разбиваются через LLM-оценку
+- **Детекция зацикливания** — повторяющееся замечание → эскалация
+- **MUD-раскраска** — цветной терминал, у каждого агента свой цвет
+- **Граф зависимостей** — `status` показывает дерево и бутылочные горлышки
+- **Worktree изоляция** — каждый агент в своём git worktree
+
+## Формат задач (TASKS.md)
 
 ```markdown
-### TASK-001: Feature name
-- **Status**: open
-- **Priority**: P1
-- **Dependencies**: TASK-000 or —
-- **Files (new)**: src/path/file.rs
-- **Files (modify)**: — or path
-- **Description**: what to implement
-- **Acceptance**: what should work
-- **Discussion**: topic-name
-- **Agent**: —
-- **Branch**: —
+### TASK-001: Название фичи
+- **Статус**: open
+- **Приоритет**: P1
+- **Зависимости**: TASK-000 или —
+- **Файлы (новые)**: src/path/file.py
+- **Файлы (modify)**: — или path
+- **Описание**: что реализовать
+- **Критерий готовности**: что должно работать
+- **Дискуссия**: имя-топика или —
+- **Агент**: —
+- **Ветка**: —
 ```
 
-## Configuration (forgerace.toml)
+Примеры: `examples/TASKS.md`.
+
+## Конфигурация (forgerace.toml)
 
 ```toml
 [project]
 name = "my-project"
+context = "краткое описание для контекста агентов"
 root = "."
 dev_branch = "develop"
 
-[agents]
-claude = { command = "claude", args = ["-p", "--max-turns", "50"] }
-gemini = { command = "gemini", args = ["-p", "--approval-mode", "yolo"] }
+[agents.claude]
+command = "claude"
+args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSearch",
+        "--max-turns", "50", "--output-format", "stream-json", "--verbose"]
+review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+inactivity_timeout = 300
+
+[agents.gemini]
+command = "gemini"
+args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
+review_args = ["-p", "-"]
+inactivity_timeout = 180
 
 [build]
-commands = [["cargo", "build"], ["cargo", "test", "--no-run"]]
-check_commands = ["make check"]
+commands = [["make", "build"], ["make", "test"]]
+check_command = "make check"
 
 [limits]
 max_parallel_tasks = 4
 agent_timeout = 900
-inactivity_timeout_claude = 300
-inactivity_timeout_gemini = 180
 max_review_rounds = 3
 max_task_complexity = 3
 ```
 
-## Architecture
+Полный пример: `examples/example.toml`.
 
-```
-forgerace/
-  __init__.py
-  config.py       — Configuration loading (TOML)
-  tasks.py        — TASKS.md parser, task model
-  agents.py       — Agent runners (Claude, Gemini, streaming)
-  review.py       — Cross-review, single review, verdict parsing
-  pipeline.py     — Main pipeline: competitive, distributed, race model
-  decompose.py    — Complexity assessment, auto-decomposition
-  discuss.py      — Discussion system (create, reply, chat, resolve)
-  worktree.py     — Git worktree management
-  merge.py        — Merge to develop (detached worktree + update-ref)
-  utils.py        — run_cmd, logging, heartbeat
-  cli.py          — CLI entry point (argparse)
-```
+## Команды
 
-## License
+| Команда | Описание |
+|---------|----------|
+| `init` | Создать `forgerace.toml` и `TASKS.md` в текущей директории |
+| `run` | Запустить задачи (с авто-дискуссиями для неутверждённых) |
+| `run --task TASK-001` | Запустить конкретную задачу |
+| `run --retry` | Перезапустить упавшие/заблокированные |
+| `run --auto` | Автозапуск следующих задач по мере завершения |
+| `status` | Статус задач + граф зависимостей |
+| `discuss new TOPIC 'вопрос'` | Создать дискуссию |
+| `discuss chat TOPIC` | Интерактивный чат с агентами |
+| `discuss list` | Список дискуссий |
+| `discuss show TOPIC` | Показать дискуссию |
+| `discuss regen TOPIC` | Перегенерировать задачи из закрытой дискуссии |
+| `merge-pending` | Промержить review-задачи в develop |
 
-MIT
+## Лицензия
+
+MIT — см. [LICENSE](LICENSE).

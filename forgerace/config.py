@@ -20,6 +20,7 @@ class AgentConfig:
     args: list[str] = field(default_factory=list)
     review_args: list[str] = field(default_factory=list)
     inactivity_timeout: int = 300
+    enabled: bool = True
 
 
 @dataclass
@@ -44,11 +45,12 @@ class Config:
 
     # --- Лимиты ---
     max_retries: int = 3
-    max_parallel_tasks: int = 4
+    max_parallel_tasks: int = 10
     agent_timeout: int = 900
     build_timeout: int = 120
     max_review_rounds: int = 3
     max_task_complexity: int = 3
+    progress_timeout: int = 600  # kill агента если diff не меняется N секунд (10 мин)
     budget_per_task_usd: Optional[float] = None
 
     # --- Pricing ---
@@ -58,7 +60,7 @@ class Config:
     agents: dict[str, AgentConfig] = field(default_factory=lambda: {
         "claude": AgentConfig(
             command="claude",
-            args=["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob",
+            args=["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSearch",
                   "--max-turns", "50", "--output-format", "stream-json", "--verbose"],
             review_args=["-p", "-", "--output-format", "text", "--permission-mode", "auto"],
             inactivity_timeout=300,
@@ -69,23 +71,30 @@ class Config:
             review_args=["-p", "-"],
             inactivity_timeout=180,
         ),
+        "qwen": AgentConfig(
+            command="qwen",
+            args=["-p", "--approval-mode", "yolo", "--output-format", "stream-json"],
+            review_args=["-p", "-", "--approval-mode", "yolo"],
+            inactivity_timeout=180,
+        ),
     })
 
     # --- Команды сборки ---
-    build_commands: list[list[str]] = field(default_factory=lambda: [
-        ["cargo", "build"],
-        ["cargo", "test", "--no-run"],
-    ])
-    check_command: str = "make check"
+    build_commands: list[list[str]] = field(default_factory=list)
+    check_command: str = ""
 
     # --- Метрики: бинарники ---
-    binary_glob_dir: str = "target/x86_64-unknown-none/debug"
-    binary_globs: list[str] = field(default_factory=lambda: ["*.bin", "ethos*"])
+    binary_glob_dir: str = ""
+    binary_globs: list[str] = field(default_factory=list)
+
+    # --- Опции ---
+    review_run_log: bool = False
 
     # --- Текстовые контексты ---
     project_context: str = ""
     discuss_context: str = ""
     agent_rules: str = ""
+    test_instruction: str = ""  # как запускать и интерпретировать тесты
 
     confidence_instruction: str = """
 В ПОСЛЕДНЕЙ строке ответа ОБЯЗАТЕЛЬНО напиши свою оценку готовности решения к реализации:
@@ -115,30 +124,103 @@ CONFIDENCE: XX%
 
     @property
     def agent_names(self) -> list[str]:
-        return list(self.agents.keys())
+        return [name for name, acfg in self.agents.items() if acfg.enabled]
+
+
+# Путь к конфигу, переданный через CLI (заполняется в init_config)
+_config_path: Optional[Path] = None
+
+
+def run_hint() -> str:
+    """Возвращает команду запуска для подсказок пользователю."""
+    import sys
+    script = sys.argv[0]
+    if script.endswith("forgerace.py"):
+        base = f"python3 {script}"
+    elif script.endswith("__main__.py") or "-m" in sys.orig_argv:
+        base = "python3 -m forgerace"
+    else:
+        base = f"{sys.executable} {script}"
+    if _config_path:
+        base += f" --config {_config_path}"
+    return base + " run"
+
+
+_LAST_CONFIG_FILE = Path.home() / ".forgerace-last"
+
+
+def find_config(start_dir: Optional[Path] = None) -> Optional[Path]:
+    """Ищет forgerace.toml вверх по дереву директорий (как .git)."""
+    d = (start_dir or Path.cwd()).resolve()
+    for _ in range(20):  # max depth
+        candidate = d / "forgerace.toml"
+        if candidate.exists():
+            return candidate
+        parent = d.parent
+        if parent == d:
+            break
+        d = parent
+    return None
+
+
+def _save_last_config(path: Path):
+    """Сохраняет путь к последнему использованному конфигу."""
+    try:
+        _LAST_CONFIG_FILE.write_text(str(path.resolve()), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _load_last_config() -> Optional[Path]:
+    """Загружает путь к последнему использованному конфигу."""
+    try:
+        if _LAST_CONFIG_FILE.exists():
+            p = Path(_LAST_CONFIG_FILE.read_text(encoding="utf-8").strip())
+            if p.exists():
+                return p
+    except OSError:
+        pass
+    return None
 
 
 def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None) -> Config:
-    """Загружает конфиг из TOML-файла. Если файла нет — возвращает дефолты."""
+    """Загружает конфиг из TOML-файла. Если файла нет — возвращает дефолты.
+
+    Порядок поиска конфига:
+    1. --config (явно указан)
+    2. forgerace.toml вверх по дереву от CWD
+    3. Последний использованный (~/.forgerace-last)
+    4. Дефолты
+    """
     cfg = Config()
 
     if root_dir:
         cfg.root_dir = root_dir.resolve()
 
     if config_path is None:
-        # Ищем forgerace.toml в root_dir
-        config_path = cfg.root_dir / "forgerace.toml"
+        # Ищем вверх по дереву
+        config_path = find_config(cfg.root_dir)
 
-    if not config_path.exists() or tomllib is None:
+    if config_path is None:
+        # Последний использованный
+        config_path = _load_last_config()
+
+    if config_path is None or not config_path.exists() or tomllib is None:
         return cfg
+
+    _save_last_config(config_path)
 
     with open(config_path, "rb") as f:
         data = tomllib.load(f)
 
+    # Директория TOML-файла — для резолва относительных путей
+    toml_dir = config_path.resolve().parent
+
     # [project]
     proj = data.get("project", {})
     if "root" in proj:
-        cfg.root_dir = Path(proj["root"]).resolve()
+        root_path = Path(proj["root"])
+        cfg.root_dir = (toml_dir / root_path).resolve() if not root_path.is_absolute() else root_path.resolve()
     if "name" in proj:
         pass  # informational only
     if "context" in proj:
@@ -160,6 +242,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 args=acfg.get("args", []),
                 review_args=acfg.get("review_args", []),
                 inactivity_timeout=acfg.get("inactivity_timeout", 300),
+                enabled=acfg.get("enabled", True),
             )
 
     # [build]
@@ -174,9 +257,11 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     # [limits]
     limits = data.get("limits", {})
     for key in ("max_parallel_tasks", "agent_timeout", "max_review_rounds",
-                "max_task_complexity", "budget_per_task_usd"):
+                "max_task_complexity", "progress_timeout", "budget_per_task_usd"):
         if key in limits:
             setattr(cfg, key, limits[key])
+    if "review_run_log" in limits:
+        cfg.review_run_log = limits["review_run_log"]
 
     # [pricing]
     pricing_data = data.get("pricing", {})
@@ -192,6 +277,8 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     rules = data.get("rules", {})
     if "agent_rules" in rules:
         cfg.agent_rules = rules["agent_rules"]
+    if "test_instruction" in rules:
+        cfg.test_instruction = rules["test_instruction"]
 
     # [metrics]
     metrics = data.get("metrics", {})
@@ -209,6 +296,8 @@ cfg = Config()
 
 def init_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None):
     """Инициализирует глобальный конфиг in-place (чтобы все модули видели изменения)."""
+    global _config_path
+    _config_path = config_path
     new_cfg = load_config(config_path, root_dir)
     # Обновляем существующий объект, а не заменяем — иначе from .config import cfg
     # в других модулях будет ссылаться на старый объект
