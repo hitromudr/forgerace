@@ -623,7 +623,8 @@ def preflight_check() -> bool:
     # Проверяем merge conflict маркеры (ищем в src/ если есть, иначе в корне)
     src_dir = cfg.root_dir / "src"
     search_dir = "src/" if src_dir.exists() else "."
-    result = run_cmd(["grep", "-rlI", "<<<<<<<", search_dir], cwd=cfg.root_dir, check=False)
+    marker = "<" + "<<<<<<"  # split to avoid self-match
+    result = run_cmd(["grep", "-rlI", marker, search_dir], cwd=cfg.root_dir, check=False)
     if result.stdout.strip():
         conflicted = result.stdout.strip().split("\n")
         log.error(f"⚠ Merge conflict маркеры в: {conflicted}")
