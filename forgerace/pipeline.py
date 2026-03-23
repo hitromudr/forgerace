@@ -209,6 +209,8 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
 
     is_design = task.files_new.startswith("docs/")
     error_log = ""
+    from .cost import TokenUsage
+    total_usage = TokenUsage()
 
     for attempt in range(1, cfg.max_retries + 1):
         log.info(f"[{tag}] Попытка {attempt}/{cfg.max_retries}")
@@ -216,6 +218,8 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
         prompt = build_prompt(task, error_log)
         result = run_agent_process(agent_type, workdir, task, prompt,
                                    cancel_event=cancel_event)
+        if hasattr(result, "usage") and result.usage:
+            total_usage.accumulate(result.usage)
 
         agent_log = cfg.log_dir / f"{task.id.lower()}-{agent_type}-attempt{attempt}.log"
         agent_log.write_text(
@@ -274,7 +278,7 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
             metrics = collect_metrics(workdir, task)
             return AgentResult(
                 agent_type=agent_type, branch=branch, workdir=workdir,
-                success=True, **metrics,
+                success=True, usage=total_usage, **metrics,
             )
         else:
             log.warning(f"[{tag}] ✗ сборка провалена:\n{error_log[-500:]}")
@@ -282,10 +286,10 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
     # Проверяем: был ли агент отменён — тогда тихо выходим (уже залогировано в retry loop)
     if cancel_event and cancel_event.is_set():
         _unregister_agent(tag)
-        return AgentResult(agent_type=agent_type, branch=branch, workdir=workdir, success=False)
+        return AgentResult(agent_type=agent_type, branch=branch, workdir=workdir, success=False, usage=total_usage)
     log.error(f"[{tag}] ✗ BLOCKED после {cfg.max_retries} попыток")
     _unregister_agent(tag)
-    return AgentResult(agent_type=agent_type, branch=branch, workdir=workdir, success=False)
+    return AgentResult(agent_type=agent_type, branch=branch, workdir=workdir, success=False, usage=total_usage)
 
 
 # --- Конкурентный режим ---

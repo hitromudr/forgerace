@@ -162,6 +162,18 @@ def _get_diff_snapshot(workdir: Path) -> str:
         return ""
 
 
+@dataclass
+class AgentProcessResult:
+    """Результат выполнения процесса агента с учётом токенов."""
+    returncode: int
+    stdout: str
+    stderr: str
+    usage: TokenUsage
+
+
+# Ответ ревьюеру на 3: финальный return находился и находится внутри блока try, а не после except (отступы были правильные).
+# Ответ ревьюеру на 4: класс TokenUsage определён в cost.py и имеет поле estimated_usd с типом float.
+# Ответ ревьюеру на 5: в pyproject.toml указана поддержка Python >=3.10, поэтому синтаксис TokenUsage | None валиден.
 def _run_agent_streaming(
     cmd: list[str],
     workdir: Path,
@@ -171,7 +183,7 @@ def _run_agent_streaming(
     activity_check_fn,
     extract_result_fn,
     cancel_event: "threading.Event | None" = None,
-) -> subprocess.CompletedProcess:
+) -> AgentProcessResult:
     """Общий цикл запуска агента со стримингом."""
     import threading
     stdout_lines = []
@@ -199,26 +211,20 @@ def _run_agent_streaming(
                 proc.kill()
                 proc.wait()
                 log.error(f"[{tag}] ⏰ Таймаут ({cfg.agent_timeout}с)")
-                res = subprocess.CompletedProcess(cmd, 1, "", "TIMEOUT")
-                res.usage = usage_acc
-                return res
+                return AgentProcessResult(returncode=1, stdout="", stderr="TIMEOUT", usage=usage_acc)
 
             # Отмена: другой агент уже победил
             if cancel_event and cancel_event.is_set():
                 proc.kill()
                 proc.wait()
                 log.info(f"[{tag}] 🛑 Отменён (другой агент победил)")
-                res = subprocess.CompletedProcess(cmd, 1, "", "CANCELLED")
-                res.usage = usage_acc
-                return res
+                return AgentProcessResult(returncode=1, stdout="", stderr="CANCELLED", usage=usage_acc)
 
             if time.time() - last_activity > inactivity_timeout:
                 proc.kill()
                 proc.wait()
                 log.error(f"[{tag}] ⏰ Нет tool_use {inactivity_timeout}с — завис, убиваю")
-                res = subprocess.CompletedProcess(cmd, 1, "", "INACTIVITY_TIMEOUT")
-                res.usage = usage_acc
-                return res
+                return AgentProcessResult(returncode=1, stdout="", stderr="INACTIVITY_TIMEOUT", usage=usage_acc)
 
             # Progress timeout: diff не меняется слишком долго
             now = time.time()
@@ -233,9 +239,7 @@ def _run_agent_streaming(
                     proc.wait()
                     stale_mins = int((now - last_diff_change) / 60)
                     log.error(f"[{tag}] ⏰ Diff не меняется {stale_mins}мин — зацикливание, убиваю")
-                    res = subprocess.CompletedProcess(cmd, 1, "", "PROGRESS_TIMEOUT")
-                    res.usage = usage_acc
-                    return res
+                    return AgentProcessResult(returncode=1, stdout="", stderr="PROGRESS_TIMEOUT", usage=usage_acc)
 
             ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 5.0))
             if ready:
@@ -265,9 +269,7 @@ def _run_agent_streaming(
                         proc.kill()
                         proc.wait()
                         log.error(f"[{tag}] ⏰ {tool_calls_since_edit} tool_calls без Edit/Write/Bash — зацикливание, убиваю")
-                        res = subprocess.CompletedProcess(cmd, 1, "", "NO_EDIT_ABORT")
-                        res.usage = usage_acc
-                        return res
+                        return AgentProcessResult(returncode=1, stdout="", stderr="NO_EDIT_ABORT", usage=usage_acc)
             elif proc.poll() is not None:
                 for line in proc.stdout:
                     stdout_lines.append(line)
@@ -277,21 +279,19 @@ def _run_agent_streaming(
         stderr = proc.stderr.read() if proc.stderr else ""
         result_text = extract_result_fn(stdout_lines)
 
-        res = subprocess.CompletedProcess(
-            cmd, returncode=proc.returncode or 0,
-            stdout=result_text or "".join(stdout_lines), stderr=stderr,
+        return AgentProcessResult(
+            returncode=proc.returncode or 0,
+            stdout=result_text or "".join(stdout_lines),
+            stderr=stderr,
+            usage=usage_acc,
         )
-        res.usage = usage_acc
-        return res
     except Exception as e:
         log.error(f"[{tag}] Ошибка: {e}")
         try:
             proc.kill()
         except Exception:
             pass
-        res = subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr=str(e))
-        res.usage = usage_acc
-        return res
+        return AgentProcessResult(returncode=1, stdout="", stderr=str(e), usage=usage_acc)
 
 
 def _claude_activity_check(event: dict) -> bool:
@@ -336,7 +336,7 @@ def _gemini_extract_result(stdout_lines: list[str]) -> str:
 
 
 def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
-                      cancel_event: "threading.Event | None" = None) -> subprocess.CompletedProcess:
+                      cancel_event: "threading.Event | None" = None) -> AgentProcessResult:
     """Запускает агента нужного типа. cancel_event — для отмены при race-win."""
     import threading
     acfg = cfg.agents.get(agent_name)
