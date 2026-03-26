@@ -200,6 +200,24 @@ def discuss_chat(topic: str):
                 _chat_solo_reply(filepath, name, solo_prompt)
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             continue
+        elif cmd == "/fresh":
+            if not extra:
+                print(f"  {_C['red']}Формат: /fresh <agent[,agent]> <промпт>{_C['reset']}")
+                continue
+            fresh_parts = extra.split(None, 1)
+            if len(fresh_parts) < 2:
+                print(f"  {_C['red']}Формат: /fresh <agent[,agent]> <промпт>{_C['reset']}")
+                continue
+            fresh_agents_str, fresh_prompt = fresh_parts
+            fresh_agents = [a.strip() for a in fresh_agents_str.split(",") if a.strip()]
+            bad = [a for a in fresh_agents if a not in cfg.agent_names]
+            if bad:
+                print(f"  {_C['red']}Агенты не найдены: {', '.join(bad)}{_C['reset']}")
+                continue
+            for name in fresh_agents:
+                _chat_fresh_reply(filepath, name, fresh_prompt)
+            print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
+            continue
         elif cmd == "/reopen":
             disc_text = filepath.read_text(encoding="utf-8")
             has_resolution = "РЕЗОЛЮЦИЯ" in disc_text or "ЗАКРЫТО" in disc_text
@@ -718,7 +736,7 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
     _chat_append(filepath, agent_type, reply)
 
 
-def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str):
+def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str, tag: str = "solo"):
     """Вызывает агента с чистым промптом БЕЗ контекста дискуссии."""
     acfg = cfg.agents.get(agent_type)
     if acfg is None:
@@ -736,7 +754,7 @@ def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str):
     start_time = time.time()
     R = _C["reset"]
     color = _agent_color(agent_type)
-    label = f"{color}{_C['bold']}{agent_type.capitalize()} (solo){R}"
+    label = f"{color}{_C['bold']}{agent_type.capitalize()} ({tag}){R}"
     try:
         proc = subprocess.Popen(
             cmd, cwd=cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -804,10 +822,27 @@ def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str):
         reply = "(пустой ответ)"
     print()
 
-    # Записываем с пометкой [solo] и цитатой промпта
+    # Записываем с пометкой и цитатой промпта
     prompt_quote = prompt[:200] + ("..." if len(prompt) > 200 else "")
     solo_message = f"> Промпт: {prompt_quote}\n\n{reply}"
-    _chat_append(filepath, f"{agent_type} [solo]", solo_message)
+    _chat_append(filepath, f"{agent_type} [{tag}]", solo_message)
+
+
+def _chat_fresh_reply(filepath: Path, agent_type: str, prompt: str):
+    """Вызывает агента с вводными дискуссии + промптом, но БЕЗ хода обсуждения."""
+    messages = _parse_messages(filepath.read_text(encoding="utf-8"))
+    # Первое сообщение после заголовка — вводные
+    intro = messages[1]["body"] if len(messages) > 1 else ""
+    full_prompt = f"""Контекст дискуссии (только вводные, без хода обсуждения):
+
+{intro}
+
+---
+
+Вопрос: {prompt}
+
+Отвечай на русском. Дай свежий взгляд — ты не видишь что обсуждали другие участники."""
+    _chat_solo_reply(filepath, agent_type, full_prompt, tag="fresh")
 
 
 def _colorize_line(line: str) -> str:
@@ -891,7 +926,7 @@ def _print_chat_help():
         (f"{Y}/claude{R} {DIM}(текст){R}",            16, f"записать комментарий, затем вызвать Claude"),
         (f"{Y}/all{R} {DIM}(текст){R}",               13, "записать комментарий, затем вызвать всех"),
         (f"{Y}/solo{R} {DIM}<agent> <промпт>{R}",     21, "чистый запрос без контекста дискуссии"),
-        (f"{Y}/solo{R} {DIM}<a,b> <промпт>{R}",       19, "несколько агентов последовательно"),
+        (f"{Y}/fresh{R} {DIM}<agent> <промпт>{R}",    22, "свежий взгляд: вводные + промпт, без хода обсуждения"),
         (f"{Y}/compact{R}",                             8, "сжать ранние сообщения в сводку (якоря техлида сохраняются)"),
         (f"{Y}/compact{R} {DIM}N{R}",                  10, "сохранить последние N сообщений (по умолчанию 4)"),
         (f"{Y}/show{R}",                                5, "показать дискуссию (через пейджер)"),
