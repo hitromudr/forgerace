@@ -165,6 +165,24 @@ def discuss_chat(topic: str):
             print(f"  {_C['yellow']}/all{_C['reset']} — все агенты   {_C['green']}/ok{_C['reset']} — одобрить и закрыть   {_C['yellow']}/help{_C['reset']} — все команды")
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             continue
+        elif cmd == "/solo":
+            if not extra:
+                print(f"  {_C['red']}Формат: /solo <agent[,agent]> <промпт>{_C['reset']}")
+                continue
+            solo_parts = extra.split(None, 1)
+            if len(solo_parts) < 2:
+                print(f"  {_C['red']}Формат: /solo <agent[,agent]> <промпт>{_C['reset']}")
+                continue
+            solo_agents_str, solo_prompt = solo_parts
+            solo_agents = [a.strip() for a in solo_agents_str.split(",") if a.strip()]
+            bad = [a for a in solo_agents if a not in cfg.agent_names]
+            if bad:
+                print(f"  {_C['red']}Агенты не найдены: {', '.join(bad)}{_C['reset']}")
+                continue
+            for name in solo_agents:
+                _chat_solo_reply(filepath, name, solo_prompt)
+            print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
+            continue
         elif cmd == "/ok":
             comment = extra or ""
             if comment:
@@ -449,6 +467,93 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
     _chat_append(filepath, agent_type, reply)
 
 
+def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str):
+    """Вызывает агента с чистым промптом БЕЗ контекста дискуссии."""
+    acfg = cfg.agents.get(agent_type)
+    if acfg is None:
+        print(f"\n[ОШИБКА: агент '{agent_type}' не найден в конфиге]")
+        return
+
+    if agent_type == "claude":
+        cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+    elif agent_type == "qwen":
+        cmd = [acfg.command, "-p", "--output-format", "text", "--approval-mode", "yolo"]
+    else:
+        cmd = [acfg.command, "-p", prompt]
+
+    use_stdin = agent_type in ("claude", "qwen")
+
+    reply_lines = []
+    start_time = time.time()
+    R = _C["reset"]
+    color = _agent_color(agent_type)
+    label = f"{color}{_C['bold']}{agent_type.capitalize()} (solo){R}"
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE if use_stdin else None, text=True, bufsize=1,
+        )
+        if use_stdin:
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+
+        got_output = False
+        print(f"{label}> {_C['dim']}думает...{R}", end="", flush=True)
+
+        while True:
+            ready, _, _ = select.select([proc.stdout], [], [], 3.0)
+            if ready:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                if not got_output:
+                    print(flush=True)
+                    got_output = True
+                print(_colorize_line(line.rstrip()), flush=True)
+                reply_lines.append(line)
+            else:
+                if proc.poll() is not None:
+                    for line in proc.stdout:
+                        if not got_output:
+                            print(flush=True)
+                            got_output = True
+                        print(_colorize_line(line.rstrip()), flush=True)
+                        reply_lines.append(line)
+                    break
+                if not got_output:
+                    elapsed = int(time.time() - start_time)
+                    print(f"\r{label}> {_C['dim']}думает... {elapsed}s{R}   ", end="", flush=True)
+
+        proc.wait(timeout=cfg.agent_timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        print("\n[ТАЙМАУТ]")
+    except KeyboardInterrupt:
+        proc.kill()
+        proc.wait()
+        print("\n[Прервано]")
+        return
+    except FileNotFoundError:
+        print(f"\n[ОШИБКА: команда '{cmd[0]}' не найдена]")
+        return
+
+    reply = "".join(reply_lines).strip()
+    if not reply:
+        stderr = proc.stderr.read() if proc.stderr else ""
+        rc = proc.returncode
+        if stderr:
+            print(f"\n{_C['red']}[{agent_type} stderr: {stderr[:300]}]{R}")
+        if rc and rc != 0:
+            print(f"{_C['red']}[{agent_type} exit code: {rc}]{R}")
+        reply = "(пустой ответ)"
+    print()
+
+    # Записываем с пометкой [solo] и цитатой промпта
+    prompt_quote = prompt[:200] + ("..." if len(prompt) > 200 else "")
+    solo_message = f"> Промпт: {prompt_quote}\n\n{reply}"
+    _chat_append(filepath, f"{agent_type} [solo]", solo_message)
+
+
 def _colorize_line(line: str) -> str:
     """Подсвечивает inline markdown: **bold**, `code`, @agent."""
     R = _C["reset"]
@@ -527,6 +632,8 @@ def _print_chat_help():
     print(f"  {Y}/all{R}      — все агенты последовательно")
     print(f"  {Y}/claude{R} {DIM}(текст){R} — записать ваш комментарий, затем вызвать Claude")
     print(f"  {Y}/all{R} {DIM}(текст){R}    — записать комментарий, затем вызвать всех")
+    print(f"  {Y}/solo{R} {DIM}<agent> <промпт>{R} — чистый запрос без контекста дискуссии")
+    print(f"  {Y}/solo{R} {DIM}<a,b> <промпт>{R}   — несколько агентов последовательно")
     print(f"  {Y}/show{R}     — показать всю дискуссию")
     print(f"  {G}/ok{R}       — одобрить и закрыть (резолюция генерируется автоматически)")
     print(f"  {Y}/resolve{R}  — написать резолюцию вручную")
