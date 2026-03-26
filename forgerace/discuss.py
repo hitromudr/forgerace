@@ -398,8 +398,15 @@ def _chat_stats(filepath: Path):
     R = _C["reset"]
     DIM = _C["dim"]
     Y = _C["yellow"]
+    # Оценка токенов: кириллица ~1 токен на 2 символа, латиница ~1 на 4
+    chars = len(text)
+    tokens_est = int(chars / 2.5)  # грубая оценка для смешанного текста
+    if tokens_est < 1000:
+        tokens_str = f"~{tokens_est}"
+    else:
+        tokens_str = f"~{tokens_est / 1000:.1f}K"
     print(f"  {Y}Сообщений:{R}  {len(msgs)}")
-    print(f"  {Y}Размер:{R}     {size_str}")
+    print(f"  {Y}Размер:{R}     {size_str} ({tokens_str} токенов)")
     print(f"  {Y}Участники:{R}  {', '.join(sorted(participants))}")
     # Подсчёт по участникам
     from collections import Counter
