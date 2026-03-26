@@ -151,8 +151,15 @@ def discuss_chat(topic: str):
             _print_chat_help()
             continue
         elif cmd == "/show":
-            formatted = _format_discussion(filepath.read_text(encoding="utf-8"))
-            _pager(formatted)
+            text_content = filepath.read_text(encoding="utf-8")
+            if extra.isdigit():
+                n = int(extra)
+                msgs = _parse_messages(text_content)
+                tail = msgs[-n:] if n < len(msgs) else msgs
+                tail_text = "".join(m["raw"] for m in tail)
+                print(_format_discussion(tail_text))
+            else:
+                _pager(_format_discussion(text_content))
             continue
         elif cmd == "/stats":
             _chat_stats(filepath)
@@ -1097,7 +1104,7 @@ def _print_chat_help():
         (f"{Y}/fresh{R} {DIM}<agent> <промпт>{R}",    22, "вводные + промпт, без хода обсуждения"),
         SEP,
         # --- Контекст ---
-        (f"{Y}/show{R}",                                5, "показать дискуссию (через пейджер)"),
+        (f"{Y}/show{R} {DIM}[N]{R}",                     9, "вся дискуссия (пейджер) или последние N сообщений"),
         (f"{Y}/stats{R}",                               6, "размер, токены, участники"),
         (f"{Y}/summary{R}",                              8, "саммари дискуссии (без закрытия)"),
         (f"{Y}/compact{R} {DIM}[N]{R}",                12, "сжать ранние сообщения в сводку (последние N, по умолчанию 4)"),
