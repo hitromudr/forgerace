@@ -669,29 +669,37 @@ def _parse_messages(text: str) -> list[dict]:
     return messages
 
 
-# Оценочная лексика техлида — маркеры приоритета
-_EVAL_PATTERNS = re.compile(
-    r"(?:хорош|плох|отличн|интересн|не интересн|важн|неважн|не важн|верн|неверн"
-    r"|правильн|неправильн|нравится|не нравится|согласен|не согласен|против"
-    r"|одобряю|отвергаю|отклоняю|принимаю|годится|не годится|так и сделаем"
-    r"|именно|точно так|нет,\s*не так|стоит|не стоит|лучше|хуже|ключев|критичн"
-    r"|must.have|обязательн|необязательн)",
-    re.IGNORECASE,
-)
-
-
 def _extract_anchors(messages: list[dict]) -> list[str]:
-    """Извлекает из сообщений техлида фрагменты с оценочной лексикой."""
-    anchors = []
+    """Извлекает якоря техлида через LLM — оценки, одобрения, отклонения, приоритеты."""
+    techlead_text = ""
     for msg in messages:
         if msg["role"] != "techlead":
             continue
-        body = msg["body"]
-        for line in body.split("\n"):
-            line_s = line.strip()
-            if line_s and _EVAL_PATTERNS.search(line_s):
-                anchors.append(line_s)
-    return anchors
+        techlead_text += msg["body"] + "\n\n"
+
+    if not techlead_text.strip():
+        return []
+
+    prompt = f"""Из сообщений техлида ниже извлеки фразы, где он:
+- оценивает (хорошо/плохо/интересно/бред/мимо)
+- одобряет или отвергает предложения
+- задаёт приоритеты или направление
+- ставит ограничения ("не надо", "хватит", "достаточно")
+
+Стиль речи техлида разговорный, возможен мат и сленг — это тоже оценки.
+Выведи ТОЛЬКО список якорей, по одному на строку, без нумерации и маркеров.
+Если якорей нет — выведи пустую строку.
+
+--- СООБЩЕНИЯ ТЕХЛИДА ---
+{techlead_text}
+--- КОНЕЦ ---
+"""
+
+    from .agents import run_text_agent
+    result = run_text_agent(prompt, timeout=60)
+    if not result or result.startswith("Error:"):
+        return []
+    return [line.strip() for line in result.strip().splitlines() if line.strip()]
 
 
 def _chat_compact(filepath: Path, keep_last: int = 4):
