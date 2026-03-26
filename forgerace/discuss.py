@@ -245,6 +245,15 @@ def discuss_chat(topic: str):
         elif cmd == "/tasks":
             _chat_review_tasks(filepath)
             continue
+        elif cmd == "/undo":
+            backup = filepath.with_suffix(".md.bak")
+            if not backup.exists():
+                print(f"  {_C['red']}Нет бэкапа ({backup.name}){_C['reset']}")
+                continue
+            filepath.write_text(backup.read_text(encoding="utf-8"), encoding="utf-8")
+            backup.unlink()
+            print(f"  ✓ Восстановлено из {backup.name}")
+            continue
         elif cmd == "/compact":
             keep = 4
             if extra.isdigit():
@@ -1086,6 +1095,7 @@ def _print_chat_help():
         (f"{Y}/fresh{R} {DIM}<agent> <промпт>{R}",    22, "свежий взгляд: вводные + промпт, без хода обсуждения"),
         (f"{Y}/compact{R}",                             8, "сжать ранние сообщения в сводку (якоря техлида сохраняются)"),
         (f"{Y}/compact{R} {DIM}N{R}",                  10, "сохранить последние N сообщений (по умолчанию 4)"),
+        (f"{Y}/undo{R}",                               5, "откатить compact/tasks (восстановить из .bak)"),
         (f"{Y}/show{R}",                                5, "показать дискуссию (через пейджер)"),
         (f"{Y}/stats{R}",                               6, "размер, кол-во сообщений, участники"),
         (f"{Y}/summary{R}",                              8, "саммари дискуссии (без закрытия)"),
