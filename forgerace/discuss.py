@@ -183,6 +183,12 @@ def discuss_chat(topic: str):
                 _chat_solo_reply(filepath, name, solo_prompt)
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             continue
+        elif cmd == "/compact":
+            keep = 4
+            if extra.isdigit():
+                keep = int(extra)
+            _chat_compact(filepath, keep_last=keep)
+            continue
         elif cmd == "/ok":
             comment = extra or ""
             if comment:
@@ -319,6 +325,128 @@ def _chat_auto_resolve(filepath: Path):
 
     _chat_append(filepath, "techlead", f"**РЕЗОЛЮЦИЯ (одобрено):**\n\n{summary}")
     print("Дискуссия закрыта.")
+
+
+def _parse_messages(text: str) -> list[dict]:
+    """Парсит файл дискуссии в список сообщений.
+
+    Возвращает [{"role": str, "meta": str, "body": str, "raw": str}, ...].
+    Первый элемент — заголовок (role="__header__").
+    """
+    parts = re.split(r"(?=\n## @)", text)
+    messages = []
+    for i, part in enumerate(parts):
+        if i == 0:
+            messages.append({"role": "__header__", "meta": "", "body": part, "raw": part})
+            continue
+        m = re.match(r"\n## @(\S+)\s*(.*?)\n\n?(.*)", part, re.DOTALL)
+        if m:
+            messages.append({
+                "role": m.group(1),
+                "meta": m.group(2),
+                "body": m.group(3).strip(),
+                "raw": part,
+            })
+        else:
+            messages.append({"role": "__unknown__", "meta": "", "body": part.strip(), "raw": part})
+    return messages
+
+
+# Оценочная лексика техлида — маркеры приоритета
+_EVAL_PATTERNS = re.compile(
+    r"(?:хорош|плох|отличн|интересн|не интересн|важн|неважн|не важн|верн|неверн"
+    r"|правильн|неправильн|нравится|не нравится|согласен|не согласен|против"
+    r"|одобряю|отвергаю|отклоняю|принимаю|годится|не годится|так и сделаем"
+    r"|именно|точно так|нет,\s*не так|стоит|не стоит|лучше|хуже|ключев|критичн"
+    r"|must.have|обязательн|необязательн)",
+    re.IGNORECASE,
+)
+
+
+def _extract_anchors(messages: list[dict]) -> list[str]:
+    """Извлекает из сообщений техлида фрагменты с оценочной лексикой."""
+    anchors = []
+    for msg in messages:
+        if msg["role"] != "techlead":
+            continue
+        body = msg["body"]
+        for line in body.split("\n"):
+            line_s = line.strip()
+            if line_s and _EVAL_PATTERNS.search(line_s):
+                anchors.append(line_s)
+    return anchors
+
+
+def _chat_compact(filepath: Path, keep_last: int = 4):
+    """Компактифицирует дискуссию: ранние сообщения → резюме, якоря техлида сохраняются."""
+    text = filepath.read_text(encoding="utf-8")
+    messages = _parse_messages(text)
+
+    # header + сообщения
+    if len(messages) <= keep_last + 1:
+        print(f"  Дискуссия слишком короткая ({len(messages) - 1} сообщений), компактификация не нужна.")
+        return
+
+    header = messages[0]
+    to_compact = messages[1:-keep_last]
+    to_keep = messages[-keep_last:]
+
+    anchors = _extract_anchors(to_compact)
+
+    # Формируем блок для суммаризации
+    compact_text = "".join(m["raw"] for m in to_compact)
+
+    anchor_block = ""
+    if anchors:
+        anchor_lines = "\n".join(f"- {a}" for a in anchors[:20])
+        anchor_block = f"""
+ВАЖНО: техлид выделил следующие моменты (оценочные высказывания).
+Они ОБЯЗАТЕЛЬНО должны быть отражены в сводке:
+{anchor_lines}
+"""
+
+    prompt = f"""Сожми следующие {len(to_compact)} сообщений дискуссии в краткую сводку (5-15 строк).
+Сохрани: ключевые решения, отвергнутые варианты, открытые вопросы.
+{anchor_block}
+Пиши на русском. Выведи ТОЛЬКО текст сводки, без заголовков.
+
+--- СООБЩЕНИЯ ---
+{compact_text}
+--- КОНЕЦ ---
+"""
+
+    print(f"[Компактифицирую {len(to_compact)} сообщений, сохраняю последние {keep_last}...]")
+    from .agents import run_text_agent
+    summary = run_text_agent(prompt, timeout=cfg.agent_timeout)
+    if not summary or summary.startswith("Error:"):
+        print(f"  {_C['red']}Не удалось сгенерировать сводку: {summary or '(пустой ответ)'}{_C['reset']}")
+        return
+
+    # Собираем новый файл
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    anchor_section = ""
+    if anchors:
+        anchor_lines = "\n".join(f"- {a}" for a in anchors[:20])
+        anchor_section = f"\n**Якоря техлида:**\n{anchor_lines}\n"
+
+    compacted = header["raw"]
+    compacted += f"\n## @compact ({now})\n\n"
+    compacted += f"*[{len(to_compact)} сообщений компактифицировано]*\n\n"
+    compacted += summary.strip() + "\n"
+    compacted += anchor_section
+
+    for msg in to_keep:
+        compacted += msg["raw"]
+
+    # Бэкап
+    backup = filepath.with_suffix(".md.bak")
+    backup.write_text(text, encoding="utf-8")
+
+    filepath.write_text(compacted, encoding="utf-8")
+    print(f"  ✓ Компактифицировано: {len(to_compact)} → сводка, сохранено {keep_last} последних")
+    print(f"  ✓ Бэкап: {backup.name}")
+    if anchors:
+        print(f"  ✓ Сохранено якорей техлида: {len(anchors)}")
 
 
 def _chat_append(filepath: Path, role: str, message: str):
@@ -634,6 +762,8 @@ def _print_chat_help():
     print(f"  {Y}/all{R} {DIM}(текст){R}    — записать комментарий, затем вызвать всех")
     print(f"  {Y}/solo{R} {DIM}<agent> <промпт>{R} — чистый запрос без контекста дискуссии")
     print(f"  {Y}/solo{R} {DIM}<a,b> <промпт>{R}   — несколько агентов последовательно")
+    print(f"  {Y}/compact{R}  — сжать ранние сообщения в сводку (якоря техлида сохраняются)")
+    print(f"  {Y}/compact{R} {DIM}N{R} — сохранить последние N сообщений (по умолчанию 4)")
     print(f"  {Y}/show{R}     — показать всю дискуссию")
     print(f"  {G}/ok{R}       — одобрить и закрыть (резолюция генерируется автоматически)")
     print(f"  {Y}/resolve{R}  — написать резолюцию вручную")
