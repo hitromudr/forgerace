@@ -461,46 +461,24 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     if acfg is None:
         return ""
 
-    # Разные агенты принимают промпт по-разному
-    if reviewer_type == "gemini":
-        # gemini: промпт как аргумент -p
-        cmd = [acfg.command, "-p", prompt]
-        result = subprocess.run(
-            cmd, cwd=cfg.root_dir,
-            capture_output=True, text=True, timeout=300,
-        )
-    elif reviewer_type in ("claude", "qwen"):
-        # claude/qwen: промпт через stdin с -p -
-        cmd = [acfg.command, "-p", "-", "--output-format", "text"]
-        if reviewer_type == "claude":
-            cmd.append("--permission-mode")
-            cmd.append("auto")
-        elif reviewer_type == "qwen":
-            cmd.append("--approval-mode")
-            cmd.append("yolo")
-        result = subprocess.run(
-            cmd, cwd=cfg.root_dir, input=prompt,
-            capture_output=True, text=True, timeout=300,
-        )
+    # Все агенты получают промпт через stdin (избегаем лимита аргументов ОС)
+    if reviewer_type == "claude":
+        cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+    elif reviewer_type == "qwen":
+        cmd = [acfg.command, "-p", "-", "--output-format", "text", "--approval-mode", "yolo"]
+    elif reviewer_type == "gemini":
+        cmd = [acfg.command, "-p", "--output-format", "text"]
     elif reviewer_type == "codex":
-        # codex: промпт как позиционный аргумент
-        cmd = [acfg.command, "exec", "--full-auto", prompt]
-        result = subprocess.run(
-            cmd, cwd=cfg.root_dir,
-            capture_output=True, text=True, timeout=300,
-        )
+        cmd = [acfg.command, "exec", "--full-auto"]
     else:
-        # Универсальный: попробовать review_args с {prompt} подстановкой
         cmd = [acfg.command]
         for arg in acfg.review_args:
-            if arg == "{prompt}":
-                cmd.append(prompt)
-            else:
+            if arg != "{prompt}":
                 cmd.append(arg)
-        result = subprocess.run(
-            cmd, cwd=cfg.root_dir, input=prompt,
-            capture_output=True, text=True, timeout=300,
-        )
+    result = subprocess.run(
+        cmd, cwd=cfg.root_dir, input=prompt,
+        capture_output=True, text=True, timeout=300,
+    )
     return (result.stdout or "").strip()
 
 
@@ -524,24 +502,11 @@ def run_text_agent(prompt: str, timeout: int = 300, tag: str = "") -> str:
         if not acfg:
             continue
         try:
-            if name in ("claude", "qwen"):
-                cmd = [acfg.command] + acfg.review_args
-                result = subprocess.run(
-                    cmd, cwd=cfg.root_dir, input=prompt,
-                    capture_output=True, text=True, timeout=timeout,
-                )
-            elif name == "codex":
-                cmd = [acfg.command, "exec", "--full-auto", prompt]
-                result = subprocess.run(
-                    cmd, cwd=cfg.root_dir,
-                    capture_output=True, text=True, timeout=timeout,
-                )
-            else:
-                cmd = [acfg.command, "-p", prompt]
-                result = subprocess.run(
-                    cmd, cwd=cfg.root_dir,
-                    capture_output=True, text=True, timeout=timeout,
-                )
+            cmd = [acfg.command] + [a for a in acfg.review_args if a != "{prompt}"]
+            result = subprocess.run(
+                cmd, cwd=cfg.root_dir, input=prompt,
+                capture_output=True, text=True, timeout=timeout,
+            )
             text = (result.stdout or "").strip()
             if text:
                 if tag:
