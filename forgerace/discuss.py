@@ -1,8 +1,10 @@
 """Система дискуссий: создание, ответы агентов, интерактивный чат, резолюции."""
 
 import json
+import os
 import re
 import select
+import shutil
 import subprocess
 import time
 from datetime import datetime
@@ -149,7 +151,14 @@ def discuss_chat(topic: str):
             _print_chat_help()
             continue
         elif cmd == "/show":
-            print(filepath.read_text(encoding="utf-8"))
+            formatted = _format_discussion(filepath.read_text(encoding="utf-8"))
+            _pager(formatted)
+            continue
+        elif cmd == "/stats":
+            _chat_stats(filepath)
+            continue
+        elif cmd == "/summary":
+            _chat_summary(filepath)
             continue
         elif cmd in ("/claude", "/gemini", "/qwen", "/both", "/all"):
             if extra:
@@ -322,6 +331,75 @@ def _post_resolve(filepath: Path):
     print(f"  ✓ Копия: {tasks_file}")
     log.info(f"{linked_task_id or topic}: подзадачи вставлены в TASKS.md")
     print(f"\n    → {run_hint()}\n")
+
+
+def _pager(text: str):
+    """Выводит текст через пейджер (less) если он длиннее терминала."""
+    lines = text.count("\n") + 1
+    term_rows = shutil.get_terminal_size().lines
+    if lines <= term_rows - 2:
+        print(text)
+        return
+    try:
+        proc = subprocess.Popen(
+            ["less", "-R", "-X", "-F"],  # -R цвета, -X не чистит экран, -F выход если < экрана
+            stdin=subprocess.PIPE, text=True,
+        )
+        proc.communicate(input=text)
+    except FileNotFoundError:
+        print(text)
+
+
+def _chat_stats(filepath: Path):
+    """Показывает статистику дискуссии."""
+    text = filepath.read_text(encoding="utf-8")
+    messages = _parse_messages(text)
+    msgs = [m for m in messages if m["role"] != "__header__"]
+    participants = set(m["role"] for m in msgs if m["role"] not in ("__unknown__", "compact"))
+    size = filepath.stat().st_size
+    if size < 1024:
+        size_str = f"{size} B"
+    elif size < 1024 * 1024:
+        size_str = f"{size / 1024:.1f} KB"
+    else:
+        size_str = f"{size / (1024 * 1024):.1f} MB"
+    R = _C["reset"]
+    DIM = _C["dim"]
+    Y = _C["yellow"]
+    print(f"  {Y}Сообщений:{R}  {len(msgs)}")
+    print(f"  {Y}Размер:{R}     {size_str}")
+    print(f"  {Y}Участники:{R}  {', '.join(sorted(participants))}")
+    # Подсчёт по участникам
+    from collections import Counter
+    counts = Counter(m["role"] for m in msgs)
+    for role, cnt in counts.most_common():
+        color = _agent_color(role)
+        print(f"    {color}{role}{R}: {cnt}")
+
+
+def _chat_summary(filepath: Path):
+    """Генерирует саммари без закрытия дискуссии."""
+    discussion = filepath.read_text(encoding="utf-8")
+    prompt = f"""Прочитай дискуссию и напиши КРАТКОЕ саммари (5-10 строк):
+- Ключевые тезисы каждого участника
+- Точки согласия и разногласий
+- Открытые вопросы (если есть)
+
+Пиши на русском. Только текст саммари, без заголовков.
+
+--- ДИСКУССИЯ ---
+{discussion}
+--- КОНЕЦ ---
+"""
+    print("[Генерирую саммари...]")
+    from .agents import run_text_agent
+    summary = run_text_agent(prompt, timeout=cfg.agent_timeout)
+    if not summary or summary.startswith("Error:"):
+        print(f"  {_C['red']}Не удалось: {summary or '(пустой ответ)'}{_C['reset']}")
+        return
+    print()
+    print(summary)
+    print()
 
 
 def _chat_auto_resolve(filepath: Path):
@@ -555,8 +633,16 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
             cmd, cwd=cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE, text=True, bufsize=1,
         )
-        proc.stdin.write(prompt)
-        proc.stdin.close()
+        try:
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+        except BrokenPipeError:
+            proc.wait()
+            stderr = proc.stderr.read() if proc.stderr else ""
+            print(f"\n{_C['red']}[{agent_type}: процесс упал при получении промпта]{_C['reset']}")
+            if stderr:
+                print(f"{_C['red']}[stderr: {stderr[:300]}]{_C['reset']}")
+            return
 
         got_output = False
         print(f"{label}> {_C['dim']}думает...{R}", end="", flush=True)
@@ -639,8 +725,16 @@ def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str):
             cmd, cwd=cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE, text=True, bufsize=1,
         )
-        proc.stdin.write(prompt)
-        proc.stdin.close()
+        try:
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+        except BrokenPipeError:
+            proc.wait()
+            stderr = proc.stderr.read() if proc.stderr else ""
+            print(f"\n{_C['red']}[{agent_type}: процесс упал при получении промпта]{_C['reset']}")
+            if stderr:
+                print(f"{_C['red']}[stderr: {stderr[:300]}]{_C['reset']}")
+            return
 
         got_output = False
         print(f"{label}> {_C['dim']}думает...{R}", end="", flush=True)
@@ -783,7 +877,9 @@ def _print_chat_help():
         (f"{Y}/solo{R} {DIM}<a,b> <промпт>{R}",       19, "несколько агентов последовательно"),
         (f"{Y}/compact{R}",                             8, "сжать ранние сообщения в сводку (якоря техлида сохраняются)"),
         (f"{Y}/compact{R} {DIM}N{R}",                  10, "сохранить последние N сообщений (по умолчанию 4)"),
-        (f"{Y}/show{R}",                                5, "показать всю дискуссию"),
+        (f"{Y}/show{R}",                                5, "показать дискуссию (через пейджер)"),
+        (f"{Y}/stats{R}",                               6, "размер, кол-во сообщений, участники"),
+        (f"{Y}/summary{R}",                              8, "саммари дискуссии (без закрытия)"),
         (f"{G}/ok{R}",                                  3, "одобрить и закрыть (резолюция генерируется автоматически)"),
         (f"{Y}/resolve{R}",                             8, "написать резолюцию вручную"),
         (f"{Y}/reopen{R}",                              7, "переоткрыть закрытую дискуссию (агенты критикуют резолюцию)"),
