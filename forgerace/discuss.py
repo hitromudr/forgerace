@@ -329,6 +329,9 @@ def discuss_chat(topic: str):
             _post_resolve(filepath)
             _auto_link_discussion(topic)
             break
+        elif cmd == "cd":
+            print(f"  {_C['yellow']}Вы имели в виду /cd {extra}?{_C['reset']}")
+            continue
         else:
             _chat_append(filepath, "techlead", text)
 
@@ -854,8 +857,11 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
     """Вызывает агента со стримингом текста по токенам."""
     discussion = filepath.read_text(encoding="utf-8")
 
+    cwd = _chat_cwd or cfg.root_dir
     prompt = f"""Ты участник архитектурной дискуссии {cfg.discuss_context}.
 Твоя роль: @{agent_type}.
+Рабочая директория: {cwd}
+Ты можешь читать файлы и изучать проекты в этой директории если это нужно для ответа.
 
 Прочитай дискуссию и напиши свой ответ. Будь конкретен: предлагай структуры,
 трейты, алгоритмы. Если не согласен — аргументируй. Отвечай кратко и по делу.
