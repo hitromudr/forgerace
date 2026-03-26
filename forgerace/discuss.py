@@ -242,6 +242,9 @@ def discuss_chat(topic: str):
                 _chat_agent_reply(filepath, name)
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             continue
+        elif cmd == "/tasks":
+            _chat_review_tasks(filepath)
+            continue
         elif cmd == "/compact":
             keep = 4
             if extra.isdigit():
@@ -429,6 +432,153 @@ def _chat_summary(filepath: Path):
     print()
     print(summary)
     print()
+
+
+def _chat_review_tasks(filepath: Path):
+    """Анализ задач в TASKS.md на соответствие дискуссии. Интерактивный: анализ → правки → применение."""
+    discussion = filepath.read_text(encoding="utf-8")
+    topic = filepath.stem
+
+    tasks = parse_tasks()
+    # Задачи привязанные к этой дискуссии
+    topic_tasks = [t for t in tasks if getattr(t, 'discussion', '') == topic]
+    all_tasks = [t for t in tasks]
+
+    if not all_tasks:
+        print(f"  {_C['yellow']}TASKS.md пуст — используйте /ok или /resolve для генерации задач{_C['reset']}")
+        return
+
+    tasks_text = Path(cfg.root_dir / "TASKS.md").read_text(encoding="utf-8")
+
+    review_prompt = f"""Проанализируй задачи из TASKS.md на соответствие текущему состоянию дискуссии.
+
+Для каждой задачи определи:
+- Релевантна ли она текущему состоянию дискуссии (дискуссия могла уйти дальше)
+- Нужна ли корректировка описания/зависимостей
+- Устарела ли (тема закрыта или переосмыслена)
+
+Также определи:
+- Каких задач не хватает (темы обсуждались, но задач нет)
+- Какие задачи лишние (не вытекают из дискуссии)
+
+Формат ответа — краткий, по пунктам:
+✓ TASK-XXX: ок (или краткая причина почему ок)
+✏ TASK-XXX: нужна правка — что именно
+✗ TASK-XXX: устарела/лишняя — почему
++ Не хватает: краткое описание недостающей задачи
+
+В конце — итог одной строкой: сколько ок, сколько нужна правка, сколько лишних, сколько не хватает.
+
+Пиши на русском. Будь конкретен, без воды.
+
+--- ДИСКУССИЯ ---
+{discussion}
+--- КОНЕЦ ДИСКУССИИ ---
+
+--- TASKS.MD ---
+{tasks_text}
+--- КОНЕЦ TASKS.MD ---
+"""
+
+    print("[Анализирую задачи vs дискуссию...]")
+    from .agents import run_text_agent
+    review = run_text_agent(review_prompt, timeout=cfg.agent_timeout)
+    if not review or review.startswith("Error:"):
+        print(f"  {_C['red']}Не удалось: {review or '(пустой ответ)'}{_C['reset']}")
+        return
+
+    R = _C["reset"]
+    print(f"\n{review}\n")
+    print(f"{_C['dim']}{'─' * 60}{R}")
+    print(f"  Варианты:")
+    print(f"  {_C['green']}ок{R}              — применить рекомендации как есть")
+    print(f"  {_C['yellow']}(текст){R}         — применить с вашими правками")
+    print(f"  {_C['red']}нет{R}             — отменить, ничего не менять")
+    print(f"{_C['dim']}{'─' * 60}{R}")
+
+    try:
+        answer = input(f"{_C['green']}{_C['bold']}TechLead>{R} ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\n  Отменено.")
+        return
+
+    if not answer or answer.lower() in ("нет", "no", "отмена", "cancel"):
+        print("  Отменено.")
+        return
+
+    # Генерируем обновлённые задачи с учётом ревью и правок техлида
+    techlead_instruction = ""
+    if answer.lower() not in ("ок", "ok", "да", "yes"):
+        techlead_instruction = f"\nДополнительные указания техлида: {answer}\n"
+
+    max_num = max((int(re.match(r"TASK-(\d+)", t.id).group(1))
+                   for t in all_tasks if re.match(r"TASK-(\d+)", t.id)), default=0)
+    next_task_num = max_num + 1
+
+    regen_prompt = f"""На основе анализа задач и дискуссии, сгенерируй ПОЛНЫЙ обновлённый блок задач для TASKS.md.
+
+Вот результат ревью (что оставить, что исправить, что добавить, что убрать):
+{review}
+{techlead_instruction}
+Формат каждой задачи — строго такой:
+
+### TASK-XXX: Название
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: N
+- **Зависимости**: TASK-YYY или —
+- **Файлы (новые)**: path/file
+- **Файлы (modify)**: — или путь
+- **Интеграция**: —
+- **Описание**: что именно реализовать
+- **Критерий готовности**: что должно работать
+- **Дискуссия**: {topic}
+- **Агент**: —
+- **Ветка**: —
+
+Правила:
+- Сохрани нумерацию существующих задач которые остаются (не перенумеровывай!)
+- Новые задачи нумеруй начиная с TASK-{next_task_num:03d}
+- Задачи помеченные ✗ — НЕ включай
+- Задачи помеченные ✏ — включи с исправлениями
+- Задачи помеченные + — добавь как новые
+- Максимизируй параллелизм
+- Пиши на русском
+
+Выведи ТОЛЬКО блок задач в формате markdown, без пояснений.
+
+--- ДИСКУССИЯ ---
+{discussion}
+--- КОНЕЦ ДИСКУССИИ ---
+
+--- ТЕКУЩИЕ ЗАДАЧИ ---
+{tasks_text}
+--- КОНЕЦ ЗАДАЧ ---
+"""
+
+    print("\n[Перегенерирую задачи...]")
+    tasks_block = run_text_agent(regen_prompt, timeout=cfg.agent_timeout)
+    if not tasks_block or tasks_block.startswith("Error:"):
+        print(f"  {_C['red']}Не удалось: {tasks_block or '(пустой ответ)'}{_C['reset']}")
+        return
+
+    # Очистка мусора
+    clean_block = re.sub(r"^.*?(?=### TASK-)", "", tasks_block, flags=re.DOTALL)
+    if not clean_block.strip():
+        clean_block = tasks_block
+
+    # Бэкап
+    tasks_path = cfg.root_dir / "TASKS.md"
+    backup = tasks_path.with_suffix(".md.bak")
+    backup.write_text(tasks_text, encoding="utf-8")
+
+    # Перезаписываем TASKS.md: заголовок + новые задачи
+    header_match = re.match(r"^(#[^#].*?\n)", tasks_text)
+    header = header_match.group(1) if header_match else f"# TASKS — {topic}\n"
+    tasks_path.write_text(header + "\n" + clean_block.strip() + "\n", encoding="utf-8")
+
+    print(f"\n  ✓ TASKS.md обновлён")
+    print(f"  ✓ Бэкап: {backup.name}")
 
 
 def _chat_auto_resolve(filepath: Path):
@@ -932,6 +1082,7 @@ def _print_chat_help():
         (f"{Y}/show{R}",                                5, "показать дискуссию (через пейджер)"),
         (f"{Y}/stats{R}",                               6, "размер, кол-во сообщений, участники"),
         (f"{Y}/summary{R}",                              8, "саммари дискуссии (без закрытия)"),
+        (f"{Y}/tasks{R}",                               6, "ревью задач vs дискуссия → правки → перегенерация"),
         (f"{G}/ok{R}",                                  3, "одобрить и закрыть (резолюция генерируется автоматически)"),
         (f"{Y}/resolve{R}",                             8, "написать резолюцию вручную"),
         (f"{Y}/reopen{R}",                              7, "переоткрыть закрытую дискуссию (агенты критикуют резолюцию)"),
