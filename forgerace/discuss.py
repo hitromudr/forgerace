@@ -242,7 +242,7 @@ def discuss_chat(topic: str):
             if len(fresh_agents) > 1:
                 messages = _parse_messages(filepath.read_text(encoding="utf-8"))
                 intro = messages[1]["body"] if len(messages) > 1 else ""
-                full_fresh = f"ЗАДАНИЕ: {fresh_prompt}\n\nКонтекст дискуссии (для справки, без хода обсуждения):\n{intro}\n\nНАПОМИНАНИЕ — твоё задание: {fresh_prompt}\n\nОтвечай на русском. Дай свежий взгляд — ты не видишь что обсуждали другие участники."
+                full_fresh = f"ЗАДАНИЕ: {fresh_prompt}\n\nКонтекст дискуссии (для справки, без хода обсуждения):\n{intro}\n\nНАПОМИНАНИЕ — твоё задание: {fresh_prompt}\nОтвечай СТРОГО на задание. Если это фактический вопрос — ответь кратко. Не развивай тему дискуссии, не предлагай свой взгляд на парадоксы, не вступай в полемику — только ответ на задание.\nОтвечай на русском."
                 _chat_solo_parallel(filepath, fresh_agents, full_fresh, tag="fresh")
             else:
                 _chat_fresh_reply(filepath, fresh_agents[0], fresh_prompt)
@@ -1156,8 +1156,8 @@ def _chat_fresh_reply(filepath: Path, agent_type: str, prompt: str):
 {intro}
 
 НАПОМИНАНИЕ — твоё задание: {prompt}
-
-Отвечай на русском. Дай свежий взгляд — ты не видишь что обсуждали другие участники."""
+Отвечай СТРОГО на задание. Если это фактический вопрос — ответь кратко. Не развивай тему дискуссии, не предлагай свой взгляд на парадоксы, не вступай в полемику — только ответ на задание.
+Отвечай на русском."""
     _chat_solo_reply(filepath, agent_type, full_prompt, tag="fresh")
 
 
