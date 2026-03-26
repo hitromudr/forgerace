@@ -17,6 +17,7 @@ from .utils import log, run_cmd, C, R, agent_color
 
 _C = C  # alias для совместимости
 _agent_color = agent_color
+_chat_cwd = None  # рабочая директория агентов, инициализируется в discuss_chat
 
 
 # --- CRUD ---
@@ -123,7 +124,7 @@ def discuss_chat(topic: str):
         _chat_commands = [
             "/claude", "/gemini", "/qwen", "/both", "/all",
             "/solo", "/fresh",
-            "/show", "/stats", "/summary", "/compact", "/undo",
+            "/show", "/stats", "/summary", "/compact", "/undo", "/cd",
             "/tasks", "/ok", "/resolve", "/reopen",
             "/help", "/exit",
         ]
@@ -143,6 +144,9 @@ def discuss_chat(topic: str):
     if text.strip() != f"# {topic}":
         print(_format_discussion(text))
         print("─" * 60)
+
+    global _chat_cwd
+    _chat_cwd = cfg.root_dir  # рабочая директория агентов, меняется через /cd
 
     _print_chat_help()
     print()
@@ -165,6 +169,19 @@ def discuss_chat(topic: str):
             break
         elif cmd == "/help":
             _print_chat_help()
+            continue
+        elif cmd == "/cd":
+            if not extra:
+                print(f"  {_C['yellow']}cwd агентов: {_chat_cwd}{_C['reset']}")
+                continue
+            new_dir = Path(extra).expanduser()
+            if not new_dir.is_absolute():
+                new_dir = (_chat_cwd / new_dir).resolve()
+            if new_dir.is_dir():
+                _chat_cwd = new_dir
+                print(f"  ✓ cwd агентов: {_chat_cwd}")
+            else:
+                print(f"  {_C['red']}Директория не найдена: {new_dir}{_C['reset']}")
             continue
         elif cmd == "/show":
             text_content = filepath.read_text(encoding="utf-8")
@@ -876,7 +893,7 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
     label = f"{color}{_C['bold']}{agent_type.capitalize()}{R}"
     try:
         proc = subprocess.Popen(
-            cmd, cwd=cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cmd, cwd=_chat_cwd or cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE, text=True, bufsize=1,
         )
         try:
@@ -1252,6 +1269,7 @@ def _print_chat_help():
         (f"{Y}/summary{R}",                              8, "саммари дискуссии (без закрытия)"),
         (f"{Y}/compact{R} {DIM}[N]{R}",                12, "сжать ранние сообщения в сводку (последние N, по умолчанию 4)"),
         (f"{Y}/undo{R}",                               5, "откатить compact/tasks из .bak"),
+        (f"{Y}/cd{R} {DIM}<path>{R}",                  10, "сменить рабочую директорию агентов"),
         SEP,
         # --- Жизненный цикл ---
         (f"{Y}/tasks{R}",                               6, "ревью задач vs дискуссия → правки → перегенерация"),
