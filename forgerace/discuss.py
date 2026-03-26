@@ -183,6 +183,19 @@ def discuss_chat(topic: str):
                 _chat_solo_reply(filepath, name, solo_prompt)
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             continue
+        elif cmd == "/reopen":
+            reason = extra or "Техлид считает, что дискуссия закрыта преждевременно."
+            _chat_append(filepath, "techlead",
+                         f"**ДИСКУССИЯ ПЕРЕОТКРЫТА.**\n\n"
+                         f"Причина: {reason}\n\n"
+                         f"Агенты: критически пересмотрите резолюцию. "
+                         f"Что в ней слабого, недосказанного или ошибочного? "
+                         f"Не соглашайтесь по инерции — ищите проблемы.")
+            print(f"[Дискуссия переоткрыта — вызываю всех агентов]\n")
+            for name in cfg.agent_names:
+                _chat_agent_reply(filepath, name)
+            print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
+            continue
         elif cmd == "/compact":
             keep = 4
             if extra.isdigit():
@@ -767,6 +780,8 @@ def _print_chat_help():
     print(f"  {Y}/show{R}     — показать всю дискуссию")
     print(f"  {G}/ok{R}       — одобрить и закрыть (резолюция генерируется автоматически)")
     print(f"  {Y}/resolve{R}  — написать резолюцию вручную")
+    print(f"  {Y}/reopen{R}  — переоткрыть закрытую дискуссию (агенты критикуют резолюцию)")
+    print(f"  {Y}/reopen{R} {DIM}(причина){R} — с указанием причины")
     print(f"  {Y}/help{R}     — показать эту справку")
     print(f"  {_C['red']}/exit{R}     — выйти без резолюции")
 
