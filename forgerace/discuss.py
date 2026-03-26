@@ -533,16 +533,16 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
         print(f"\n[ОШИБКА: агент '{agent_type}' не найден в конфиге]")
         return
 
-    # text mode — промпт через stdin для claude/qwen, через аргумент для gemini
+    # text mode — промпт через stdin для всех агентов (избегаем лимита аргументов ОС)
     if agent_type == "claude":
         cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
     elif agent_type == "qwen":
         cmd = [acfg.command, "-p", "--output-format", "text", "--approval-mode", "yolo"]
     else:
-        # gemini и другие — промпт как аргумент
-        cmd = [acfg.command, "-p", prompt]
+        # gemini и другие — промпт через stdin + пустой -p для headless-режима
+        cmd = [acfg.command, "-p", "--output-format", "text"]
 
-    use_stdin = agent_type in ("claude", "qwen")
+    use_stdin = True
 
     reply_lines = []
     spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -553,11 +553,10 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
     try:
         proc = subprocess.Popen(
             cmd, cwd=cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE if use_stdin else None, text=True, bufsize=1,
+            stdin=subprocess.PIPE, text=True, bufsize=1,
         )
-        if use_stdin:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
+        proc.stdin.write(prompt)
+        proc.stdin.close()
 
         got_output = False
         print(f"{label}> {_C['dim']}думает...{R}", end="", flush=True)
@@ -628,9 +627,7 @@ def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str):
     elif agent_type == "qwen":
         cmd = [acfg.command, "-p", "--output-format", "text", "--approval-mode", "yolo"]
     else:
-        cmd = [acfg.command, "-p", prompt]
-
-    use_stdin = agent_type in ("claude", "qwen")
+        cmd = [acfg.command, "-p", "--output-format", "text"]
 
     reply_lines = []
     start_time = time.time()
@@ -640,11 +637,10 @@ def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str):
     try:
         proc = subprocess.Popen(
             cmd, cwd=cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE if use_stdin else None, text=True, bufsize=1,
+            stdin=subprocess.PIPE, text=True, bufsize=1,
         )
-        if use_stdin:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
+        proc.stdin.write(prompt)
+        proc.stdin.close()
 
         got_output = False
         print(f"{label}> {_C['dim']}думает...{R}", end="", flush=True)
@@ -773,25 +769,32 @@ def _print_chat_help():
     Y = _C["yellow"]
     G = _C["green"]
     print(f"{DIM}Команды:{R}")
-    print(f"  {DIM}(текст){R}   — ваш комментарий, сохраняется в дискуссию (агенты не вызываются)")
-    print(f"  {Y}/claude{R}   — запросить ответ {_C['cyan']}Claude{R}")
-    print(f"  {Y}/gemini{R}   — запросить ответ {_C['magenta']}Gemini{R}")
-    print(f"  {Y}/qwen{R}     — запросить ответ {_agent_color('qwen')}Qwen{R}")
-    print(f"  {Y}/both{R}     — Claude + Gemini")
-    print(f"  {Y}/all{R}      — все агенты последовательно")
-    print(f"  {Y}/claude{R} {DIM}(текст){R} — записать ваш комментарий, затем вызвать Claude")
-    print(f"  {Y}/all{R} {DIM}(текст){R}    — записать комментарий, затем вызвать всех")
-    print(f"  {Y}/solo{R} {DIM}<agent> <промпт>{R} — чистый запрос без контекста дискуссии")
-    print(f"  {Y}/solo{R} {DIM}<a,b> <промпт>{R}   — несколько агентов последовательно")
-    print(f"  {Y}/compact{R}  — сжать ранние сообщения в сводку (якоря техлида сохраняются)")
-    print(f"  {Y}/compact{R} {DIM}N{R} — сохранить последние N сообщений (по умолчанию 4)")
-    print(f"  {Y}/show{R}     — показать всю дискуссию")
-    print(f"  {G}/ok{R}       — одобрить и закрыть (резолюция генерируется автоматически)")
-    print(f"  {Y}/resolve{R}  — написать резолюцию вручную")
-    print(f"  {Y}/reopen{R}  — переоткрыть закрытую дискуссию (агенты критикуют резолюцию)")
-    print(f"  {Y}/reopen{R} {DIM}(причина){R} — с указанием причины")
-    print(f"  {Y}/help{R}     — показать эту справку")
-    print(f"  {_C['red']}/exit{R}     — выйти без резолюции")
+    # (cmd_colored, visible_len, description)
+    cmds = [
+        (f"{DIM}(текст){R}",                          8,  "ваш комментарий, сохраняется в дискуссию"),
+        (f"{Y}/claude{R}",                             7,  f"запросить ответ {_C['cyan']}Claude{R}"),
+        (f"{Y}/gemini{R}",                             7,  f"запросить ответ {_C['magenta']}Gemini{R}"),
+        (f"{Y}/qwen{R}",                               5,  f"запросить ответ {_agent_color('qwen')}Qwen{R}"),
+        (f"{Y}/both{R}",                               5,  "Claude + Gemini"),
+        (f"{Y}/all{R}",                                4,  "все агенты последовательно"),
+        (f"{Y}/claude{R} {DIM}(текст){R}",            16, f"записать комментарий, затем вызвать Claude"),
+        (f"{Y}/all{R} {DIM}(текст){R}",               13, "записать комментарий, затем вызвать всех"),
+        (f"{Y}/solo{R} {DIM}<agent> <промпт>{R}",     21, "чистый запрос без контекста дискуссии"),
+        (f"{Y}/solo{R} {DIM}<a,b> <промпт>{R}",       19, "несколько агентов последовательно"),
+        (f"{Y}/compact{R}",                             8, "сжать ранние сообщения в сводку (якоря техлида сохраняются)"),
+        (f"{Y}/compact{R} {DIM}N{R}",                  10, "сохранить последние N сообщений (по умолчанию 4)"),
+        (f"{Y}/show{R}",                                5, "показать всю дискуссию"),
+        (f"{G}/ok{R}",                                  3, "одобрить и закрыть (резолюция генерируется автоматически)"),
+        (f"{Y}/resolve{R}",                             8, "написать резолюцию вручную"),
+        (f"{Y}/reopen{R}",                              7, "переоткрыть закрытую дискуссию (агенты критикуют резолюцию)"),
+        (f"{Y}/reopen{R} {DIM}(причина){R}",           17, "с указанием причины"),
+        (f"{Y}/help{R}",                                5, "показать эту справку"),
+        (f"{_C['red']}/exit{R}",                        5, "выйти без резолюции"),
+    ]
+    col = max(v for _, v, _ in cmds) + 1
+    for colored, vlen, desc in cmds:
+        pad = " " * (col - vlen)
+        print(f"  {colored}{pad}— {desc}")
 
 
 def _print_confidence(text: str, agent_type: str):
