@@ -493,13 +493,18 @@ def _chat_compact(filepath: Path, keep_last: int = 4):
     messages = _parse_messages(text)
 
     # header + сообщения
-    if len(messages) <= keep_last + 1:
+    if len(messages) <= keep_last + 2:
         print(f"  Дискуссия слишком короткая ({len(messages) - 1} сообщений), компактификация не нужна.")
         return
 
     header = messages[0]
-    to_compact = messages[1:-keep_last]
+    first_msg = messages[1]  # вводные к дискуссии — не компактифицируем
+    to_compact = messages[2:-keep_last]
     to_keep = messages[-keep_last:]
+
+    if not to_compact:
+        print(f"  Нечего компактифицировать (первое сообщение + последние {keep_last} = всё).")
+        return
 
     anchors = _extract_anchors(to_compact)
 
@@ -540,6 +545,7 @@ def _chat_compact(filepath: Path, keep_last: int = 4):
         anchor_section = f"\n**Якоря техлида:**\n{anchor_lines}\n"
 
     compacted = header["raw"]
+    compacted += first_msg["raw"]
     compacted += f"\n## @compact ({now})\n\n"
     compacted += f"*[{len(to_compact)} сообщений компактифицировано]*\n\n"
     compacted += summary.strip() + "\n"
