@@ -969,7 +969,7 @@ def _chat_solo_parallel(filepath: Path, agent_names: list[str], prompt: str, tag
         else:
             cmd = [acfg.command, "-p", "", "--output-format", "text"]
 
-        solo_cwd = "/tmp" if tag == "solo" else cfg.root_dir
+        solo_cwd = "/tmp"
         try:
             proc = subprocess.Popen(
                 cmd, cwd=solo_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1071,8 +1071,8 @@ def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str, tag: str = "s
     color = _agent_color(agent_type)
     label = f"{color}{_C['bold']}{agent_type.capitalize()} ({tag}){R}"
     try:
-        # solo запускается из /tmp чтобы агент не видел файлы проекта
-        solo_cwd = "/tmp" if tag == "solo" else cfg.root_dir
+        # solo/fresh запускаются из /tmp чтобы агент не видел файлы проекта
+        solo_cwd = "/tmp"
         proc = subprocess.Popen(
             cmd, cwd=solo_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE, text=True, bufsize=1,
