@@ -242,7 +242,7 @@ def discuss_chat(topic: str):
             if len(fresh_agents) > 1:
                 messages = _parse_messages(filepath.read_text(encoding="utf-8"))
                 intro = messages[1]["body"] if len(messages) > 1 else ""
-                full_fresh = f"Контекст дискуссии (только вводные, без хода обсуждения):\n\n{intro}\n\n---\n\nВопрос: {fresh_prompt}\n\nОтвечай на русском. Дай свежий взгляд — ты не видишь что обсуждали другие участники."
+                full_fresh = f"ЗАДАНИЕ: ответь на вопрос ниже. Контекст дискуссии дан для справки, но отвечай СТРОГО на вопрос.\n\nВОПРОС: {fresh_prompt}\n\nКонтекст дискуссии (только вводные, без хода обсуждения):\n{intro}\n\nПОВТОРЯЮ ВОПРОС (отвечай именно на него): {fresh_prompt}\n\nОтвечай на русском. Дай свежий взгляд — ты не видишь что обсуждали другие участники."
                 _chat_solo_parallel(filepath, fresh_agents, full_fresh, tag="fresh")
             else:
                 _chat_fresh_reply(filepath, fresh_agents[0], fresh_prompt)
@@ -1150,13 +1150,14 @@ def _chat_fresh_reply(filepath: Path, agent_type: str, prompt: str):
     messages = _parse_messages(filepath.read_text(encoding="utf-8"))
     # Первое сообщение после заголовка — вводные
     intro = messages[1]["body"] if len(messages) > 1 else ""
-    full_prompt = f"""Контекст дискуссии (только вводные, без хода обсуждения):
+    full_prompt = f"""ЗАДАНИЕ: ответь на вопрос ниже. Контекст дискуссии дан для справки, но отвечай СТРОГО на вопрос.
 
+ВОПРОС: {prompt}
+
+Контекст дискуссии (только вводные, без хода обсуждения):
 {intro}
 
----
-
-Вопрос: {prompt}
+ПОВТОРЯЮ ВОПРОС (отвечай именно на него): {prompt}
 
 Отвечай на русском. Дай свежий взгляд — ты не видишь что обсуждали другие участники."""
     _chat_solo_reply(filepath, agent_type, full_prompt, tag="fresh")
