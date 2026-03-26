@@ -81,7 +81,15 @@ def discuss_list():
         if f.name == "README.md":
             continue
         text = f.read_text(encoding="utf-8")
-        closed = "ЗАКРЫТО" in text or "РЕЗОЛЮЦИЯ" in text
+        has_resolution = "ЗАКРЫТО" in text or "РЕЗОЛЮЦИЯ" in text
+        reopened = "ДИСКУССИЯ ПЕРЕОТКРЫТА" in text
+        if reopened and has_resolution:
+            # переоткрыта после последней резолюции?
+            last_resolve = max(text.rfind("ЗАКРЫТО"), text.rfind("РЕЗОЛЮЦИЯ"))
+            last_reopen = text.rfind("ДИСКУССИЯ ПЕРЕОТКРЫТА")
+            closed = last_resolve > last_reopen
+        else:
+            closed = has_resolution
         status = "ЗАКРЫТО" if closed else "ОТКРЫТО"
         participants = set(re.findall(r"## @(\w+)", text))
         print(f"  [{status}] {f.stem}  участники: {', '.join(sorted(participants))}")
