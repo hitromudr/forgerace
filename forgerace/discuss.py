@@ -219,8 +219,10 @@ def discuss_chat(topic: str):
             if bad:
                 print(f"  {_C['red']}Агенты не найдены: {', '.join(bad)}{_C['reset']}")
                 continue
-            for name in solo_agents:
-                _chat_solo_reply(filepath, name, solo_prompt)
+            if len(solo_agents) > 1:
+                _chat_solo_parallel(filepath, solo_agents, solo_prompt)
+            else:
+                _chat_solo_reply(filepath, solo_agents[0], solo_prompt)
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             continue
         elif cmd == "/fresh":
@@ -237,8 +239,13 @@ def discuss_chat(topic: str):
             if bad:
                 print(f"  {_C['red']}Агенты не найдены: {', '.join(bad)}{_C['reset']}")
                 continue
-            for name in fresh_agents:
-                _chat_fresh_reply(filepath, name, fresh_prompt)
+            if len(fresh_agents) > 1:
+                messages = _parse_messages(filepath.read_text(encoding="utf-8"))
+                intro = messages[1]["body"] if len(messages) > 1 else ""
+                full_fresh = f"Контекст дискуссии (только вводные, без хода обсуждения):\n\n{intro}\n\n---\n\nВопрос: {fresh_prompt}\n\nОтвечай на русском. Дай свежий взгляд — ты не видишь что обсуждали другие участники."
+                _chat_solo_parallel(filepath, fresh_agents, full_fresh, tag="fresh")
+            else:
+                _chat_fresh_reply(filepath, fresh_agents[0], fresh_prompt)
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             continue
         elif cmd == "/reopen":
@@ -938,6 +945,110 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
     reply = re.sub(r"\n?CONFIDENCE:\s*\d+\s*%\s*$", "", reply).rstrip()
 
     _chat_append(filepath, agent_type, reply)
+
+
+def _chat_solo_parallel(filepath: Path, agent_names: list[str], prompt: str, tag: str = "solo"):
+    """Запускает несколько агентов параллельно, показывает таймеры, выводит по мере готовности."""
+    import threading
+
+    R = _C["reset"]
+    results = {}  # agent_name -> reply text
+    errors = {}   # agent_name -> error text
+    procs = {}    # agent_name -> proc
+    start_time = time.time()
+
+    def _run_agent(name):
+        acfg = cfg.agents.get(name)
+        if acfg is None:
+            errors[name] = "не найден в конфиге"
+            return
+        if name == "claude":
+            cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+        elif name == "qwen":
+            cmd = [acfg.command, "-p", "--output-format", "text", "--approval-mode", "yolo"]
+        else:
+            cmd = [acfg.command, "-p", "", "--output-format", "text"]
+
+        solo_cwd = "/tmp" if tag == "solo" else cfg.root_dir
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=solo_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE, text=True,
+            )
+            procs[name] = proc
+            try:
+                proc.stdin.write(prompt)
+                proc.stdin.close()
+            except BrokenPipeError:
+                proc.wait()
+                stderr = proc.stderr.read() if proc.stderr else ""
+                errors[name] = f"процесс упал при получении промпта: {stderr[:200]}"
+                return
+            stdout, stderr = proc.communicate(timeout=cfg.agent_timeout)
+            results[name] = stdout.strip() if stdout else ""
+            if not results[name] and stderr:
+                errors[name] = stderr[:300]
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            errors[name] = "ТАЙМАУТ"
+        except FileNotFoundError:
+            errors[name] = f"команда '{cmd[0]}' не найдена"
+
+    # Запускаем все потоки
+    threads = []
+    for name in agent_names:
+        t = threading.Thread(target=_run_agent, args=(name,), daemon=True)
+        t.start()
+        threads.append((name, t))
+
+    # Показываем таймеры пока кто-то работает
+    labels = {}
+    for name in agent_names:
+        color = _agent_color(name)
+        labels[name] = f"{color}{_C['bold']}{name.capitalize()} ({tag}){R}"
+
+    try:
+        while any(t.is_alive() for _, t in threads):
+            elapsed = int(time.time() - start_time)
+            status_parts = []
+            for name, t in threads:
+                if t.is_alive():
+                    status_parts.append(f"{labels[name]}> {_C['dim']}думает... {elapsed}s{R}")
+                elif name in results:
+                    status_parts.append(f"{labels[name]}> {_C['green']}готов{R}")
+                elif name in errors:
+                    status_parts.append(f"{labels[name]}> {_C['red']}ошибка{R}")
+            print(f"\r{'   '.join(status_parts)}   ", end="", flush=True)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print(f"\n[Прервано]")
+        for name, proc in procs.items():
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        return
+
+    print()  # новая строка после таймеров
+
+    # Выводим результаты
+    prompt_quote = prompt[:200] + ("..." if len(prompt) > 200 else "")
+    for name in agent_names:
+        color = _agent_color(name)
+        label = f"{color}{_C['bold']}{name.capitalize()} ({tag}){R}"
+        if name in results and results[name]:
+            reply = results[name]
+            print(f"\n{label}>")
+            for line in reply.splitlines():
+                print(_colorize_line(line))
+            print()
+            solo_message = f"> Промпт: {prompt_quote}\n\n{reply}"
+            _chat_append(filepath, f"{name} [{tag}]", solo_message)
+        elif name in errors:
+            print(f"\n{label}> {_C['red']}[{errors[name]}]{R}")
+        else:
+            print(f"\n{label}> (пустой ответ)")
+            _chat_append(filepath, f"{name} [{tag}]", f"> Промпт: {prompt_quote}\n\n(пустой ответ)")
 
 
 def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str, tag: str = "solo"):
