@@ -201,6 +201,17 @@ def discuss_chat(topic: str):
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             continue
         elif cmd == "/reopen":
+            disc_text = filepath.read_text(encoding="utf-8")
+            has_resolution = "РЕЗОЛЮЦИЯ" in disc_text or "ЗАКРЫТО" in disc_text
+            last_reopen = disc_text.rfind("ДИСКУССИЯ ПЕРЕОТКРЫТА")
+            last_resolve = max(disc_text.rfind("РЕЗОЛЮЦИЯ"), disc_text.rfind("ЗАКРЫТО"))
+            already_reopened = last_reopen > last_resolve if has_resolution else False
+            if not has_resolution:
+                print(f"  {_C['yellow']}Дискуссия не закрыта — нечего переоткрывать{_C['reset']}")
+                continue
+            if already_reopened:
+                print(f"  {_C['yellow']}Дискуссия уже переоткрыта — продолжайте обсуждение{_C['reset']}")
+                continue
             reason = extra or "Техлид считает, что дискуссия закрыта преждевременно."
             _chat_append(filepath, "techlead",
                          f"**ДИСКУССИЯ ПЕРЕОТКРЫТА.**\n\n"
@@ -618,7 +629,7 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
         cmd = [acfg.command, "-p", "--output-format", "text", "--approval-mode", "yolo"]
     else:
         # gemini и другие — промпт через stdin + пустой -p для headless-режима
-        cmd = [acfg.command, "-p", "--output-format", "text"]
+        cmd = [acfg.command, "-p", "", "--output-format", "text"]
 
     use_stdin = True
 
@@ -713,7 +724,7 @@ def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str):
     elif agent_type == "qwen":
         cmd = [acfg.command, "-p", "--output-format", "text", "--approval-mode", "yolo"]
     else:
-        cmd = [acfg.command, "-p", "--output-format", "text"]
+        cmd = [acfg.command, "-p", "", "--output-format", "text"]
 
     reply_lines = []
     start_time = time.time()

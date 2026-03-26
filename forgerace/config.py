@@ -79,7 +79,7 @@ class Config:
         "gemini": AgentConfig(
             command="gemini",
             args=["-p", "--approval-mode", "yolo", "--output-format", "stream-json"],
-            review_args=["-p", "-"],
+            review_args=["-p", "", "--output-format", "text"],
             inactivity_timeout=180,
         ),
         "qwen": AgentConfig(
