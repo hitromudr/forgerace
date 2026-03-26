@@ -117,9 +117,25 @@ def discuss_chat(topic: str):
         filepath.write_text(f"# {topic}\n", encoding="utf-8")
         print(f"Создана новая дискуссия: {topic}")
 
-    # readline для стрелок вверх/вниз (история ввода), без автокомплита
+    # readline: история ввода + автокомплит команд по Tab
     try:
-        import readline  # noqa: F811
+        import readline
+        _chat_commands = [
+            "/claude", "/gemini", "/qwen", "/both", "/all",
+            "/solo", "/fresh",
+            "/show", "/stats", "/summary", "/compact", "/undo",
+            "/tasks", "/ok", "/resolve", "/reopen",
+            "/help", "/exit",
+        ]
+        def _completer(text, state):
+            if text.startswith("/"):
+                matches = [c for c in _chat_commands if c.startswith(text)]
+            else:
+                matches = []
+            return matches[state] if state < len(matches) else None
+        readline.set_completer(_completer)
+        readline.set_completer_delims(" ")
+        readline.parse_and_bind("tab: complete")
     except ImportError:
         pass
 
