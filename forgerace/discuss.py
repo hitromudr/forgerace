@@ -960,8 +960,10 @@ def _chat_solo_reply(filepath: Path, agent_type: str, prompt: str, tag: str = "s
     color = _agent_color(agent_type)
     label = f"{color}{_C['bold']}{agent_type.capitalize()} ({tag}){R}"
     try:
+        # solo запускается из /tmp чтобы агент не видел файлы проекта
+        solo_cwd = "/tmp" if tag == "solo" else cfg.root_dir
         proc = subprocess.Popen(
-            cmd, cwd=cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cmd, cwd=solo_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE, text=True, bufsize=1,
         )
         try:
