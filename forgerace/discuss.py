@@ -737,7 +737,7 @@ def _chat_compact(filepath: Path, keep_last: int = 4):
 --- КОНЕЦ ---
 """
 
-    print(f"[Компактифицирую {len(to_compact)} сообщений, сохраняю последние {keep_last}...]")
+    print(f"[Компактифицирую {len(to_compact)} сообщений, сохраняю: вводные + последние {keep_last}]")
     from .agents import run_text_agent
     summary = run_text_agent(prompt, timeout=cfg.agent_timeout)
     if not summary or summary.startswith("Error:"):
