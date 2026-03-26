@@ -732,14 +732,18 @@ def _chat_compact(filepath: Path, keep_last: int = 4):
     if anchors:
         anchor_lines = "\n".join(f"- {a}" for a in anchors[:20])
         anchor_block = f"""
-ВАЖНО: техлид выделил следующие моменты (оценочные высказывания).
-Они ОБЯЗАТЕЛЬНО должны быть отражены в сводке:
+ВАЖНО: в сводку ОБЯЗАТЕЛЬНО интегрируй оценки и решения техлида (якоря).
+Не выноси их отдельным списком — вплети в текст как цитаты или пересказ.
+Каждый якорь должен быть отражён в сводке:
 {anchor_lines}
 """
 
-    prompt = f"""Сожми следующие {len(to_compact)} сообщений дискуссии в краткую сводку (5-15 строк).
-Сохрани: ключевые решения, отвергнутые варианты, открытые вопросы.
+    prompt = f"""Сожми следующие {len(to_compact)} сообщений дискуссии в единую сводку (10-20 строк).
+Включи: ключевые решения, отвергнутые варианты, открытые вопросы, хронологию.
 {anchor_block}
+Оценки техлида (одобрения, отклонения, мат, сленг) — передавай близко к оригиналу,
+это маркеры приоритета. Не смягчай и не переформулируй в литературный стиль.
+
 Пиши на русском. Выведи ТОЛЬКО текст сводки, без заголовков.
 
 --- СООБЩЕНИЯ ---
@@ -754,6 +758,7 @@ def _chat_compact(filepath: Path, keep_last: int = 4):
             print(f"  {_C['dim']}• {a[:100]}{_C['reset']}")
     else:
         print(f"[Якорей техлида не найдено]")
+    print(f"[Генерирую сводку...]")
     from .agents import run_text_agent
     summary = run_text_agent(prompt, timeout=cfg.agent_timeout)
     if not summary or summary.startswith("Error:"):
@@ -762,17 +767,11 @@ def _chat_compact(filepath: Path, keep_last: int = 4):
 
     # Собираем новый файл
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    anchor_section = ""
-    if anchors:
-        anchor_lines = "\n".join(f"- {a}" for a in anchors[:20])
-        anchor_section = f"\n**Якоря техлида:**\n{anchor_lines}\n"
-
     compacted = header["raw"]
     compacted += first_msg["raw"]
     compacted += f"\n## @compact ({now})\n\n"
     compacted += f"*[{len(to_compact)} сообщений компактифицировано]*\n\n"
     compacted += summary.strip() + "\n"
-    compacted += anchor_section
 
     for msg in to_keep:
         compacted += msg["raw"]
