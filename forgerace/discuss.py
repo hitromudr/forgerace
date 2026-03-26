@@ -357,7 +357,14 @@ def _post_resolve(filepath: Path):
     discussion = filepath.read_text(encoding="utf-8")
     topic = filepath.stem
 
-    tasks = parse_tasks()
+    # Определяем целевой TASKS.md — из _chat_cwd если задан, иначе cfg
+    target_dir = _chat_cwd if _chat_cwd and _chat_cwd != cfg.root_dir else cfg.root_dir
+    tasks_file = target_dir / cfg.tasks_file_rel
+    if not tasks_file.exists():
+        tasks_file.write_text(f"# TASKS — {topic}\n", encoding="utf-8")
+        print(f"  Создан {tasks_file}")
+
+    tasks = parse_tasks(tasks_file)
     max_num = max((int(re.match(r"TASK-(\d+)", t.id).group(1))
                    for t in tasks if re.match(r"TASK-(\d+)", t.id)), default=0)
     next_task_num = max_num + 1
@@ -408,19 +415,26 @@ def _post_resolve(filepath: Path):
         log.error(f"Не удалось сгенерировать задачи: {tasks_block or '(пустой ответ)'}")
         return
 
-    tasks_file = filepath.parent / f"{topic}-tasks.md"
-    tasks_file.write_text(tasks_block + "\n", encoding="utf-8")
+    copy_file = filepath.parent / f"{topic}-tasks.md"
+    copy_file.write_text(tasks_block + "\n", encoding="utf-8")
 
     # Очистка мусора из ответа Claude (может добавить пояснения перед задачами)
     clean_block = re.sub(r"^.*?(?=### TASK-)", "", tasks_block, flags=re.DOTALL)
     if not clean_block.strip():
         clean_block = tasks_block  # fallback если regex не нашёл
 
-    insert_tasks_into_tasksmd(clean_block, linked_task_id)
+    # Вставляем в целевой TASKS.md
+    if target_dir != cfg.root_dir:
+        # Альтернативный путь — вставляем напрямую
+        content = tasks_file.read_text(encoding="utf-8")
+        content = content.rstrip() + "\n\n" + clean_block.rstrip() + "\n"
+        tasks_file.write_text(content, encoding="utf-8")
+    else:
+        insert_tasks_into_tasksmd(clean_block, linked_task_id)
 
-    print(f"\n  ✓ Задачи сгенерированы и вставлены в TASKS.md")
-    print(f"  ✓ Копия: {tasks_file}")
-    log.info(f"{linked_task_id or topic}: подзадачи вставлены в TASKS.md")
+    print(f"\n  ✓ Задачи вставлены в {tasks_file}")
+    print(f"  ✓ Копия: {copy_file}")
+    log.info(f"{linked_task_id or topic}: подзадачи вставлены в {tasks_file}")
     print(f"\n    → {run_hint()}\n")
 
 
@@ -505,16 +519,20 @@ def _chat_review_tasks(filepath: Path):
     discussion = filepath.read_text(encoding="utf-8")
     topic = filepath.stem
 
-    tasks = parse_tasks()
-    # Задачи привязанные к этой дискуссии
-    topic_tasks = [t for t in tasks if getattr(t, 'discussion', '') == topic]
+    target_dir = _chat_cwd if _chat_cwd and _chat_cwd != cfg.root_dir else cfg.root_dir
+    tasks_path = target_dir / cfg.tasks_file_rel
+    if not tasks_path.exists():
+        print(f"  {_C['yellow']}{tasks_path} не найден — используйте /ok или /resolve для генерации задач{_C['reset']}")
+        return
+
+    tasks = parse_tasks(tasks_path)
     all_tasks = [t for t in tasks]
 
     if not all_tasks:
         print(f"  {_C['yellow']}TASKS.md пуст — используйте /ok или /resolve для генерации задач{_C['reset']}")
         return
 
-    tasks_text = Path(cfg.root_dir / "TASKS.md").read_text(encoding="utf-8")
+    tasks_text = tasks_path.read_text(encoding="utf-8")
 
     review_prompt = f"""Проанализируй задачи из TASKS.md на соответствие текущему состоянию дискуссии.
 
@@ -634,7 +652,6 @@ def _chat_review_tasks(filepath: Path):
         clean_block = tasks_block
 
     # Бэкап
-    tasks_path = cfg.root_dir / "TASKS.md"
     backup = tasks_path.with_suffix(".md.bak")
     backup.write_text(tasks_text, encoding="utf-8")
 
