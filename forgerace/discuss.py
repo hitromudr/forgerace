@@ -721,6 +721,7 @@ def _chat_compact(filepath: Path, keep_last: int = 4):
         print(f"  Нечего компактифицировать (первое сообщение + последние {keep_last} = всё).")
         return
 
+    print(f"[Извлекаю якоря техлида...]")
     anchors = _extract_anchors(to_compact)
 
     # Формируем блок для суммаризации
@@ -746,6 +747,12 @@ def _chat_compact(filepath: Path, keep_last: int = 4):
 """
 
     print(f"[Компактифицирую {len(to_compact)} сообщений, сохраняю: вводные + последние {keep_last}]")
+    if anchors:
+        print(f"[Извлечено якорей техлида: {len(anchors)}]")
+        for a in anchors[:10]:
+            print(f"  {_C['dim']}• {a[:100]}{_C['reset']}")
+    else:
+        print(f"[Якорей техлида не найдено]")
     from .agents import run_text_agent
     summary = run_text_agent(prompt, timeout=cfg.agent_timeout)
     if not summary or summary.startswith("Error:"):
