@@ -57,6 +57,107 @@ _INIT_TASKS = '''# TASKS — {name}
 '''
 
 
+def _generate_brief(cwd: Path, brief_path: Path):
+    """Генерирует PROJECT_BRIEF.md — анализ проекта для архитектурных дискуссий."""
+    import subprocess
+    import shutil
+
+    # Собираем контекст проекта
+    context_parts = []
+
+    # README
+    for name in ("README.md", "readme.md", "README.rst", "README"):
+        readme = cwd / name
+        if readme.exists():
+            text = readme.read_text(encoding="utf-8", errors="ignore")[:6000]
+            context_parts.append(f"## README\n{text}")
+            break
+
+    # CLAUDE.md
+    claude_md = cwd / "CLAUDE.md"
+    if claude_md.exists():
+        text = claude_md.read_text(encoding="utf-8", errors="ignore")[:4000]
+        context_parts.append(f"## CLAUDE.md\n{text}")
+
+    # Зависимости
+    for dep_file in ("requirements.txt", "pyproject.toml", "package.json", "Cargo.toml", "go.mod", "Gemfile"):
+        dep_path = cwd / dep_file
+        if dep_path.exists():
+            text = dep_path.read_text(encoding="utf-8", errors="ignore")[:3000]
+            context_parts.append(f"## {dep_file}\n{text}")
+
+    # Структура директорий (2 уровня)
+    try:
+        result = subprocess.run(
+            ["find", ".", "-maxdepth", "2", "-type", "f", "-not", "-path", "./.git/*",
+             "-not", "-path", "./node_modules/*", "-not", "-path", "./.venv/*"],
+            cwd=cwd, capture_output=True, text=True, timeout=10,
+        )
+        files = result.stdout.strip()
+        if files:
+            # Ограничиваем до 100 файлов
+            file_list = files.split("\n")[:100]
+            context_parts.append(f"## Структура файлов\n" + "\n".join(file_list))
+    except Exception:
+        pass
+
+    if not context_parts:
+        print(f"  {C['dim']}Нет файлов для анализа — PROJECT_BRIEF.md не создан{R}")
+        return
+
+    context = "\n\n".join(context_parts)
+
+    prompt = f"""Проанализируй проект и создай PROJECT_BRIEF.md — краткое описание для архитектурных дискуссий.
+
+Формат ответа — ТОЛЬКО markdown, без обёрток ```markdown```:
+
+# Project Brief
+
+## Что это
+(1-3 предложения: что делает проект, для кого)
+
+## Стек
+(язык, фреймворки, ключевые библиотеки)
+
+## Архитектура
+(основные компоненты и как они связаны, 3-7 пунктов)
+
+## Ограничения и контекст
+(инфраструктурные, бизнес-ограничения, что важно для принятия архитектурных решений)
+
+## Зависимости
+(внешние сервисы, API, базы данных)
+
+---
+
+Контекст проекта:
+
+{context}"""
+
+    # Пробуем доступные агенты
+    for cmd_name in ("claude", "gemini"):
+        if not shutil.which(cmd_name):
+            continue
+        print(f"  {C['yellow']}⚡ Генерация PROJECT_BRIEF.md через {cmd_name}...{R}", end="", flush=True)
+        try:
+            if cmd_name == "claude":
+                cmd = [cmd_name, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+            else:
+                cmd = [cmd_name, "-p", "", "--output-format", "text"]
+            result = subprocess.run(
+                cmd, cwd=cwd, input=prompt,
+                capture_output=True, text=True, timeout=120,
+            )
+            text = (result.stdout or "").strip()
+            if text and len(text) > 100:
+                brief_path.write_text(text, encoding="utf-8")
+                print(f" {C['green']}✓{R}")
+                return
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+    print(f" {C['red']}✗ нет доступных агентов{R}")
+
+
 def _cmd_init():
     """Создаёт forgerace.toml и TASKS.md в текущей директории."""
     cwd = Path.cwd()
@@ -89,6 +190,14 @@ def _cmd_init():
 
     if created:
         print(f"  {C['green']}✓ Создано: {', '.join(created)}{R}")
+
+    # Генерация PROJECT_BRIEF.md — анализ проекта для дискуссий
+    brief_path = cwd / "PROJECT_BRIEF.md"
+    if brief_path.exists():
+        print(f"  {C['dim']}PROJECT_BRIEF.md уже существует{R}")
+    else:
+        _generate_brief(cwd, brief_path)
+
     print(f"\n  Теперь:")
     print(f"    {C['bold']}vim forgerace.toml{R}     — настрой build-команды и агентов")
     print(f"    {C['bold']}./fr discuss new ...{R}  — запусти дискуссию → /ok → задачи")

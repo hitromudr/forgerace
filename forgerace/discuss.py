@@ -870,16 +870,28 @@ def _extract_text_from_gemini_event(event: dict) -> str:
     return ""
 
 
+_AUTO_COMPACT_THRESHOLD = 80_000  # символов (~20K токенов)
+
+
 def _chat_agent_reply(filepath: Path, agent_type: str):
     """Вызывает агента со стримингом текста по токенам."""
     discussion = filepath.read_text(encoding="utf-8")
+    # Auto-compact если дискуссия слишком большая
+    if len(discussion) > _AUTO_COMPACT_THRESHOLD:
+        print(f"  {_C['yellow']}⚡ Дискуссия {len(discussion)//1000}K символов — автосжатие...{_C['reset']}")
+        _chat_compact(filepath, keep_last=4)
+        discussion = filepath.read_text(encoding="utf-8")
 
     cwd = _chat_cwd or cfg.root_dir
+    # Claude CLI сам читает CLAUDE.md — не дублируем. Остальным инжектим project_docs.
+    docs_section = ""
+    if agent_type != "claude" and cfg.project_docs:
+        docs_section = f"\n## Документация проекта\n{cfg.project_docs}\n"
     prompt = f"""Ты участник архитектурной дискуссии {cfg.discuss_context}.
 Твоя роль: @{agent_type}.
 Рабочая директория: {cwd}
 Ты можешь читать файлы и изучать проекты в этой директории если это нужно для ответа.
-
+{docs_section}
 Прочитай дискуссию и напиши свой ответ. Будь конкретен: предлагай структуры,
 трейты, алгоритмы. Если не согласен — аргументируй. Отвечай кратко и по делу.
 Пиши на русском. Выведи ТОЛЬКО текст ответа, без заголовков и метаданных.

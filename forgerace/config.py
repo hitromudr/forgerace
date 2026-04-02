@@ -116,6 +116,7 @@ class Config:
     discuss_context: str = ""
     agent_rules: str = ""
     test_instruction: str = ""  # как запускать и интерпретировать тесты
+    project_docs: str = ""  # кешированный CLAUDE.md (загружается в init_config)
 
     confidence_instruction: str = """
 В ПОСЛЕДНЕЙ строке ответа ОБЯЗАТЕЛЬНО напиши свою оценку готовности решения к реализации:
@@ -369,5 +370,15 @@ def init_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     # в других модулях будет ссылаться на старый объект
     for field_obj in cfg.__dataclass_fields__:
         setattr(cfg, field_obj, getattr(new_cfg, field_obj))
+    # Кешируем документацию проекта: PROJECT_BRIEF.md (приоритет) → CLAUDE.md (fallback)
+    for doc_name in ("PROJECT_BRIEF.md", "CLAUDE.md"):
+        doc_path = cfg.root_dir / doc_name
+        if doc_path.exists():
+            try:
+                content = doc_path.read_text(encoding="utf-8", errors="ignore")
+                cfg.project_docs = content[:8000] + ("\n... (обрезано)" if len(content) > 8000 else "")
+                break
+            except Exception:
+                pass
     # Создаём директории
     cfg.log_dir.mkdir(parents=True, exist_ok=True)

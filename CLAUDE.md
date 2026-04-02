@@ -9,7 +9,7 @@ ForgeRace — мультиагентный оркестратор разрабо
 ## Команды
 
 ```bash
-# Инициализация в проекте (создаёт forgerace.toml, TASKS.md, обёртку ./fr)
+# Инициализация в проекте (создаёт forgerace.toml, TASKS.md, PROJECT_BRIEF.md, обёртку ./fr)
 python3 forgerace.py init
 
 # Запуск пайплайна
@@ -47,7 +47,9 @@ python3 forgerace.py merge-pending
 - **review.py** — кросс-ревью: `code_review` запускает агентов-ревьюеров друг на друга, парсит `VERDICT:`/`COMMENTS:`. `send_to_rework` возвращает агенту замечания.
 - **pipeline.py** — главный цикл: `run_pipeline` → `execute_task_competitive` (все агенты на одну задачу, race-to-merge). Heartbeat-поток мониторит прогресс. `_pre_check` валидирует задачу перед запуском.
 - **decompose.py** — LLM оценивает сложность задачи, при необходимости разбивает на подзадачи и вставляет в TASKS.md.
-- **discuss.py** — система архитектурных дискуссий: агенты обсуждают подход до реализации, auto-resolve при достижении консенсуса (CONFIDENCE ≥ 80%).
+- **discuss.py** — система архитектурных дискуссий: агенты обсуждают подход до реализации, auto-resolve при достижении консенсуса (CONFIDENCE ≥ 80%). Интерактивный чат с командами: `/solo` (чистый контекст без дискуссии), `/fresh` (вводные без истории), `/compact` (LLM-сжатие с сохранением якорей), `/undo`, `/reopen`, `/show N`, `/stats`, `/summary`, `/tasks`, `/cd` (смена рабочей директории агентов). Агенты solo/fresh запускаются из `/tmp` для изоляции от файлов проекта.
+- **cost.py** — `TokenUsage` (dataclass) для учёта токенов и оценки стоимости LLM-вызовов.
+- **task_queue.py** — приоритетная очередь задач (`heapq`) + `ConcurrencyLimiter` для ограничения параллельного выполнения.
 - **worktree.py** — git worktree для изоляции агентов (каждый агент работает в своём worktree).
 - **merge.py** — мерж через detached worktree + `git update-ref` (без checkout в основном repo).
 - **utils.py** — `run_cmd`, `slugify`, валидация путей, логирование.
@@ -63,6 +65,8 @@ python3 forgerace.py merge-pending
 - **Progress timeout**: агент убивается, если его diff не меняется `progress_timeout` секунд.
 - **Signal handling**: `run` создаёт process group (`setpgrp`) и ловит SIGINT/SIGTERM для убийства всех дочерних процессов. `discuss` использует обычный Ctrl+C. Pipeline завершается через `os._exit(0)` для гарантированного убийства застрявших потоков.
 - **Дефолты build_commands** пустые — задавать через `[build]` в TOML. `review_run_log` опциональна (`[limits] review_run_log = true`).
+- **Промпты агентам через stdin**: все агенты (claude, gemini) получают промпт через stdin, не через CLI-аргументы (ограничение на длину аргументов ОС).
+- **Контекст проекта**: `init` генерирует `PROJECT_BRIEF.md` (LLM-анализ README, зависимостей, структуры) для архитектурных дискуссий. При старте `cfg.project_docs` загружает `PROJECT_BRIEF.md` (приоритет) или `CLAUDE.md` (fallback). В промпты инжектится только не-claude агентам (claude CLI сам читает CLAUDE.md). В discuss при >80K символов — auto-compact.
 
 ## Конфигурация
 

@@ -238,7 +238,7 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
     for attempt in range(1, cfg.max_retries + 1):
         log.info(f"[{tag}/код] попытка {attempt}/{cfg.max_retries}")
 
-        prompt = build_prompt(task, error_log)
+        prompt = build_prompt(task, error_log, agent_type=agent_type)
         result = run_agent_process(agent_type, workdir, task, prompt,
                                    cancel_event=cancel_event)
         if hasattr(result, "usage") and result.usage:
