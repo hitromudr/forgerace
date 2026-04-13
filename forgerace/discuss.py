@@ -141,12 +141,17 @@ def discuss_chat(topic: str):
             for aname in cfg.agent_names:
                 for fname in cfg.frames:
                     _frame_cmds.append(f"/{aname}+{fname}")
+        # /help <topic> автокомплит
+        _help_topics = [f"/help {f}" for f in (cfg.frames or {})]
+        _help_topics += ["/help all", "/help both", "/help solo", "/help fresh",
+                         "/help ok", "/help resolve", "/help reset", "/help compact",
+                         "/help frames", "/help scenarios"]
         _chat_commands = [
             *_agent_cmds, *_frame_cmds, "/both", "/all",
             "/solo", "/fresh",
             "/show", "/stats", "/summary", "/compact", "/undo", "/reset", "/cd",
             "/tasks", "/ok", "/resolve", "/reopen",
-            "/help", "/exit",
+            *_help_topics, "/help", "/exit",
         ]
         def _completer(text, state):
             if text.startswith("/"):
@@ -188,7 +193,10 @@ def discuss_chat(topic: str):
         if cmd == "/exit":
             break
         elif cmd == "/help":
-            _print_chat_help()
+            if extra:
+                _print_help_detail(extra.strip().lstrip("/").lstrip("+"))
+            else:
+                _print_chat_help()
             continue
         elif cmd == "/cd":
             if not extra:
@@ -1392,6 +1400,109 @@ def _format_discussion(text: str) -> str:
     return "\n".join(result)
 
 
+def _print_help_detail(topic: str):
+    """Подробная справка по команде или фрейму."""
+    R = _C["reset"]
+    DIM = _C["dim"]
+    B = _C["bold"]
+    Y = _C["yellow"]
+
+    # Фреймы
+    if topic in cfg.frames:
+        f = cfg.frames[topic]
+        print(f"\n  {B}+{topic}{R} — {f.description}")
+        if f.content:
+            print(f"  {DIM}{'─' * 50}{R}")
+            for line in f.content.strip().splitlines():
+                print(f"  {line}")
+        print()
+        return
+
+    # Команды
+    details = {
+        "all": (
+            "/all [агенты]",
+            "Вызвать всех enabled агентов последовательно.\n"
+            "Без аргументов — порядок из конфига.\n"
+            "С аргументами — явный порядок: /all gemini,claude\n"
+            "Поддерживает фреймы: /all qwen+audit,qwen+wild",
+        ),
+        "both": (
+            "/both [текст]",
+            "Вызвать claude и gemini последовательно.\n"
+            "Текст добавляется как комментарий @techlead перед вызовом.",
+        ),
+        "solo": (
+            "/solo <агенты> <промпт>",
+            "Агенты получают ТОЛЬКО промпт, без контекста дискуссии.\n"
+            "Несколько агентов — параллельно. Работают в /tmp.\n"
+            "Пример: /solo qwen+audit,qwen+wild оцени архитектуру X",
+        ),
+        "fresh": (
+            "/fresh <агенты> <промпт>",
+            "Агенты получают интро дискуссии + промпт (без хода обсуждения).\n"
+            "Несколько агентов — параллельно.\n"
+            "Пример: /fresh gemini,claude ответь на 5 вопросов из вводной",
+        ),
+        "ok": (
+            "/ok [текст]",
+            "Финализация дискуссии:\n"
+            "1. Добавляет комментарий (если есть)\n"
+            "2. Все агенты высказывают финальные замечания\n"
+            "3. Генерируется резолюция\n"
+            "4. Из резолюции создаются задачи в TASKS.md\n"
+            "   (с полями Запрещено и Проверка из дискуссии)",
+        ),
+        "resolve": (
+            "/resolve [текст]",
+            "Ручная резолюция без финального раунда агентов.\n"
+            "Текст становится резолюцией, затем генерируются задачи.",
+        ),
+        "reset": (
+            "/reset",
+            "Сбрасывает дискуссию к интро (первое сообщение @techlead).\n"
+            "Все ответы агентов удаляются. Бэкап → .bak\n"
+            "Восстановить: /undo",
+        ),
+        "compact": (
+            "/compact [N]",
+            "Сжимает ранние сообщения в сводку через LLM.\n"
+            "Оставляет последние N сообщений (по умолчанию 4).\n"
+            "Полезно когда дискуссия > 80K символов (auto-compact).\n"
+            "Восстановить: /undo",
+        ),
+        "frames": (
+            "Когнитивные фреймы",
+            "Фреймы — линзы мышления. Модель + фрейм = агент-специалист.\n"
+            "Синтаксис: /agent+frame (например /qwen+audit)\n"
+            "Одна модель с разными фреймами даёт разные ответы.\n\n"
+            "Доступные фреймы: " + ", ".join(f"+{n}" for n in cfg.frames) + "\n"
+            "Подробнее о фрейме: /help <имя_фрейма>",
+        ),
+        "scenarios": (
+            "Сценарии дискуссий",
+            "Готовые цепочки фреймов:\n\n"
+            "  проверь → сломай → оцени:\n"
+            "    /agent+audit → /agent+wild → /agent+price\n\n"
+            "  глубокий разбор:\n"
+            "    /agent+optimizer → /agent+meta → /agent+audit\n\n"
+            "  дебаты (два агента):\n"
+            "    /agent1+theory → /agent2+evidence → /agent1+price",
+        ),
+    }
+
+    if topic in details:
+        title, body = details[topic]
+        print(f"\n  {B}{title}{R}")
+        print(f"  {DIM}{'─' * 50}{R}")
+        for line in body.splitlines():
+            print(f"  {line}")
+        print()
+        return
+
+    print(f"  {_C['red']}Неизвестная тема: {topic}. Доступно: {', '.join(sorted(details.keys()))}; фреймы: {', '.join(cfg.frames)}{R}")
+
+
 def _print_chat_help():
     """Справка по командам чата."""
     R = _C["reset"]
@@ -1481,7 +1592,7 @@ def _print_chat_help():
         (f"{Y}/resolve{R} {DIM}[текст]{R}", len("/resolve [текст]"), "резолюция вручную + задачи"),
         (f"{Y}/reopen{R} {DIM}[причина]{R}", len("/reopen [причина]"), "переоткрыть (агенты критикуют резолюцию)"),
         SEP,
-        (f"{Y}/help{R}", 5, "эта справка"),
+        (f"{Y}/help{R} {DIM}[команда]{R}", len("/help [команда]"), "справка или подробности по команде/фрейму"),
         (f"{_C['red']}/exit{R}", 5, "выйти без резолюции"),
     ]
 
@@ -1497,6 +1608,7 @@ def _print_chat_help():
             continue
         pad = " " * max(col - vlen, 1)
         print(f"    {colored}{pad}{DIM}—{R} {desc}")
+    print(f"\n  {DIM}Tab — автодополнение команд. /help <команда> — подробности.{R}")
 
 
 def _print_confidence(text: str, agent_type: str):
