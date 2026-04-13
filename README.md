@@ -193,6 +193,7 @@ inactivity_timeout = 180
 
 [build]
 commands = [["make", "build"], ["make", "test"]]
+lint_fix = [["ruff", "check", ".", "--fix"]]  # авто-фикс после агента
 check_command = "make check"
 
 [limits]
