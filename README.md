@@ -22,40 +22,39 @@
 
 - Python 3.10+
 - Git
-- Хотя бы один агентский CLI, установленный и авторизованный:
-  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` CLI)
-  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini` CLI)
+- Хотя бы один агентский CLI:
+  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`)
+  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini`)
+  - [Qwen CLI](https://github.com/nicepkg/qwen) (`qwen`) — бесплатный
 
-**Важно:** ForgeRace использует официальные CLI агентов, а не API напрямую. Способ авторизации зависит от конкретного CLI — см. документацию каждого.
+`init` автоматически определит какие CLI установлены.
 
 ## Быстрый старт
 
 ```bash
-# 1. Клонируй ForgeRace
+# 1. Клонируй ForgeRace куда удобно
 git clone https://github.com/hitromudr/forgerace.git ~/forgerace
 
-# 2. Перейди в свой проект и инициализируй
+# 2. В своём проекте
 cd ~/work/my-project
-python3 ~/forgerace/forgerace.py init
-# Создаст forgerace.toml и TASKS.md
-
-# 3. Настрой конфиг
-vim forgerace.toml    # build-команды, dev_branch, агенты
-
-# 4. Запусти дискуссию — агенты разработают архитектуру и сгенерируют задачи
-python3 ~/forgerace/forgerace.py discuss new api-caching 'Нужно добавить кеширование ответов API. Redis или in-memory? Какие эндпоинты кешировать? TTL?'
-python3 ~/forgerace/forgerace.py discuss chat api-caching
-# Агенты обсуждают архитектуру. Когда готово: /ok
-# → генерируется резолюция + задачи автоматически вставляются в TASKS.md
-
-# 5. Запусти агентов
-python3 ~/forgerace/forgerace.py run
-
-# Статус и граф зависимостей
-python3 ~/forgerace/forgerace.py status
+~/forgerace/fr init
 ```
 
-После первого запуска конфиг запоминается — `--config` не нужен.
+`init` создаст:
+- `forgerace.toml` — конфиг с автодетектом агентов и когнитивными фреймами
+- `TASKS.md` — файл задач
+- `fr` — лаунчер (добавлен в `.gitignore`)
+- `docs/discuss/` — директория для дискуссий
+- `PROJECT_BRIEF.md` — описание проекта (генерируется агентом)
+
+```bash
+# 3. Настрой и работай
+vim forgerace.toml                    # build-команды, dev_branch
+./fr discuss new auth 'Как сделать авторизацию?'
+./fr discuss chat auth                # /help внутри чата
+./fr run                              # запуск задач
+./fr status                           # граф зависимостей
+```
 
 ## Флоу дискуссий
 
@@ -66,14 +65,13 @@ python3 ~/forgerace/forgerace.py discuss new api-caching 'Redis vs in-memory к�
 python3 ~/forgerace/forgerace.py discuss chat api-caching
 ```
 
-В интерактивном чате:
-- **текст** — твой комментарий (агенты не вызываются)
-- **/claude**, **/gemini**, **/both** — вызвать агента(ов)
-- **/both текст** — записать комментарий и вызвать обоих
-- **/ok** — утвердить и закрыть → генерация задач
-- **/resolve текст** — закрыть с ручной резолюцией
-- **/show** — показать всю дискуссию
-- **/exit** — выйти без закрытия
+В интерактивном чате — `/help` для полной справки, `Tab` для автодополнения:
+
+- `/agent` — вызвать агента (`/claude`, `/qwen`, `/gemini`)
+- `/agent+frame` — агент с когнитивным фреймом (`/qwen+audit`, `/claude+wild`)
+- `/all` — все агенты; `/all gemini,claude` — явный порядок
+- `/ok` — утвердить → генерация задач с полями "Запрещено" и "Проверка"
+- `/reset` — сброс к интро; `/help <команда>` — подробности
 
 ### Что делает `/ok`
 
@@ -92,6 +90,30 @@ python3 ~/forgerace/forgerace.py discuss chat api-caching
 3. Откроет интерактивный чат — ждёт `/ok` от techlead
 
 Исключение: задачи с критерием готовности `make check` утверждаются автоматически.
+
+## Когнитивные фреймы
+
+Фреймы — линзы мышления для агентов в дискуссиях. Одна модель с разными фреймами даёт принципиально разные ответы. Три qwen с тремя фреймами — три специалиста за $0.
+
+| Фрейм | Вопрос |
+|--------|--------|
+| `+audit` | выживет ли? (8 осей) |
+| `+wild` | а если наоборот? (дикие стратегии) |
+| `+price` | какой ценой? (trade-off матрицы) |
+| `+theory` | какой принцип? |
+| `+evidence` | какие факты? |
+| `+optimizer` | разбери по фазам (4-фазный анализ) |
+| `+meta` | какой закон? (13 мета-фреймворков) |
+| `+vectors` | какой инструмент? (10 когнитивных векторов) |
+
+Сценарии:
+```
+проверь → сломай → оцени:   /agent+audit → /agent+wild → /agent+price
+глубокий разбор:             /agent+optimizer → /agent+meta → /agent+audit
+дебаты:                      /agent1+theory → /agent2+evidence → /agent1+price
+```
+
+Подробнее: `frames/README.md`, в чате — `/help frames`.
 
 ## Режимы выполнения
 
@@ -135,11 +157,15 @@ python3 ~/forgerace/forgerace.py discuss chat api-caching
 - **Файлы (новые)**: src/path/file.py
 - **Файлы (modify)**: — или path
 - **Описание**: что реализовать
-- **Критерий готовности**: что должно работать
+- **Запрещено**: антипаттерны из дискуссии (kill box) или —
+- **Проверка**: команда верификации (агент обязан запустить)
+- **Критерий готовности**: бизнес-результат
 - **Дискуссия**: имя-топика или —
 - **Агент**: —
 - **Ветка**: —
 ```
+
+`Запрещено` и `Проверка` генерируются автоматически из дискуссии при `/ok`.
 
 Примеры: `examples/TASKS.md`.
 
