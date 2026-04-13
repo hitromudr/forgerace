@@ -1,0 +1,86 @@
+# ForgeRace + когнитивные фреймы из abracadabra
+# Скопируй в корень проекта как forgerace.toml
+
+[project]
+name = "my-project"
+context = "описание проекта — что это, на чём написано"
+discuss_context = "контекст для дискуссий — домен, ограничения, что важно"
+root = "."
+dev_branch = "develop"
+discuss_dir = "docs/discuss"
+
+# ── Когнитивные фреймы ──────────────────────────────────────
+# Комбинируй: /qwen+octagon, /gemini+lateral, /qwen+conflicts
+# Три qwen с разными фреймами = три специалиста за $0
+
+[frames.octagon]
+description = "8 осей выживаемости решения (Инженерный Октагон)"
+file = "frames/octagon.md"
+
+[frames.optimizer]
+description = "4-фазный анализ: grounding -> divergence -> red-teaming -> convergence"
+file = "frames/optimizer.md"
+
+[frames.vectors]
+description = "10 когнитивных векторов (дедукция, инверсия, латераль, парадокс...)"
+file = "frames/vectors.md"
+
+[frames.conflicts]
+description = "Арбитраж конфликтов, trade-off матрицы, диктатура Телоса"
+file = "frames/conflicts.md"
+
+[frames.philosopher]
+description = "13 мета-фреймворков: диалектика, теория игр, Cynefin, стоицизм..."
+file = "frames/philosopher.md"
+
+[frames.lateral]
+description = "Дикие стратегии, инверсия, детектор ложного консенсуса"
+file = "frames/lateral.md"
+
+# ── Агенты ───────────────────────────────────────────────────
+# Включи то что установлено. Фреймы работают с любой моделью.
+
+[agents.qwen]
+enabled = true
+command = "qwen"
+args = ["-p", "--allowed-tools", "read_file,write_file,edit,run_shell_command,grep_search,glob,list_directory,web_fetch",
+        "--output-format", "stream-json", "--approval-mode", "yolo"]
+review_args = ["-p", "--output-format", "text", "--approval-mode", "yolo"]
+inactivity_timeout = 300
+
+[agents.gemini]
+enabled = false  # включи если есть
+command = "gemini"
+args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
+review_args = ["-p", "-"]
+inactivity_timeout = 180
+
+[agents.claude]
+enabled = false  # включи если есть
+command = "claude"
+args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob", "--max-turns", "50", "--output-format", "stream-json", "--verbose"]
+review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+inactivity_timeout = 300
+
+# ── Сборка ───────────────────────────────────────────────────
+
+[build]
+commands = []
+check_command = ""
+timeout = 120
+
+[limits]
+agent_timeout = 900
+max_review_rounds = 3
+
+[rules]
+agent_rules = """
+ЗАПРЕЩЕНО:
+- git stash, git checkout, git reset, git clean
+- Изменение .env, credentials, secrets
+
+ПРАВИЛА:
+1. Трогай ТОЛЬКО файлы из секции "Файлы" задачи.
+2. Используй паттерны из существующего кода.
+3. НИКОГДА не удаляй код, не относящийся к задаче.
+"""
