@@ -560,31 +560,45 @@ def _cmd_agent_toggle(agent_name: str, enable: bool):
 
 def _print_full_help():
     """Полная справка с примерами."""
-    print(f"""{C['bold']}ForgeRace{R} — мультиагентный оркестратор разработки
+    DIM = C['dim']
+    Y = C['yellow']
+    B = C['bold']
+    print(f"""{B}ForgeRace{R} — мультиагентный оркестратор разработки
 
-{C['yellow']}БЫСТРЫЙ СТАРТ:{R}
-  ./fr init                              Создать forgerace.toml и TASKS.md
-  ./fr discuss new auth 'Как сделать авторизацию?'
-  ./fr discuss chat auth                 Обсуждение → /all → /ok → задачи
-  ./fr run                               Запустить все готовые задачи
+{Y}БЫСТРЫЙ СТАРТ:{R}
+  {B}./fr init{R}                              Создать проект (авто-детект агентов + фреймы)
+  {B}./fr discuss new{R} auth 'вопрос'          Создать дискуссию
+  {B}./fr discuss chat{R} auth                  Интерактивный чат → /help внутри
+  {B}./fr run{R}                               Запустить все готовые задачи
 
-{C['yellow']}ЗАПУСК ЗАДАЧ:{R}
+{Y}ЗАПУСК ЗАДАЧ:{R}
   ./fr run                               Все готовые задачи (конкурентно)
   ./fr run --task TASK-032               Конкретная задача
   ./fr run --retry                       Перезапуск упавших (blocked → open)
   ./fr run --auto --max-tasks 4          Авто-цикл: разблокированные → запуск
   ./fr run --dry-run                     Показать что запустится (без запуска)
 
-{C['yellow']}ДИСКУССИИ:{R}
+{Y}ДИСКУССИИ:{R}
   ./fr discuss new <тема> '<вопрос>'     Создать дискуссию
-  ./fr discuss chat <тема>               Интерактивный чат (Claude/Gemini/Qwen)
+  ./fr discuss chat <тема>               Интерактивный чат
   ./fr discuss list                      Список дискуссий
   ./fr discuss show <тема>               Показать дискуссию целиком
+  ./fr discuss reply <тема> --agent X    Пакетный ответ агента (без чата)
   ./fr discuss regen <тема>              Перегенерировать задачи из резолюции
 
-  Команды чата: /claude, /gemini, /qwen, /all, /both, /ok, /exit
+  {DIM}В чате: /help — справка, /help <команда> — подробности, Tab — автодополнение{R}
 
-{C['yellow']}АГЕНТЫ И РЕЖИМ:{R}
+{Y}КОГНИТИВНЫЕ ФРЕЙМЫ:{R}
+  {DIM}Модель + фрейм = агент-специалист. Три qwen с разными фреймами = три перспективы.{R}
+
+  В чате:    /qwen+audit                 Агент с фреймом
+  Пакетно:   ./fr discuss reply тема --agent qwen+audit
+  Сценарий:  /agent+audit → /agent+wild → /agent+price  {DIM}(проверь → сломай → оцени){R}
+
+  {DIM}Фреймы настраиваются в forgerace.toml секция [frames.*]{R}
+  {DIM}Встроенные фреймы: audit, wild, price, theory, evidence, optimizer, meta, vectors{R}
+
+{Y}АГЕНТЫ И РЕЖИМ:{R}
   ./fr agents                            Список агентов и статус (ON/OFF)
   ./fr agents off claude                 Выключить claude
   ./fr agents on claude                  Включить обратно
@@ -592,11 +606,11 @@ def _print_full_help():
   ./fr mode competitive                  Все агенты на каждую задачу (race)
   ./fr mode distributed                  Задачи раскидываются по агентам
 
-{C['yellow']}СТАТУС И МЕРЖ:{R}
+{Y}СТАТУС И МЕРЖ:{R}
   ./fr status                            Статус задач + граф зависимостей
   ./fr merge-pending                     Промержить review-задачи в develop
 
-{C['yellow']}ОПЦИИ:{R}
+{Y}ОПЦИИ:{R}
   --config PATH                          Путь к forgerace.toml
   --root PATH                            Корневая директория проекта
   --verbose                              Подробный вывод
