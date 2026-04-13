@@ -1,10 +1,13 @@
 """Конфигурация ForgeRace — загрузка из TOML с дефолтами."""
 
+import logging
 import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 try:
     import tomllib  # Python 3.11+
@@ -16,6 +19,13 @@ except ModuleNotFoundError:
 
 
 @dataclass
+class FrameConfig:
+    """Когнитивный фрейм для дискуссий (anti-convergence)."""
+    description: str = ""
+    content: str = ""  # inline-контент или загруженный из файла
+
+
+@dataclass
 class AgentConfig:
     """Конфиг одного агента."""
     command: str
@@ -24,6 +34,7 @@ class AgentConfig:
     inactivity_timeout: int = 300
     enabled: bool = True
     protocol: str = "cli"  # "cli" или "mcp"
+    cognitive_frame: str = ""  # legacy: inline фрейм (используется если нет frames)
 
 
 @dataclass
@@ -66,6 +77,9 @@ class Config:
 
     # --- Pricing ---
     pricing: PricingConfig = field(default_factory=PricingConfig)
+
+    # --- Когнитивные фреймы (model × frame = agent instance) ---
+    frames: dict[str, FrameConfig] = field(default_factory=dict)
 
     # --- Агенты ---
     agents: dict[str, AgentConfig] = field(default_factory=lambda: {
@@ -281,6 +295,8 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
         pass  # informational only
     if "context" in proj:
         cfg.project_context = proj["context"]
+    if "discuss_context" in proj:
+        cfg.discuss_context = proj["discuss_context"]
     if "dev_branch" in proj:
         cfg.dev_branch = proj["dev_branch"]
     if "tasks_file" in proj:
@@ -302,6 +318,25 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 inactivity_timeout=acfg.get("inactivity_timeout", 300),
                 enabled=acfg.get("enabled", True),
                 protocol=acfg.get("protocol", "cli"),
+                cognitive_frame=acfg.get("cognitive_frame", ""),
+            )
+
+    # [frames.*]
+    frames_data = data.get("frames", {})
+    if frames_data:
+        cfg.frames = {}
+        for name, fcfg in frames_data.items():
+            content = fcfg.get("content", "")
+            # Загрузка из файла если указан file= и нет inline content
+            if not content and "file" in fcfg:
+                frame_path = cfg.root_dir / fcfg["file"]
+                if frame_path.exists():
+                    content = frame_path.read_text(encoding="utf-8")
+                else:
+                    log.warning("Frame file not found: %s", frame_path)
+            cfg.frames[name] = FrameConfig(
+                description=fcfg.get("description", ""),
+                content=content,
             )
 
     # [build]
@@ -382,3 +417,26 @@ def init_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 pass
     # Создаём директории
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
+
+
+def resolve_agent_frame(agent_spec: str) -> tuple[str, str]:
+    """Разбирает спецификатор 'model+frame' → (model_name, frame_content).
+
+    Примеры:
+        'claude'          → ('claude', cognitive_frame из AgentConfig или '')
+        'qwen+octagon'    → ('qwen', content из frames['octagon'])
+        'gemini+arbiter'  → ('gemini', content из frames['arbiter'])
+
+    Приоритет: explicit +frame > agent.cognitive_frame > ''
+    """
+    if "+" in agent_spec:
+        model_name, frame_name = agent_spec.split("+", 1)
+        frame_cfg = cfg.frames.get(frame_name)
+        if frame_cfg and frame_cfg.content:
+            return model_name, frame_cfg.content
+        log.warning("Frame '%s' not found or empty, using agent default", frame_name)
+        acfg = cfg.agents.get(model_name)
+        return model_name, (acfg.cognitive_frame if acfg else "")
+    # Без +frame — используем cognitive_frame агента (legacy)
+    acfg = cfg.agents.get(agent_spec)
+    return agent_spec, (acfg.cognitive_frame if acfg else "")

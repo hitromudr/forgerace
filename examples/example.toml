@@ -14,12 +14,14 @@ command = "claude"
 args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob", "--max-turns", "50", "--output-format", "stream-json", "--verbose"]
 review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
 inactivity_timeout = 300
+# cognitive_frame = "Optional: thinking style for discussions (top-down, bottom-up, adversarial, etc.)"
 
 [agents.gemini]
 command = "gemini"
 args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
 review_args = ["-p", "-"]
 inactivity_timeout = 180
+# cognitive_frame = "Optional: contrasting thinking style to prevent convergence in discussions"
 
 [agents.qwen]
 command = "qwen"
@@ -27,6 +29,28 @@ args = ["-p", "--allowed-tools", "read_file,write_file,edit,run_shell_command,gr
         "--output-format", "stream-json", "--approval-mode", "yolo"]
 review_args = ["-p", "--output-format", "text", "--approval-mode", "yolo"]
 inactivity_timeout = 300
+
+# --- Cognitive Frames (model x frame = agent instance) ---
+# Use in discussions: /qwen+structure, /gemini+arbiter, /claude+lateral
+# Frames are independent of models — any model can use any frame.
+
+# Inline frame:
+# [frames.structure]
+# description = "Structural analysis through engineering axes"
+# content = "Analyse every proposal through 8 axes: purpose, topology, resources, kinematics, persistence, security, observability, evolvability."
+
+# Frame loaded from file:
+# [frames.octagon]
+# description = "8-axis engineering octagon from abracadabra KB"
+# file = "frames/octagon.md"
+
+# [frames.lateral]
+# description = "Lateral thinking, inversion, wild strategies"
+# file = "frames/lateral.md"
+
+# [frames.arbiter]
+# description = "Trade-off analysis, conflict resolution"
+# file = "frames/arbiter.md"
 
 [build]
 commands = [

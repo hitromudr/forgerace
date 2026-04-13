@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from .config import cfg, run_hint
+from .config import cfg, run_hint, resolve_agent_frame
 from .decompose import insert_tasks_into_tasksmd
 from .tasks import Task, parse_tasks, link_task_discussion
 from .utils import log, run_cmd, C, R, agent_color
@@ -37,21 +37,33 @@ def discuss_create(topic: str, question: str, author: str = "techlead"):
     log.info(f"Дискуссия создана: {filepath}")
 
 
-def discuss_reply(topic: str, agent_type: str):
-    """Запускает агента чтобы он ответил в дискуссии."""
+def discuss_reply(topic: str, agent_spec: str):
+    """Запускает агента чтобы он ответил в дискуссии.
+
+    agent_spec может быть 'claude', 'qwen+octagon', 'gemini+arbiter' и т.д.
+    """
     filepath = cfg.discuss_dir / f"{topic}.md"
     if not filepath.exists():
         log.error(f"Дискуссия {topic} не найдена")
         return
 
+    model_name, frame_content = resolve_agent_frame(agent_spec)
     discussion = filepath.read_text(encoding="utf-8")
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    prompt = f"""Ты участник архитектурной дискуссии {cfg.discuss_context}.
-Твоя роль: @{agent_type}.
+    frame_section = ""
+    if frame_content:
+        frame_section = f"\n## Твой когнитивный фрейм\n{frame_content}\n"
 
-Прочитай дискуссию ниже и напиши свой ответ. Будь конкретен: предлагай структуры,
-трейты, алгоритмы. Если не согласен с предыдущим участником — аргументируй.
+    display_name = agent_spec  # 'qwen+octagon' в заголовке дискуссии
+    prompt = f"""Ты участник дискуссии{' ' + cfg.discuss_context if cfg.discuss_context else ''}.
+Твоя роль: @{display_name}.
+{frame_section}
+Прочитай дискуссию и напиши свой ответ.
+Уровень ответа определяй по контексту дискуссии:
+- Если обсуждаются концепции, стратегии, trade-offs — рассуждай на уровне принципов и альтернатив. НЕ прыгай к коду.
+- Если обсуждается конкретная реализация — предлагай структуры, алгоритмы, примеры.
+- Если не согласен с предыдущим участником — аргументируй.
 
 Отвечай ТОЛЬКО текстом своего сообщения (без заголовка, без форматирования секции).
 Пиши на русском.
@@ -63,15 +75,16 @@ def discuss_reply(topic: str, agent_type: str):
 """
 
     from .agents import run_reviewer
+    agent_type = model_name  # run_reviewer использует model_name для выбора CLI
     reply_text = run_reviewer(agent_type, prompt) or "(пустой ответ)"
 
-    _print_confidence(reply_text, agent_type)
+    _print_confidence(reply_text, agent_spec)
     reply_text = re.sub(r"\n?CONFIDENCE:\s*\d+\s*%\s*$", "", reply_text).rstrip()
 
     with open(filepath, "a", encoding="utf-8") as f:
-        f.write(f"\n## @{agent_type} ({now})\n\n{reply_text}\n")
+        f.write(f"\n## @{display_name} ({now})\n\n{reply_text}\n")
 
-    log.info(f"@{agent_type} ответил в {topic}")
+    log.info(f"@{display_name} ответил в {topic}")
 
 
 def discuss_list():
@@ -121,10 +134,17 @@ def discuss_chat(topic: str):
     # readline: история ввода + автокомплит команд по Tab
     try:
         import readline
+        # Генерируем автокомплит: /model, /model+frame для всех комбинаций
+        _agent_cmds = [f"/{n}" for n in cfg.agent_names]
+        _frame_cmds = []
+        if cfg.frames:
+            for aname in cfg.agent_names:
+                for fname in cfg.frames:
+                    _frame_cmds.append(f"/{aname}+{fname}")
         _chat_commands = [
-            "/claude", "/gemini", "/qwen", "/both", "/all",
+            *_agent_cmds, *_frame_cmds, "/both", "/all",
             "/solo", "/fresh",
-            "/show", "/stats", "/summary", "/compact", "/undo", "/cd",
+            "/show", "/stats", "/summary", "/compact", "/undo", "/reset", "/cd",
             "/tasks", "/ok", "/resolve", "/reopen",
             "/help", "/exit",
         ]
@@ -200,23 +220,41 @@ def discuss_chat(topic: str):
         elif cmd == "/summary":
             _chat_summary(filepath)
             continue
-        elif cmd in ("/claude", "/gemini", "/qwen", "/both", "/all"):
-            if extra:
-                _chat_append(filepath, "techlead", extra)
+        elif cmd in ("/both", "/all") or _is_agent_cmd(cmd):
+            # Парсим extra: отделяем агентов (если есть) от комментария
+            # /gemini+arbiter claude+topdown — вызвать двоих последовательно
+            # /claude текст комментария — комментарий + вызов claude
+            # /all — все enabled агенты
             agents_to_call = []
+            comment = ""
             if cmd == "/all":
-                agents_to_call = [n for n in cfg.agent_names]
+                # /all gemini,claude — explicit order; /all — default order
+                if extra:
+                    explicit = _parse_agent_specs(extra)
+                    if explicit:
+                        agents_to_call = explicit
+                    else:
+                        comment = extra
+                        agents_to_call = list(cfg.agent_names)
+                else:
+                    agents_to_call = list(cfg.agent_names)
             elif cmd == "/both":
                 agents_to_call = [n for n in ("claude", "gemini") if n in cfg.agent_names]
+                comment = extra
             else:
-                name = cmd.lstrip("/")
-                if name in cfg.agent_names:
-                    agents_to_call = [name]
+                # /claude, /qwen+octagon, /gemini+arbiter и т.д.
+                spec = cmd.lstrip("/")
+                model_name = spec.split("+", 1)[0] if "+" in spec else spec
+                if model_name in cfg.agent_names:
+                    agents_to_call = [spec]
+                    comment = extra
                 else:
-                    print(f"  {_C['red']}Агент '{name}' не найден в конфиге{_C['reset']}")
+                    print(f"  {_C['red']}Агент '{model_name}' не найден в конфиге{_C['reset']}")
                     continue
-            for name in agents_to_call:
-                _chat_agent_reply(filepath, name)
+            if comment:
+                _chat_append(filepath, "techlead", comment)
+            for spec in agents_to_call:
+                _chat_agent_reply(filepath, spec)
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             print(f"  Введите текст — добавить свой комментарий в дискуссию")
             print(f"  {_C['yellow']}/all{_C['reset']} — все агенты   {_C['green']}/ok{_C['reset']} — одобрить и закрыть   {_C['yellow']}/help{_C['reset']} — все команды")
@@ -246,13 +284,26 @@ def discuss_chat(topic: str):
             if not extra:
                 print(f"  {_C['red']}Формат: /fresh <agent[,agent]> <промпт>{_C['reset']}")
                 continue
-            fresh_parts = extra.split(None, 1)
-            if len(fresh_parts) < 2:
-                print(f"  {_C['red']}Формат: /fresh <agent[,agent]> <промпт>{_C['reset']}")
+            # Парсим: /fresh agent1,agent2 промпт  или  /fresh agent1 agent2 промпт
+            # Агенты — слова без пробелов в начале, промпт — всё остальное после последнего агента
+            fresh_tokens = extra.split()
+            # Собираем агентов: токены которые являются именами агентов (с учётом запятых)
+            fresh_agents = []
+            prompt_start_idx = 0
+            for i, tok in enumerate(fresh_tokens):
+                # Разделяем по запятой: "gemini,claude" → ["gemini", "claude"]
+                parts = [p.strip() for p in tok.split(",") if p.strip()]
+                all_agents = all(p.split("+")[0] in cfg.agent_names for p in parts)
+                if all_agents:
+                    fresh_agents.extend(parts)
+                    prompt_start_idx = i + 1
+                else:
+                    break
+            fresh_prompt = " ".join(fresh_tokens[prompt_start_idx:]) if prompt_start_idx < len(fresh_tokens) else ""
+            if not fresh_agents or not fresh_prompt:
+                print(f"  {_C['red']}Формат: /fresh <agent[,agent...]> <промпт>{_C['reset']}")
                 continue
-            fresh_agents_str, fresh_prompt = fresh_parts
-            fresh_agents = [a.strip() for a in fresh_agents_str.split(",") if a.strip()]
-            bad = [a for a in fresh_agents if a not in cfg.agent_names]
+            bad = [a for a in fresh_agents if a.split("+")[0] not in cfg.agent_names]
             if bad:
                 print(f"  {_C['red']}Агенты не найдены: {', '.join(bad)}{_C['reset']}")
                 continue
@@ -291,6 +342,22 @@ def discuss_chat(topic: str):
             continue
         elif cmd == "/tasks":
             _chat_review_tasks(filepath)
+            continue
+        elif cmd == "/reset":
+            text = filepath.read_text(encoding="utf-8")
+            messages = _parse_messages(text)
+            if len(messages) < 2:
+                print(f"  {_C['red']}Нечего сбрасывать — только заголовок{_C['reset']}")
+                continue
+            # Сохраняем бэкап
+            backup = filepath.with_suffix(".md.bak")
+            backup.write_text(text, encoding="utf-8")
+            # Оставляем заголовок + первое сообщение (интро @techlead)
+            header = messages[0]["raw"]  # "# topic\n"
+            intro = messages[1]["raw"]   # "## @techlead ...\n\n...\n"
+            filepath.write_text(header + "\n" + intro, encoding="utf-8")
+            removed = len(messages) - 2
+            print(f"  ✓ Сброс к интро. Удалено {removed} сообщений. Бэкап: {backup.name}")
             continue
         elif cmd == "/undo":
             backup = filepath.with_suffix(".md.bak")
@@ -831,6 +898,33 @@ def _chat_compact(filepath: Path, keep_last: int = 4):
         print(f"  ✓ Сохранено якорей техлида: {len(anchors)}")
 
 
+def _is_agent_cmd(cmd: str) -> bool:
+    """Проверяет, является ли команда вызовом агента: /claude, /qwen+octagon и т.д."""
+    if not cmd.startswith("/"):
+        return False
+    spec = cmd.lstrip("/")
+    model_name = spec.split("+", 1)[0] if "+" in spec else spec
+    return model_name in cfg.agent_names
+
+
+def _parse_agent_specs(text: str) -> list[str]:
+    """Парсит строку с агентами: 'gemini,claude' или 'gemini claude' или 'qwen+octagon gemini+arbiter'.
+
+    Возвращает список agent specs если ВСЕ токены — валидные агенты.
+    Возвращает [] если хотя бы один токен — не агент (значит это комментарий).
+    """
+    specs = []
+    for tok in text.replace(",", " ").split():
+        tok = tok.strip()
+        if not tok:
+            continue
+        model_name = tok.split("+", 1)[0] if "+" in tok else tok
+        if model_name not in cfg.agent_names:
+            return []  # не агент — значит вся строка это комментарий
+        specs.append(tok)
+    return specs
+
+
 def _chat_append(filepath: Path, role: str, message: str):
     """Дописывает сообщение в файл дискуссии."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -873,8 +967,12 @@ def _extract_text_from_gemini_event(event: dict) -> str:
 _AUTO_COMPACT_THRESHOLD = 80_000  # символов (~20K токенов)
 
 
-def _chat_agent_reply(filepath: Path, agent_type: str):
-    """Вызывает агента со стримингом текста по токенам."""
+def _chat_agent_reply(filepath: Path, agent_spec: str):
+    """Вызывает агента со стримингом текста по токенам.
+
+    agent_spec может быть 'claude', 'qwen+octagon', 'gemini+arbiter' и т.д.
+    """
+    model_name, frame_content = resolve_agent_frame(agent_spec)
     discussion = filepath.read_text(encoding="utf-8")
     # Auto-compact если дискуссия слишком большая
     if len(discussion) > _AUTO_COMPACT_THRESHOLD:
@@ -885,16 +983,23 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
     cwd = _chat_cwd or cfg.root_dir
     # Claude CLI сам читает CLAUDE.md — не дублируем. Остальным инжектим project_docs.
     docs_section = ""
-    if agent_type != "claude" and cfg.project_docs:
+    if model_name != "claude" and cfg.project_docs:
         docs_section = f"\n## Документация проекта\n{cfg.project_docs}\n"
-    prompt = f"""Ты участник архитектурной дискуссии {cfg.discuss_context}.
-Твоя роль: @{agent_type}.
+    frame_section = ""
+    if frame_content:
+        frame_section = f"\n## Твой когнитивный фрейм\n{frame_content}\n"
+    display_name = agent_spec
+    prompt = f"""Ты участник дискуссии{' ' + cfg.discuss_context if cfg.discuss_context else ''}.
+Твоя роль: @{display_name}.
 Рабочая директория: {cwd}
 Ты можешь читать файлы и изучать проекты в этой директории если это нужно для ответа.
-{docs_section}
-Прочитай дискуссию и напиши свой ответ. Будь конкретен: предлагай структуры,
-трейты, алгоритмы. Если не согласен — аргументируй. Отвечай кратко и по делу.
-Пиши на русском. Выведи ТОЛЬКО текст ответа, без заголовков и метаданных.
+{docs_section}{frame_section}
+Прочитай дискуссию и напиши свой ответ.
+Уровень ответа определяй по контексту дискуссии:
+- Если обсуждаются концепции, стратегии, trade-offs — рассуждай на уровне принципов и альтернатив. НЕ прыгай к коду и реализации.
+- Если обсуждается конкретная реализация — предлагай структуры, алгоритмы, примеры кода.
+- Если не согласен — аргументируй с позиции trade-offs, а не личных предпочтений.
+Отвечай кратко и по делу. Пиши на русском. Выведи ТОЛЬКО текст ответа, без заголовков и метаданных.
 ВАЖНО: ты НЕ принимаешь решений. Только @techlead утверждает план и выносит резолюции.
 Ты можешь предлагать и рекомендовать, но НИКОГДА не пиши "план утверждён", "решено", "фиксируем" и т.п.
 {cfg.confidence_instruction}
@@ -904,6 +1009,7 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
 --- КОНЕЦ ---
 """
 
+    agent_type = model_name  # для выбора CLI команды
     acfg = cfg.agents.get(agent_type)
     if acfg is None:
         print(f"\n[ОШИБКА: агент '{agent_type}' не найден в конфиге]")
@@ -993,10 +1099,10 @@ def _chat_agent_reply(filepath: Path, agent_type: str):
         reply = "(пустой ответ)"
     print()
 
-    _print_confidence(reply, agent_type)
+    _print_confidence(reply, display_name)
     reply = re.sub(r"\n?CONFIDENCE:\s*\d+\s*%\s*$", "", reply).rstrip()
 
-    _chat_append(filepath, agent_type, reply)
+    _chat_append(filepath, display_name, reply)
 
 
 def _chat_solo_parallel(filepath: Path, agent_names: list[str], prompt: str, tag: str = "solo"):
@@ -1094,6 +1200,8 @@ def _chat_solo_parallel(filepath: Path, agent_names: list[str], prompt: str, tag
             for line in reply.splitlines():
                 print(_colorize_line(line))
             print()
+            _print_confidence(reply, name)
+            reply = re.sub(r"\n?CONFIDENCE:\s*\d+\s*%\s*$", "", reply).rstrip()
             solo_message = f"> Промпт: {prompt_quote}\n\n{reply}"
             _chat_append(filepath, f"{name} [{tag}]", solo_message)
         elif name in errors:
@@ -1282,48 +1390,87 @@ def _print_chat_help():
     DIM = _C["dim"]
     Y = _C["yellow"]
     G = _C["green"]
-    # Группы: агенты, спецрежимы, контекст, анализ, жизненный цикл, служебные
-    SEP = None  # разделитель между группами
-    print(f"{DIM}Команды:{R}")
+    B = _C["bold"]
+
+    # Генерируем список агентов из конфига
+    agent_lines = []
+    for name in cfg.agent_names:
+        color = _agent_color(name)
+        agent_lines.append(
+            (f"{Y}/{name}{R} {DIM}[текст]{R}", len(f"/{name} [текст]"),
+             f"[комментарий +] ответ {color}{name.capitalize()}{R}")
+        )
+
+    # Фреймы
+    frame_names = list(cfg.frames.keys()) if cfg.frames else []
+    frame_hint = ""
+    if frame_names:
+        examples = [f"/{cfg.agent_names[0]}+{frame_names[0]}"] if cfg.agent_names and frame_names else []
+        if len(frame_names) > 1 and len(cfg.agent_names) > 1:
+            examples.append(f"/{cfg.agent_names[1]}+{frame_names[1]}")
+        frame_hint = f" {DIM}({', '.join(examples)}){R}" if examples else ""
+
+    SEP = None
+    HEADER = "HEADER"  # маркер заголовка группы
+
     cmds = [
-        # --- Агенты ---
-        (f"{DIM}(текст){R}",                          8,  "ваш комментарий в дискуссию"),
-        (f"{Y}/claude{R} {DIM}[текст]{R}",            15, f"[комментарий +] ответ {_C['cyan']}Claude{R}"),
-        (f"{Y}/gemini{R} {DIM}[текст]{R}",            15, f"[комментарий +] ответ {_C['magenta']}Gemini{R}"),
-        (f"{Y}/qwen{R} {DIM}[текст]{R}",              13, f"[комментарий +] ответ {_agent_color('qwen')}Qwen{R}"),
-        (f"{Y}/both{R} {DIM}[текст]{R}",              13, "Claude + Gemini"),
-        (f"{Y}/all{R} {DIM}[текст]{R}",               12, "все агенты последовательно"),
+        # --- Вызов агентов ---
+        (HEADER, 0, f"{B}Вызов агентов:{R}"),
+        (f"{DIM}(текст){R}", 8, "ваш комментарий в дискуссию"),
+        *agent_lines,
+        (f"{Y}/both{R} {DIM}[текст]{R}", len("/both [текст]"), "claude + gemini последовательно"),
+        (f"{Y}/all{R} {DIM}[агенты]{R}", len("/all [агенты]"), "все агенты, или явный порядок: /all gemini,claude"),
+        SEP,
+        # --- Фреймы ---
+        (HEADER, 0, f"{B}Когнитивные фреймы{R} {DIM}(модель+фрейм):{R}"),
+        (f"{Y}/agent+frame{R}", len("/agent+frame"),
+         f"вызвать модель с фреймом{frame_hint}"),
+    ]
+    for fname in frame_names:
+        fdesc = cfg.frames[fname].description or fname
+        cmds.append((f"{DIM}+{fname}{R}", len(f"+{fname}"), fdesc))
+    cmds += [
         SEP,
         # --- Спецрежимы ---
-        (f"{Y}/solo{R} {DIM}<a[,b]> <промпт>{R}",      21, "без контекста (несколько — параллельно)"),
-        (f"{Y}/fresh{R} {DIM}<a[,b]> <промпт>{R}",     22, "вводные + промпт (несколько — параллельно)"),
+        (HEADER, 0, f"{B}Спецрежимы:{R}"),
+        (f"{Y}/solo{R} {DIM}<агенты> <промпт>{R}", len("/solo <агенты> <промпт>"),
+         "параллельно, без контекста дискуссии"),
+        (f"{Y}/fresh{R} {DIM}<агенты> <промпт>{R}", len("/fresh <агенты> <промпт>"),
+         "параллельно, только интро + промпт"),
         SEP,
-        # --- Контекст ---
-        (f"{Y}/show{R} {DIM}[N]{R}",                     9, "вся дискуссия (пейджер) или последние N сообщений"),
-        (f"{Y}/stats{R}",                               6, "размер, токены, участники"),
-        (f"{Y}/summary{R}",                              8, "саммари дискуссии (без закрытия)"),
-        (f"{Y}/compact{R} {DIM}[N]{R}",                12, "сжать ранние сообщения в сводку (последние N, по умолчанию 4)"),
-        (f"{Y}/undo{R}",                               5, "откатить compact/tasks из .bak"),
-        (f"{Y}/cd{R} {DIM}<path>{R}",                  10, "сменить рабочую директорию агентов"),
+        # --- Управление контекстом ---
+        (HEADER, 0, f"{B}Контекст:{R}"),
+        (f"{Y}/show{R} {DIM}[N]{R}", len("/show [N]"), "вся дискуссия или последние N сообщений"),
+        (f"{Y}/stats{R}", 6, "размер, токены, участники"),
+        (f"{Y}/summary{R}", 8, "саммари дискуссии (без закрытия)"),
+        (f"{Y}/compact{R} {DIM}[N]{R}", len("/compact [N]"), "сжать ранние сообщения (оставить последние N)"),
+        (f"{Y}/reset{R}", 6, "сбросить к интро, бэкап → .bak"),
+        (f"{Y}/undo{R}", 5, "восстановить из .bak"),
+        (f"{Y}/cd{R} {DIM}<path>{R}", len("/cd <path>"), "сменить рабочую директорию агентов"),
         SEP,
         # --- Жизненный цикл ---
-        (f"{Y}/tasks{R}",                               6, "ревью задач vs дискуссия → правки → перегенерация"),
-        (f"{G}/ok{R} {DIM}[текст]{R}",                 11, "одобрить и закрыть (резолюция + задачи)"),
-        (f"{Y}/resolve{R} {DIM}[текст]{R}",            16, "резолюция вручную + задачи"),
-        (f"{Y}/reopen{R} {DIM}[причина]{R}",           16, "переоткрыть (агенты критикуют резолюцию)"),
+        (HEADER, 0, f"{B}Закрытие:{R}"),
+        (f"{Y}/tasks{R}", 6, "ревью задач vs дискуссия → правки → перегенерация"),
+        (f"{G}/ok{R} {DIM}[текст]{R}", len("/ok [текст]"), "одобрить и закрыть (резолюция + задачи)"),
+        (f"{Y}/resolve{R} {DIM}[текст]{R}", len("/resolve [текст]"), "резолюция вручную + задачи"),
+        (f"{Y}/reopen{R} {DIM}[причина]{R}", len("/reopen [причина]"), "переоткрыть (агенты критикуют резолюцию)"),
         SEP,
-        # --- Служебные ---
-        (f"{Y}/help{R}",                                5, "эта справка"),
-        (f"{_C['red']}/exit{R}",                        5, "выйти без резолюции"),
+        (f"{Y}/help{R}", 5, "эта справка"),
+        (f"{_C['red']}/exit{R}", 5, "выйти без резолюции"),
     ]
-    col = max(v for c in cmds if c is not None for _, v, _ in [c]) + 1
+
+    col = max(v for c in cmds if c is not None and c != HEADER and c[0] != HEADER
+              for _, v, _ in [c]) + 2
     for entry in cmds:
         if entry is None:
             print()
             continue
         colored, vlen, desc = entry
-        pad = " " * (col - vlen)
-        print(f"  {colored}{pad}— {desc}")
+        if colored == HEADER:
+            print(f"  {desc}")
+            continue
+        pad = " " * max(col - vlen, 1)
+        print(f"    {colored}{pad}{DIM}—{R} {desc}")
 
 
 def _print_confidence(text: str, agent_type: str):
