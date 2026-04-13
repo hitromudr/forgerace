@@ -1418,6 +1418,27 @@ def _print_help_detail(topic: str):
         print()
         return
 
+    # agent+frame → redirect на фрейм
+    if "+" in topic:
+        frame_part = topic.split("+", 1)[1]
+        if frame_part in cfg.frames:
+            _print_help_detail(frame_part)
+            return
+
+    # Конкретный агент
+    if topic in cfg.agent_names:
+        acfg = cfg.agents[topic]
+        frame_examples = ", ".join(f"/{topic}+{f}" for f in list(cfg.frames)[:3]) if cfg.frames else ""
+        print(f"\n  {B}/{topic}{R} {DIM}[текст]{R}")
+        print(f"  {DIM}{'─' * 50}{R}")
+        print(f"  Вызвать {topic}. Текст — комментарий @techlead перед вызовом.")
+        print(f"  Команда: {acfg.command}")
+        print(f"  Таймаут: {acfg.inactivity_timeout}s")
+        if frame_examples:
+            print(f"  С фреймами: {frame_examples}")
+        print()
+        return
+
     # Команды
     details = {
         "all": (
@@ -1471,6 +1492,44 @@ def _print_help_detail(topic: str):
             "Полезно когда дискуссия > 80K символов (auto-compact).\n"
             "Восстановить: /undo",
         ),
+        "show": (
+            "/show [N]",
+            "Показать дискуссию через пейджер (less).\n"
+            "Без аргументов — вся дискуссия.\n"
+            "С числом — последние N сообщений.",
+        ),
+        "stats": (
+            "/stats",
+            "Размер дискуссии в символах и токенах,\n"
+            "список участников, количество сообщений.",
+        ),
+        "summary": (
+            "/summary",
+            "LLM-саммари дискуссии без закрытия.\n"
+            "Выводит в терминал, не записывает в файл.",
+        ),
+        "undo": (
+            "/undo",
+            "Восстановить дискуссию из .bak.\n"
+            "Работает после /reset, /compact, /tasks.",
+        ),
+        "cd": (
+            "/cd <path>",
+            "Сменить рабочую директорию агентов.\n"
+            "Агенты смогут читать файлы из этой директории.\n"
+            "Без аргументов — показать текущую.",
+        ),
+        "tasks": (
+            "/tasks",
+            "Ревью задач vs дискуссия: LLM сравнивает текущие\n"
+            "задачи с ходом дискуссии, предлагает правки.\n"
+            "После ревью — интерактивная генерация обновлённых задач.",
+        ),
+        "reopen": (
+            "/reopen [причина]",
+            "Переоткрыть закрытую дискуссию.\n"
+            "Все агенты критикуют предыдущую резолюцию.",
+        ),
         "frames": (
             "Когнитивные фреймы",
             "Фреймы — линзы мышления. Модель + фрейм = агент-специалист.\n"
@@ -1500,7 +1559,16 @@ def _print_help_detail(topic: str):
         print()
         return
 
-    print(f"  {_C['red']}Неизвестная тема: {topic}. Доступно: {', '.join(sorted(details.keys()))}; фреймы: {', '.join(cfg.frames)}{R}")
+    # Fallback: подсказка
+    available = sorted(details.keys())
+    frame_list = list(cfg.frames.keys())
+    agent_list = cfg.agent_names
+    print(f"  {_C['red']}Неизвестная тема: {topic}{R}")
+    print(f"  {DIM}Команды: {', '.join(available)}{R}")
+    if frame_list:
+        print(f"  {DIM}Фреймы:  {', '.join(frame_list)}{R}")
+    if agent_list:
+        print(f"  {DIM}Агенты:  {', '.join(agent_list)}{R}")
 
 
 def _print_chat_help():
