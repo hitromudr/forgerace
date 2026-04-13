@@ -113,6 +113,7 @@ class Config:
 
     # --- Команды сборки ---
     build_commands: list[list[str]] = field(default_factory=list)
+    lint_commands: list[list[str]] = field(default_factory=list)  # авто-фикс линтером после агента
     check_command: str = ""
 
     # --- Метрики: бинарники ---
@@ -351,6 +352,8 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     build = data.get("build", {})
     if "commands" in build:
         cfg.build_commands = build["commands"]
+    if "lint_fix" in build:
+        cfg.lint_commands = build["lint_fix"]
     if "check_command" in build:
         cfg.check_command = build["check_command"]
     if "timeout" in build:

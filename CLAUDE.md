@@ -64,7 +64,7 @@ python3 forgerace.py merge-pending
 - **Worktree изоляция**: каждый агент работает в отдельном git worktree. Мерж — через отдельный detached worktree + `update-ref`, чтобы не трогать рабочее дерево.
 - **Progress timeout**: агент убивается, если его diff не меняется `progress_timeout` секунд.
 - **Signal handling**: `run` создаёт process group (`setpgrp`) и ловит SIGINT/SIGTERM для убийства всех дочерних процессов. `discuss` использует обычный Ctrl+C. Pipeline завершается через `os._exit(0)` для гарантированного убийства застрявших потоков.
-- **Дефолты build_commands** пустые — задавать через `[build]` в TOML. `review_run_log` опциональна (`[limits] review_run_log = true`).
+- **Дефолты build_commands** пустые — задавать через `[build]` в TOML. `lint_fix` — авто-фикс линтером после агента (до build_commands), изменения коммитятся автоматически. `review_run_log` опциональна (`[limits] review_run_log = true`).
 - **Промпты агентам через stdin**: все агенты (claude, gemini) получают промпт через stdin, не через CLI-аргументы (ограничение на длину аргументов ОС).
 - **Контекст проекта**: `init` генерирует `PROJECT_BRIEF.md` (LLM-анализ README, зависимостей, структуры) для архитектурных дискуссий. При старте `cfg.project_docs` загружает `PROJECT_BRIEF.md` (приоритет) или `CLAUDE.md` (fallback). В промпты инжектится только не-claude агентам (claude CLI сам читает CLAUDE.md). В discuss при >80K символов — auto-compact.
 

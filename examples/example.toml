@@ -57,6 +57,11 @@ commands = [
     ["make", "build"],
     ["make", "test"],
 ]
+# Авто-фикс линтером после работы агента (до build commands).
+# Изменения коммитятся автоматически.
+lint_fix = [
+    ["ruff", "check", ".", "--fix"],
+]
 check_command = "make check"
 timeout = 120
 

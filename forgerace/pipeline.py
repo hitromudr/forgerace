@@ -140,6 +140,17 @@ def verify_build(workdir: Path, task: Task | None = None) -> tuple[bool, str]:
             return False, f"check_command failed:\n{result.stderr}\n{result.stdout}"
         return False, "Агент не внёс никаких изменений"
 
+    # Авто-фикс линтером (lint_fix) — до build_commands
+    if cfg.lint_commands:
+        for cmd in cfg.lint_commands:
+            run_cmd(cmd, cwd=workdir, timeout=cfg.build_timeout, check=False)
+        # Коммитим изменения линтера (если есть)
+        lint_status = run_cmd(["git", "status", "--porcelain"], cwd=workdir, check=False)
+        if (lint_status.stdout or "").strip():
+            run_cmd(["git", "add", "-A"], cwd=workdir, check=False)
+            run_cmd(["git", "commit", "-m", "style: auto-fix lint"], cwd=workdir, check=False)
+            log.info("  🔧 Lint auto-fix applied")
+
     for cmd in cfg.build_commands:
         result = run_cmd(cmd, cwd=workdir, timeout=cfg.build_timeout, check=False)
         if result.returncode != 0:
