@@ -163,13 +163,21 @@ def is_task_approved(task: Task) -> bool:
 # --- Поиск задач ---
 
 def find_ready_tasks(tasks: list[Task]) -> list[Task]:
-    """Находит задачи, которые можно взять (open + зависимости done)."""
+    """Находит задачи, которые можно взять (open + зависимости done).
+    Призрачные зависимости (ссылки на несуществующие задачи) игнорируются с предупреждением."""
+    all_ids = {t.id for t in tasks}
     done_ids = {t.id for t in tasks if t.status in ("done", "skip")}
     ready = []
     for t in tasks:
         if t.status != "open":
             continue
-        if all(d in done_ids for d in t.deps):
+        real_deps = []
+        for d in t.deps:
+            if d not in all_ids:
+                log.warning(f"⚠ {t.id}: зависимость {d} не существует (призрак), игнорируется")
+            else:
+                real_deps.append(d)
+        if all(d in done_ids for d in real_deps):
             ready.append(t)
     return sorted(ready, key=lambda t: t.priority)
 
@@ -223,6 +231,8 @@ class DependencyGraph:
                 if dep in self._all_ids:
                     self.depends_on[t.id].add(dep)
                     self.dependents[dep].add(t.id)
+                else:
+                    log.warning(f"⚠ {t.id}: зависимость {dep} не существует (призрак)")
 
     def get_transitive_dependents(self, task_id: str) -> set[str]:
         """Все задачи, которые (транзитивно) зависят от task_id."""

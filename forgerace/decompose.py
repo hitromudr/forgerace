@@ -166,6 +166,15 @@ COMPLEXITY: N
                 log.info(f"  🔗 Обновлена зависимость: {task.id} → {last_subtask} в строке {i + 1}")
         cfg.tasks_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+    # Валидируем зависимости подзадач
+    all_tasks = parse_tasks()
+    all_ids = {t.id for t in all_tasks}
+    for t in all_tasks:
+        if t.id in new_task_ids:
+            for dep in t.deps:
+                if dep not in all_ids:
+                    log.warning(f"  ⚠ {t.id}: зависимость {dep} не существует (призрак)")
+
     # Логируем
     log.info(f"  ✓ {task.id} декомпозирована на {len(new_task_ids)} подзадач:")
     new_tasks = parse_tasks()
