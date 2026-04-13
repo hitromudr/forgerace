@@ -198,14 +198,16 @@ def _generate_brief(cwd: Path, brief_path: Path):
 
 {context}"""
 
-    # Пробуем доступные агенты
-    for cmd_name in ("claude", "gemini"):
+    # Пробуем доступные агенты (в порядке предпочтения)
+    for cmd_name in ("claude", "gemini", "qwen"):
         if not shutil.which(cmd_name):
             continue
         print(f"  {C['yellow']}⚡ Генерация PROJECT_BRIEF.md через {cmd_name}...{R}", end="", flush=True)
         try:
             if cmd_name == "claude":
                 cmd = [cmd_name, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+            elif cmd_name == "qwen":
+                cmd = [cmd_name, "-p", "--output-format", "text", "--approval-mode", "yolo"]
             else:
                 cmd = [cmd_name, "-p", "", "--output-format", "text"]
             result = subprocess.run(
