@@ -545,9 +545,25 @@ def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
 
 ## Критерий готовности
 {task.acceptance}
+"""
 
+    if task.forbidden and task.forbidden.strip() not in ("", "—"):
+        prompt += f"""
+## ЗАПРЕЩЕНО (kill box этой задачи)
+{task.forbidden}
+"""
+
+    if task.verification and task.verification.strip() not in ("", "—"):
+        prompt += f"""
+## Обязательная проверка
+После реализации ОБЯЗАТЕЛЬНО выполни эту команду. Задача НЕ считается выполненной пока команда не вернёт exit code 0:
+```
+{task.verification}
+```
+"""
+
+    prompt += f"""
 ## Правила
-- ЗАПРЕЩЕНО создавать или править orchestrator_monolith.py — он удалён, весь код в forgerace/*.py
 - Правь ТОЛЬКО файлы указанные в "Файлы" выше. Не переписывай файлы целиком — делай точечные правки.
 {cfg.agent_rules}
 """

@@ -23,6 +23,8 @@ class Task:
     files_modify: str   # src/memory.rs
     integration: str    # pub mod frame_allocator в memory.rs
     description: str    # полное описание
+    forbidden: str      # антипаттерны / kill box для этой задачи
+    verification: str   # команда верификации (агент ОБЯЗАН запустить)
     acceptance: str     # критерий готовности
     agent: str          # claude / gemini / —
     branch: str         # task/001-frame-allocator / —
@@ -53,6 +55,8 @@ def parse_tasks(path: Path | None = None) -> list[Task]:
             files_modify=_field(raw, r"\*\*Файлы \(modify\)\*\*:\s*(.+)"),
             integration=_field(raw, r"\*\*Интеграция\*\*:\s*(.+)"),
             description=_field(raw, r"\*\*Описание\*\*:\s*(.+)"),
+            forbidden=_field(raw, r"\*\*Запрещено\*\*:\s*(.+)"),
+            verification=_field(raw, r"\*\*Проверка\*\*:\s*(.+)"),
             acceptance=_field(raw, r"\*\*Критерий готовности\*\*:\s*(.+)"),
             agent=_field(raw, r"\*\*Агент\*\*:\s*(.+)"),
             branch=_field(raw, r"\*\*Ветка\*\*:\s*(.+)"),
