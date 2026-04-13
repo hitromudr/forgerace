@@ -56,32 +56,41 @@ def _build_init_toml(name: str, detected_agents: list[str], has_frames: bool) ->
     if has_frames:
         lines += [
             '',
-            '# ── Когнитивные фреймы (модель+фрейм) ──────────────────────',
-            '# /qwen+octagon, /gemini+lateral, /claude+conflicts ...',
+            '# ── Когнитивные фреймы ──────────────────────────────────────',
+            '# /agent+frame в дискуссиях: /qwen+audit, /gemini+wild ...',
+            '# Сценарий: /qwen+audit → /qwen+wild → /qwen+price',
             '',
-            '[frames.octagon]',
-            'description = "8 осей выживаемости решения (Инженерный Октагон)"',
-            'file = "frames/octagon.md"',
+            '[frames.audit]',
+            'description = "8 осей выживаемости решения"',
+            'file = "frames/audit.md"',
+            '',
+            '[frames.wild]',
+            'description = "дикие стратегии, инверсия, слом шаблонов"',
+            'file = "frames/wild.md"',
+            '',
+            '[frames.price]',
+            'description = "цена выбора, trade-off матрицы, арбитраж"',
+            'file = "frames/price.md"',
+            '',
+            '[frames.theory]',
+            'description = "от принципов к реализации"',
+            'file = "frames/theory.md"',
+            '',
+            '[frames.evidence]',
+            'description = "от фактов к обобщению"',
+            'file = "frames/evidence.md"',
             '',
             '[frames.optimizer]',
-            'description = "4-фазный анализ: grounding -> divergence -> red-teaming"',
+            'description = "4-фазный разбор: grounding → divergence → red-teaming"',
             'file = "frames/optimizer.md"',
             '',
+            '[frames.meta]',
+            'description = "13 фреймворков: диалектика, теория игр, стоицизм..."',
+            'file = "frames/meta.md"',
+            '',
             '[frames.vectors]',
-            'description = "10 когнитивных векторов (дедукция, инверсия, латераль...)"',
+            'description = "10 когнитивных векторов: дедукция, инверсия, парадокс..."',
             'file = "frames/vectors.md"',
-            '',
-            '[frames.conflicts]',
-            'description = "Арбитраж конфликтов, trade-off матрицы"',
-            'file = "frames/conflicts.md"',
-            '',
-            '[frames.philosopher]',
-            'description = "13 мета-фреймворков: диалектика, теория игр, стоицизм..."',
-            'file = "frames/philosopher.md"',
-            '',
-            '[frames.lateral]',
-            'description = "Дикие стратегии, инверсия, детектор консенсуса"',
-            'file = "frames/lateral.md"',
         ]
 
     # Agents — только обнаруженные
@@ -248,7 +257,7 @@ def _cmd_init():
         print(f"  {C['yellow']}⚠ Агенты не найдены в PATH (claude, gemini, qwen){R}")
 
     # 2. Проверяем наличие встроенных фреймов
-    has_frames = (forgerace_dir / "frames" / "octagon.md").exists()
+    has_frames = (forgerace_dir / "frames" / "audit.md").exists()
     if has_frames:
         print(f"  {C['green']}✓ Когнитивные фреймы: {forgerace_dir / 'frames'}{R}")
 
@@ -313,8 +322,9 @@ def _cmd_init():
     if has_frames and detected:
         agent = detected[0]
         print(f"    {C['bold']}./fr discuss chat тема{R}    — интерактивный чат")
-        print(f"    {C['yellow']}  /{agent}+octagon{R}           — агент с фреймом")
-        print(f"    {C['yellow']}  /{agent}+lateral{R}           — дикие стратегии")
+        print(f"    {C['yellow']}  /{agent}+audit{R}             — проверь: 8 осей выживаемости")
+        print(f"    {C['yellow']}  /{agent}+wild{R}              — сломай: дикие стратегии")
+        print(f"    {C['yellow']}  /{agent}+price{R}             — оцени: цена выбора")
     print(f"    {C['bold']}./fr run{R}                  — запусти задачи")
     print(f"    {C['bold']}./fr help{R}                 — все команды")
 

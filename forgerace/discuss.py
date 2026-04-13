@@ -1437,6 +1437,24 @@ def _print_chat_help():
     for fname in frame_names:
         fdesc = cfg.frames[fname].description or fname
         cmds.append((f"{DIM}+{fname}{R}", len(f"+{fname}"), fdesc))
+    # Сценарии — динамические, на основе enabled агентов
+    if frame_names and cfg.agent_names:
+        a = cfg.agent_names[0]  # первый доступный агент
+        scenarios = []
+        if "audit" in frame_names and "wild" in frame_names and "price" in frame_names:
+            scenarios.append(f"/{a}+audit → /{a}+wild → /{a}+price")
+        if "optimizer" in frame_names and "meta" in frame_names and "audit" in frame_names:
+            scenarios.append(f"/{a}+optimizer → /{a}+meta → /{a}+audit")
+        if "theory" in frame_names and "evidence" in frame_names and len(cfg.agent_names) > 1:
+            b = cfg.agent_names[1]
+            scenarios.append(f"/{a}+theory → /{b}+evidence → /{a}+price")
+        if scenarios:
+            cmds.append(SEP)
+            cmds.append((HEADER, 0, f"{B}Сценарии:{R}"))
+            labels = ["проверь → сломай → оцени", "глубокий разбор", "дебаты"]
+            for i, sc in enumerate(scenarios):
+                label = labels[i] if i < len(labels) else ""
+                cmds.append((f"{DIM}{label}{R}", len(label), sc))
     cmds += [
         SEP,
         # --- Спецрежимы ---
