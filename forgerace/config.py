@@ -169,6 +169,10 @@ _config_path: Optional[Path] = None
 
 def run_hint() -> str:
     """Возвращает команду запуска для подсказок пользователю."""
+    # Если в проекте есть ./fr — используем его
+    fr_path = cfg.root_dir / "fr"
+    if fr_path.exists():
+        return "./fr run"
     import sys
     script = sys.argv[0]
     if script.endswith("forgerace.py"):
