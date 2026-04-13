@@ -16,42 +16,106 @@ from .tasks import parse_tasks, update_task_status
 from .utils import log, run_cmd, setup_logging
 
 
-_INIT_TOML = '''# ForgeRace configuration
-# Docs: https://github.com/hitromudr/forgerace
+_AGENT_CONFIGS = {
+    "claude": {
+        "command": "claude",
+        "args": '["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSearch",\n'
+                '        "--max-turns", "50", "--output-format", "stream-json", "--verbose"]',
+        "review_args": '["-p", "-", "--output-format", "text", "--permission-mode", "auto"]',
+        "timeout": 300,
+    },
+    "gemini": {
+        "command": "gemini",
+        "args": '["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]',
+        "review_args": '["-p", "-"]',
+        "timeout": 180,
+    },
+    "qwen": {
+        "command": "qwen",
+        "args": '["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]',
+        "review_args": '["-p", "-", "--approval-mode", "yolo"]',
+        "timeout": 180,
+    },
+}
 
-[project]
-name = "{name}"
-root = "."
-dev_branch = "develop"
 
-[agents.claude]
-command = "claude"
-args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSearch",
-        "--max-turns", "50", "--output-format", "stream-json", "--verbose"]
-review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
-inactivity_timeout = 300
+def _build_init_toml(name: str, detected_agents: list[str], has_frames: bool) -> str:
+    """Генерирует forgerace.toml с автодетектом агентов и фреймами."""
+    lines = [
+        '# ForgeRace configuration',
+        '# Docs: https://github.com/hitromudr/forgerace',
+        '',
+        '[project]',
+        f'name = "{name}"',
+        'root = "."',
+        'dev_branch = "develop"',
+        'discuss_dir = "docs/discuss"',
+    ]
 
-[agents.gemini]
-command = "gemini"
-args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
-review_args = ["-p", "-"]
-inactivity_timeout = 180
+    # Frames
+    if has_frames:
+        lines += [
+            '',
+            '# ── Когнитивные фреймы (модель+фрейм) ──────────────────────',
+            '# /qwen+octagon, /gemini+lateral, /claude+conflicts ...',
+            '',
+            '[frames.octagon]',
+            'description = "8 осей выживаемости решения (Инженерный Октагон)"',
+            'file = "frames/octagon.md"',
+            '',
+            '[frames.optimizer]',
+            'description = "4-фазный анализ: grounding -> divergence -> red-teaming"',
+            'file = "frames/optimizer.md"',
+            '',
+            '[frames.vectors]',
+            'description = "10 когнитивных векторов (дедукция, инверсия, латераль...)"',
+            'file = "frames/vectors.md"',
+            '',
+            '[frames.conflicts]',
+            'description = "Арбитраж конфликтов, trade-off матрицы"',
+            'file = "frames/conflicts.md"',
+            '',
+            '[frames.philosopher]',
+            'description = "13 мета-фреймворков: диалектика, теория игр, стоицизм..."',
+            'file = "frames/philosopher.md"',
+            '',
+            '[frames.lateral]',
+            'description = "Дикие стратегии, инверсия, детектор консенсуса"',
+            'file = "frames/lateral.md"',
+        ]
 
-[agents.qwen]
-command = "qwen"
-args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
-review_args = ["-p", "-", "--approval-mode", "yolo"]
-inactivity_timeout = 180
+    # Agents — только обнаруженные
+    lines.append('')
+    lines.append('# ── Агенты ───────────────────────────────────────────────────')
 
-[build]
-commands = []
-check_command = ""
+    all_agents = ["claude", "gemini", "qwen"]
+    for agent in all_agents:
+        acfg = _AGENT_CONFIGS[agent]
+        enabled = agent in detected_agents
+        lines += [
+            '',
+            f'[agents.{agent}]',
+            f'enabled = {"true" if enabled else "false"}'
+            f'{"" if enabled else "  # не найден в PATH"}',
+            f'command = "{acfg["command"]}"',
+            f'args = {acfg["args"]}',
+            f'review_args = {acfg["review_args"]}',
+            f'inactivity_timeout = {acfg["timeout"]}',
+        ]
 
-[limits]
-max_parallel_tasks = 10
-agent_timeout = 900
-max_review_rounds = 3
-'''
+    lines += [
+        '',
+        '[build]',
+        'commands = []',
+        'check_command = ""',
+        '',
+        '[limits]',
+        'max_parallel_tasks = 10',
+        'agent_timeout = 900',
+        'max_review_rounds = 3',
+        '',
+    ]
+    return '\n'.join(lines)
 
 _INIT_TASKS = '''# TASKS — {name}
 '''
@@ -158,51 +222,99 @@ def _generate_brief(cwd: Path, brief_path: Path):
     print(f" {C['red']}✗ нет доступных агентов{R}")
 
 
+def _detect_agents() -> list[str]:
+    """Ищет доступные CLI агентов в PATH."""
+    import shutil
+    found = []
+    for name in ("claude", "gemini", "qwen"):
+        if shutil.which(name):
+            found.append(name)
+    return found
+
+
 def _cmd_init():
-    """Создаёт forgerace.toml и TASKS.md в текущей директории."""
+    """Инициализирует ForgeRace в текущей директории."""
     cwd = Path.cwd()
     name = cwd.name
+    forgerace_dir = Path(__file__).resolve().parent.parent  # корень репы forgerace
+
+    # 1. Детектим агентов
+    detected = _detect_agents()
+    if detected:
+        print(f"  {C['green']}✓ Найдены агенты: {', '.join(detected)}{R}")
+    else:
+        print(f"  {C['yellow']}⚠ Агенты не найдены в PATH (claude, gemini, qwen){R}")
+
+    # 2. Проверяем наличие встроенных фреймов
+    has_frames = (forgerace_dir / "frames" / "octagon.md").exists()
+    if has_frames:
+        print(f"  {C['green']}✓ Когнитивные фреймы: {forgerace_dir / 'frames'}{R}")
+
+    # 3. Создаём файлы
+    created = []
 
     toml_path = cwd / "forgerace.toml"
-    tasks_path = cwd / "TASKS.md"
-
-    created = []
     if toml_path.exists():
         print(f"  {C['dim']}forgerace.toml уже существует{R}")
     else:
-        toml_path.write_text(_INIT_TOML.format(name=name), encoding="utf-8")
+        toml_path.write_text(
+            _build_init_toml(name, detected, has_frames), encoding="utf-8")
         created.append("forgerace.toml")
 
+    tasks_path = cwd / "TASKS.md"
     if tasks_path.exists():
         print(f"  {C['dim']}TASKS.md уже существует{R}")
     else:
         tasks_path.write_text(_INIT_TASKS.format(name=name), encoding="utf-8")
         created.append("TASKS.md")
 
-    # Создаём обёртку fr для короткого вызова
-    import sys
-    forgerace_py = Path(sys.argv[0]).resolve()
+    # 4. Симлинк fr → forgerace.py
+    forgerace_py = (forgerace_dir / "forgerace.py").resolve()
     fr_path = cwd / "fr"
     if not fr_path.exists():
         fr_path.write_text(f"#!/bin/sh\nexec python3 {forgerace_py} \"$@\"\n", encoding="utf-8")
         fr_path.chmod(0o755)
         created.append("fr")
 
+    # 5. Добавляем fr в .gitignore
+    gitignore = cwd / ".gitignore"
+    if gitignore.exists():
+        gi_text = gitignore.read_text(encoding="utf-8")
+        if "fr" not in gi_text.splitlines():
+            with open(gitignore, "a", encoding="utf-8") as f:
+                f.write("\n# ForgeRace launcher\nfr\n")
+            print(f"  {C['green']}✓ fr добавлен в .gitignore{R}")
+    else:
+        gitignore.write_text("# ForgeRace launcher\nfr\n", encoding="utf-8")
+        created.append(".gitignore")
+
+    # 6. docs/discuss
+    discuss_dir = cwd / "docs" / "discuss"
+    if not discuss_dir.exists():
+        discuss_dir.mkdir(parents=True, exist_ok=True)
+        created.append("docs/discuss/")
+
     if created:
         print(f"  {C['green']}✓ Создано: {', '.join(created)}{R}")
 
-    # Генерация PROJECT_BRIEF.md — анализ проекта для дискуссий
+    # 7. PROJECT_BRIEF.md
     brief_path = cwd / "PROJECT_BRIEF.md"
     if brief_path.exists():
         print(f"  {C['dim']}PROJECT_BRIEF.md уже существует{R}")
     else:
         _generate_brief(cwd, brief_path)
 
-    print(f"\n  Теперь:")
-    print(f"    {C['bold']}vim forgerace.toml{R}     — настрой build-команды и агентов")
-    print(f"    {C['bold']}./fr discuss new ...{R}  — запусти дискуссию → /ok → задачи")
-    print(f"    {C['bold']}./fr run{R}              — запусти агентов")
-    print(f"    {C['bold']}./fr help{R}             — все команды")
+    # 8. Подсказки
+    print(f"\n  {C['bold']}Быстрый старт:{R}")
+    print(f"    {C['bold']}vim forgerace.toml{R}        — настрой проект")
+    print(f"    {C['bold']}./fr discuss new тема '?'{R} — начни дискуссию")
+    if has_frames and detected:
+        agent = detected[0]
+        print(f"    {C['bold']}./fr discuss chat тема{R}    — интерактивный чат")
+        print(f"    {C['yellow']}  /{agent}+octagon{R}           — агент с фреймом")
+        print(f"    {C['yellow']}  /{agent}+lateral{R}           — дикие стратегии")
+    print(f"    {C['bold']}./fr run{R}                  — запусти задачи")
+    print(f"    {C['bold']}./fr help{R}                 — все команды")
 
 
 def show_status():

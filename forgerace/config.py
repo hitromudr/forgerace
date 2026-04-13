@@ -327,13 +327,17 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
         cfg.frames = {}
         for name, fcfg in frames_data.items():
             content = fcfg.get("content", "")
-            # Загрузка из файла если указан file= и нет inline content
+            # Загрузка из файла: сначала ищем в проекте, потом в директории forgerace
             if not content and "file" in fcfg:
-                frame_path = cfg.root_dir / fcfg["file"]
+                frame_file = fcfg["file"]
+                frame_path = cfg.root_dir / frame_file
+                if not frame_path.exists():
+                    # Fallback: относительно пакета forgerace (встроенные фреймы)
+                    frame_path = Path(__file__).resolve().parent.parent / frame_file
                 if frame_path.exists():
                     content = frame_path.read_text(encoding="utf-8")
                 else:
-                    log.warning("Frame file not found: %s", frame_path)
+                    log.warning("Frame file not found: %s (searched project and forgerace dirs)", frame_file)
             cfg.frames[name] = FrameConfig(
                 description=fcfg.get("description", ""),
                 content=content,
