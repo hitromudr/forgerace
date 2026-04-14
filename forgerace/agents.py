@@ -584,6 +584,8 @@ def run_text_agent(prompt: str, timeout: int = 300, tag: str = "") -> str:
     # Ротация: каждый вызов начинает с другого агента
     names = names[start:] + names[:start]
     for name in names:
+        if name in _disabled_agents:
+            continue
         acfg = cfg.agents.get(name)
         if not acfg:
             continue
@@ -593,6 +595,12 @@ def run_text_agent(prompt: str, timeout: int = 300, tag: str = "") -> str:
                 cmd, cwd=cfg.root_dir, input=prompt,
                 capture_output=True, text=True, timeout=timeout,
             )
+            # Detect quota errors
+            stderr_lower = (result.stderr or "").lower()
+            if any(kw in stderr_lower for kw in _QUOTA_KEYWORDS):
+                _disabled_agents.add(name)
+                log.error("run_text_agent(%s): квота — отключён", name)
+                continue
             text = (result.stdout or "").strip()
             if text:
                 if tag:
