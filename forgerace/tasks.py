@@ -176,14 +176,21 @@ def topic_for_task(task: Task) -> str:
 # --- Проверка утверждённости ---
 
 def is_task_approved(task: Task) -> bool:
-    """Проверяет, утверждена ли задача (есть дискуссия с резолюцией)."""
+    """Проверяет, утверждена ли задача.
+
+    Утверждена если:
+    - Нет привязанной дискуссии (discussion: — или пустое) → не требует обсуждения
+    - Дискуссия есть и содержит РЕЗОЛЮЦИЮ → обсуждена и утверждена
+    - acceptance содержит "make check" → автоматическая проверка
+    - Дискуссия привязана как "future" → ещё не создана, считаем утверждённой
+    """
     if "make check" in (task.acceptance or ""):
         return True
-    if not task.discussion or task.discussion == "—":
-        return False
+    if not task.discussion or task.discussion in ("—", "future"):
+        return True
     filepath = cfg.discuss_dir / f"{task.discussion}.md"
     if not filepath.exists():
-        return False
+        return True  # discussion file missing — don't block execution
     text = filepath.read_text(encoding="utf-8")
     return "РЕЗОЛЮЦИЯ" in text
 

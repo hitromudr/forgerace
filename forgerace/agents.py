@@ -480,6 +480,12 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
         cmd, cwd=cfg.root_dir, input=prompt,
         capture_output=True, text=True, timeout=timeout,
     )
+    if result.returncode != 0:
+        log.warning("run_reviewer(%s) exit code %d: %s",
+                     reviewer_type, result.returncode, (result.stderr or "")[:500])
+    if not (result.stdout or "").strip() and result.stderr:
+        log.warning("run_reviewer(%s) empty stdout, stderr: %s",
+                     reviewer_type, result.stderr[:500])
     return (result.stdout or "").strip()
 
 
