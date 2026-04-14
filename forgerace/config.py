@@ -426,14 +426,23 @@ def init_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 break
             except Exception:
                 pass
-    # Определяем dev_branch из текущей ветки если не задан явно
-    if not cfg.dev_branch:
-        import subprocess
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+    # Определяем dev_branch: если задан явно — проверяем что ветка существует,
+    # иначе (или если не существует) — используем текущую ветку
+    current = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=cfg.root_dir, capture_output=True, text=True,
+    ).stdout.strip() or "main"
+    if cfg.dev_branch:
+        check = subprocess.run(
+            ["git", "rev-parse", "--verify", f"refs/heads/{cfg.dev_branch}"],
             cwd=cfg.root_dir, capture_output=True, text=True,
         )
-        cfg.dev_branch = (result.stdout.strip() or "main")
+        if check.returncode != 0:
+            log.warning("Ветка '%s' не найдена, используем текущую: %s",
+                        cfg.dev_branch, current)
+            cfg.dev_branch = current
+    else:
+        cfg.dev_branch = current
     # Создаём директории
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
 
