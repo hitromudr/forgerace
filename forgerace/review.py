@@ -59,6 +59,8 @@ def _parse_issues(raw_issues: list | str | None) -> list[dict]:
     pattern = re.compile(r"^\[(\w+)]\s*(.+)$")
     for item in raw_issues:
         if isinstance(item, dict):
+            if "severity" in item:
+                item = {**item, "severity": str(item["severity"]).lower()}
             result.append(item)
             continue
         if not isinstance(item, str):
@@ -91,6 +93,8 @@ def validate_review(data: dict) -> tuple[bool, str]:
     # --- confidence ---
     conf_raw = data.get("confidence")
     if conf_raw is not None:
+        if isinstance(conf_raw, bool):
+            return False, f"confidence must be int or float, got bool"
         try:
             conf = int(conf_raw)
         except (ValueError, TypeError):
