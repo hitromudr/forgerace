@@ -203,6 +203,24 @@ def _codex_extract_result(stdout_lines: list[str]) -> str:
 
 # --- Запуск агентов ---
 
+def _terminate_agent_process(proc: subprocess.Popen):
+    """Graceful shutdown процесса агента: terminate → wait(timeout=2) → kill при зависании."""
+    pid = proc.pid
+    log.info(f"Завершение процесса агента (pid={pid}): terminate...")
+    try:
+        proc.terminate()
+        proc.wait(timeout=2)
+        log.info(f"Процесс агента (pid={pid}) завершён через terminate")
+    except subprocess.TimeoutExpired:
+        log.warning(f"Процесс агента (pid={pid}) не ответил на terminate, применяю kill")
+        try:
+            proc.kill()
+            proc.wait(timeout=5)
+            log.info(f"Процесс агента (pid={pid}) принудительно завершён через kill")
+        except subprocess.TimeoutExpired:
+            log.error(f"Процесс агента (pid={pid}) не завершился даже после kill")
+
+
 _PRODUCTIVE_TOOLS = {"Write", "Edit", "Bash", "write_file", "edit", "run_shell_command"}
 
 
@@ -280,21 +298,18 @@ def _run_agent_streaming(
         while True:
             remaining = deadline - time.time()
             if remaining <= 0:
-                proc.kill()
-                proc.wait()
+                _terminate_agent_process(proc)
                 log.error(f"[{tag}] ⏰ Таймаут ({cfg.agent_timeout}с)")
                 return AgentProcessResult(returncode=1, stdout="", stderr="TIMEOUT", usage=usage_acc)
 
             # Отмена: другой агент уже победил
             if cancel_event and cancel_event.is_set():
-                proc.kill()
-                proc.wait()
+                _terminate_agent_process(proc)
                 log.info(f"[{tag}] 🛑 Отменён (другой агент победил)")
                 return AgentProcessResult(returncode=1, stdout="", stderr="CANCELLED", usage=usage_acc)
 
             if time.time() - last_activity > inactivity_timeout:
-                proc.kill()
-                proc.wait()
+                _terminate_agent_process(proc)
                 log.error(f"[{tag}] ⏰ Нет tool_use {inactivity_timeout}с — завис, убиваю")
                 return AgentProcessResult(returncode=1, stdout="", stderr="INACTIVITY_TIMEOUT", usage=usage_acc)
 
