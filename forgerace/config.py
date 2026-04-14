@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from .config_errors import ConfigValidationError
+
 log = logging.getLogger(__name__)
 
 try:
@@ -67,12 +69,12 @@ class Config:
     # --- Лимиты ---
     max_retries: int = 3
     max_parallel_tasks: int = 10
-    agent_timeout: int = 900
+    agent_timeout: float = 900.0
     build_timeout: int = 120
     max_review_rounds: int = 3
     review_frame: str = "adversarial"  # cognitive frame for self-review when only one agent
     max_task_complexity: int = 3
-    progress_timeout: int = 600  # kill агента если diff не меняется N секунд (10 мин)
+    progress_timeout: float = 600.0  # kill агента если diff не меняется N секунд (10 мин)
     max_concurrent: int = 3  # макс. параллельных задач в ConcurrencyLimiter
     budget_per_task_usd: Optional[float] = None
 
@@ -259,6 +261,54 @@ def _load_last_config() -> Optional[Path]:
     return None
 
 
+def validate_numeric_fields(cfg: Config) -> None:
+    """Валидирует числовые поля конфигурации."""
+    # 1) agent_timeout: isinstance(val, (int, float)) и > 0, привести к float
+    val = cfg.agent_timeout
+    if not isinstance(val, (int, float)) or isinstance(val, bool) or val <= 0:
+        raise ConfigValidationError(
+            f"agent_timeout must be a positive number, got {type(val).__name__}: {val}"
+        )
+    cfg.agent_timeout = float(val)
+
+    # 2) progress_timeout: isinstance(val, (int, float)) и > 0, привести к float
+    val = cfg.progress_timeout
+    if not isinstance(val, (int, float)) or isinstance(val, bool) or val <= 0:
+        raise ConfigValidationError(
+            f"progress_timeout must be a positive number, got {type(val).__name__}: {val}"
+        )
+    cfg.progress_timeout = float(val)
+
+    # 3) max_parallel_tasks: строго isinstance(val, int) и > 0
+    val = cfg.max_parallel_tasks
+    if not isinstance(val, int) or isinstance(val, bool) or val <= 0:
+        raise ConfigValidationError(
+            f"max_parallel_tasks must be a positive integer, got {type(val).__name__}: {val}"
+        )
+
+    # 4) max_retries: isinstance(val, int) и >= 0 (ноль допустим)
+    val = cfg.max_retries
+    if not isinstance(val, int) or isinstance(val, bool) or val < 0:
+        raise ConfigValidationError(
+            f"max_retries must be a non-negative integer, got {type(val).__name__}: {val}"
+        )
+
+    # 5) max_concurrent: isinstance(val, int) и > 0
+    val = cfg.max_concurrent
+    if not isinstance(val, int) or isinstance(val, bool) or val <= 0:
+        raise ConfigValidationError(
+            f"max_concurrent must be a positive integer, got {type(val).__name__}: {val}"
+        )
+
+    # 6) соотношение таймаутов: если progress_timeout >= agent_timeout — log.warning
+    if cfg.progress_timeout >= cfg.agent_timeout:
+        log.warning(
+            "progress_timeout (%.1f) >= agent_timeout (%.1f). "
+            "Агент может быть убит по отсутствию прогресса раньше, чем по общему таймауту.",
+            cfg.progress_timeout, cfg.agent_timeout
+        )
+
+
 def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None) -> Config:
     """Загружает конфиг из TOML-файла. Если файла нет — возвращает дефолты.
 
@@ -403,7 +453,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     if "on_complete" in hooks:
         cfg.hook_on_complete = hooks["on_complete"]
 
-    validate_paths(cfg)
+    validate_numeric_fields(cfg)
     return cfg
 
 
