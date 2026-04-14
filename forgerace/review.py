@@ -83,10 +83,16 @@ def validate_review(data: dict) -> tuple[bool, str]:
         elif isinstance(issue, dict):
             if "text" in issue:
                 new_issue = dict(issue)
-                new_issue.setdefault("severity", "major")
+                severity = new_issue.get("severity")
+                if isinstance(severity, str) and severity.strip():
+                    new_issue["severity"] = severity.strip().lower()
+                else:
+                    new_issue["severity"] = "major"
                 normalized_issues.append(new_issue)
             else:
                 return False, "Замечание в формате словаря должно содержать ключ 'text'"
+        else:
+            return False, "Замечание должно быть строкой или словарем"
 
     # 4. Проверка совместимости статуса
     has_critical = any(i.get("severity") == "critical" for i in normalized_issues)
