@@ -44,26 +44,25 @@ def validate_review(data: dict) -> tuple[bool, str]:
     if not target_verdict:
         return False, f"Недопустимый вердикт: {verdict}"
 
-    data["verdict"] = target_verdict
-
     # 2. Обработка уверенности (confidence)
     confidence_raw = data.get("confidence", 100)
     try:
         # Принимаем float или int, приводим к int
         confidence = int(float(confidence_raw))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return False, f"Некорректное значение confidence: {confidence_raw}"
 
     low, high = REVIEW_SCHEMA["confidence_range"]
     if not (low <= confidence <= high):
         return False, f"Confidence {confidence} вне диапазона [{low}, {high}]"
-    data["confidence"] = confidence
 
     # 3. Парсинг замечаний (issues)
     raw_issues = data.get("issues", [])
     if isinstance(raw_issues, str):
         raw_issues = [s.strip() for s in raw_issues.splitlines() if s.strip()]
-    elif not isinstance(raw_issues, list):
+    elif isinstance(raw_issues, (list, tuple, set)):
+        raw_issues = list(raw_issues)
+    else:
         raw_issues = []
 
     normalized_issues = []
@@ -86,8 +85,8 @@ def validate_review(data: dict) -> tuple[bool, str]:
                 new_issue = dict(issue)
                 new_issue.setdefault("severity", "major")
                 normalized_issues.append(new_issue)
-
-    data["issues"] = normalized_issues
+            else:
+                return False, "Замечание в формате словаря должно содержать ключ 'text'"
 
     # 4. Проверка совместимости статуса
     has_critical = any(i.get("severity") == "critical" for i in normalized_issues)
@@ -97,6 +96,11 @@ def validate_review(data: dict) -> tuple[bool, str]:
 
     if target_verdict == "REJECTED" and not normalized_issues:
         return False, "REJECTED требует указания хотя бы одной проблемы"
+
+    # Мутации данных происходят только после успешного прохождения всех проверок
+    data["verdict"] = target_verdict
+    data["confidence"] = confidence
+    data["issues"] = normalized_issues
 
     return True, ""
 
