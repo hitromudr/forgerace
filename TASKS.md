@@ -1,17 +1,19 @@
 
  TASKS — forgerace
 
-### TASK-002: Валидация ревью с бизнес-правилами
+### TASK-026: Реализация бизнес-валидации ревью
 - **Статус**: open
 - **Приоритет**: P1
 - **Этап**: 1
-- **Зависимости**: TASK-001
-- **Файлы (новые)**: —
-- **Файлы (modify)**: forgerace/review.py
-- **Интеграция**: —
-- **Описание**: Реализовать функцию `validate_review(data: dict) -> tuple[bool, str]`. Проверки: соответствие `REVIEW_SCHEMA`, APPROVED + critical issues → невалидно, NEEDS_REWORK без issues → невалидно, REJECTED без issues → невалидно, confidence вне диапазона → невалидно. Убрать старый костыль с проверкой длины COMMENTS > 20 символов.
-- **Критерий готовности**: `validate_review` корректно отклоняет невалидные комбинации вердикт/issues, старый парсинг `VERDICT:`/`COMMENTS:` удалён
-- **Дискуссия**: future
+- **Зависимости**: —
+- **Файлы (новые)**: tests/test_review.py
+- **Файлы (modify)**: forgerace/review.py, forgerace/pipeline.py
+- **Интеграция**: Интеграция вызова `validate_review` в `single_review` (вместо старой проверки `COMMENTS > 20`), обновление оркестратора для чтения `is_terminal` из схемы
+- **Описание**: Реализовать `validate_review(data: dict) -> tuple[bool, str]`. Обновить `REVIEW_SCHEMA` (добавить `is_terminal`, `confidence_range`). Принимать `confidence` как `int` и `float` (приводить к `int`). Обновить парсинг `issues` из промпта (в формате `[severity] текст`) и нормализовать их в `list[dict]`. Переименовать `NEEDS_WORK` в `NEEDS_REWORK` (добавив алиас для обратной совместимости). Реализовать завершение ветки оркестратором при статусе `REJECTED` на основе флага `is_terminal`. Удалить проверку длины комментариев > 20 символов. Написать 8-10 unit-тестов.
+- **Запрещено**: не хардкодить логику обработки REJECTED в оркестраторе (использовать `is_terminal` из схемы); не использовать строгую проверку `isinstance(confidence, int)` (обязательно поддерживать float); не использовать хардкод dict-схемы без возможности расширения.
+- **Проверка**: pytest tests/test_review.py -v
+- **Критерий готовности**: Функция валидации корректно отклоняет ревью, нарушающие бизнес-правила (APPROVED с critical issues, REJECTED/NEEDS_REWORK без issues, неверный confidence). Костыль проверки длины комментариев удален. При статусе REJECTED оркестратор немедленно завершает ветку агента без retry.
+- **Дискуссия**: 2-validatsiya-revyu-s-biznes-pravilami
 - **Агент**: —
 - **Ветка**: —
 
@@ -141,17 +143,67 @@
 - **Агент**: —
 - **Ветка**: —
 
-### TASK-015: Интеграция TaskQueue в pipeline.py
+### TASK-028: Механизм блокировки записи в TASKS.md
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/pipeline.py
+- **Интеграция**: добавить `tasks_md_lock = threading.Lock()` в модуль pipeline.py; обернуть все функции записи в TASKS.md в `with tasks_md_lock:`
+- **Описание**: Реализовать потокобезопасную запись в TASKS.md через threading.Lock. Найти все места записи в TASKS.md внутри pipeline.py (обновление статусов задач) и обернуть их в lock. Это предотвратит гонку при одновременном обновлении файла из нескольких future.
+- **Запрещено**: использовать file-level lock (только threading.Lock); блокировать чтение TASKS.md (только запись); создавать новые глобальные состояния вне lock
+- **Проверка**: ruff check forgerace/pipeline.py && python -c "from forgerace.pipeline import tasks_md_lock; print('OK')"
+- **Критерий готовности**: все записи в TASKS.md внутри pipeline.py защищены threading.Lock, одновременные обновления не приводят к повреждению файла
+- **Дискуссия**: 15-integratsiya-taskqueue-v-pipelinepy
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-029: Основной цикл оркестрации на TaskQueue
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 2
+- **Зависимости**: TASK-027
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/pipeline.py
+- **Интеграция**: заменить блок ThreadPoolExecutor + as_completed (строки ~1142-1154) на цикл с TaskQueue; добавить импорт TaskQueue из forgerace.task_queue
+- **Описание**: Заменить существующий код запуска батча задач на TaskQueue с динамическим пополнением. Инициализировать TaskQueue(max_concurrent=cfg.limits_max_concurrent). Заполнить очередь начальными готовыми задачами с приоритетами. В цикле: pop задачи → submit через execute_task → при освобождении слота подхватить новую готовую задачу. Использовать `max_concurrent` из секции [limits] конфига (дефолт 3).
+- **Запрещено**: использовать time.sleep(1) для ожидания; удалять уровни 2-4 (race, review, rework); хардкодить max_concurrent; использовать active polling вместо callback
+- **Проверка**: ruff check forgerace/pipeline.py && pytest tests/test_pipeline_orchestration.py -v
+- **Критерий готовности**: задачи запускаются через TaskQueue с приоритетами, при завершении одной задачи новая готовая задача подхватывается автоматически без ожидания следующего батча
+- **Дискуссия**: 15-integratsiya-taskqueue-v-pipelinepy
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-030: Callback завершения задачи с обновлением статусов
 - **Статус**: open
 - **Приоритет**: P1
 - **Этап**: 3
-- **Зависимости**: TASK-014
+- **Зависимости**: TASK-029
 - **Файлы (новые)**: —
 - **Файлы (modify)**: forgerace/pipeline.py
-- **Интеграция**: заменить текущий запуск всех задач разом на TaskQueue
-- **Описание**: Заменить существующий код запуска задач (ThreadPoolExecutor + as_completed) на новый TaskQueue. Передача задач из `find_ready_tasks()` в очередь с приоритетами.
-- **Критерий готовности**: пайплайн работает с новой очередью, задачи запускаются по приоритету с учётом лимита и зависимостей
-- **Дискуссия**: future
+- **Интеграция**: добавить функцию `_on_task_complete(future, task, task_idx)` и зарегистрировать через `future.add_done_callback()` в основном цикле
+- **Описание**: Реализовать callback, который вызывается при завершении каждого future. Callback: логирует результат (успех/ошибка), обновляет статус задачи в TASKS.md (через tasks_md_lock), вызывает `find_ready_tasks()` для поиска новых разблокированных задач и добавляет их в очередь с приоритетами. Использовать `add_done_callback` вместо polling — это исключит холостой поллинг и позволит запускать разблокированные подзадачи моментально.
+- **Запрещено**: использовать polling/time.sleep для проверки завершения; обновлять TASKS.md без lock; блокировать очередь на время чтения TASKS.md; падать при ошибке в callback
+- **Проверка**: ruff check forgerace/pipeline.py && pytest tests/test_pipeline_callback.py -v
+- **Критерий готовности**: при завершении задачи статус обновляется мгновенно, зависимые задачи автоматически добавляются в очередь без задержки
+- **Дискуссия**: 15-integratsiya-taskqueue-v-pipelinepy
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-031: Graceful shutdown очереди
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 3
+- **Зависимости**: TASK-029
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/pipeline.py
+- **Интеграция**: добавить вызов `queue.shutdown(wait=True)` после завершения основного цикла; обработать KeyboardInterrupt и SIGTERM
+- **Описание**: Реализовать корректное завершение работы TaskQueue. После завершения основного цикла (очередь пуста + нет pending future) вызвать `queue.shutdown(wait=True)` для ожидания всех активных задач. Обработать сигналы прерывания (KeyboardInterrupt, SIGTERM) — остановить приём новых задач, дождаться завершения активных, обновить статусы незавершённых задач в TASKS.md.
+- **Запрещено**: использовать queue.shutdown(wait=False) — это потеряет активные задачи; игнорировать SIGTERM; оставлять задачи в подвешенном состоянии без обновления статуса
+- **Проверка**: ruff check forgerace/pipeline.py && pytest tests/test_pipeline_shutdown.py -v
+- **Критерий готовности**: при Ctrl+C или завершении цикла все активные задачи корректно завершаются, статусы обновляются в TASKS.md, процесс выходит с кодом 0
+- **Дискуссия**: 15-integratsiya-taskqueue-v-pipelinepy
 - **Агент**: —
 - **Ветка**: —
 
@@ -198,7 +250,7 @@
 - **Ветка**: task/task-016-dobavit-pole-estimated-usd-v-tokenusage-gemini
 
 ### TASK-017: Проверка бюджета в pipeline
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: 4
 - **Зависимости**: TASK-016
@@ -207,7 +259,7 @@
 - **Интеграция**: —
 - **Описание**: В pipeline (где запускается агент) добавить проверку `estimated_usd` против `budget_per_task_usd` из конфига. При превышении — убивать процесс агента (subprocess.terminate/kill), помечать задачу статусом BUDGET_EXCEEDED через `update_task_status`.
 - **Критерий готовности**: Агент останавливается при превышении бюджета, задача помечается BUDGET_EXCEEDED
-- **Дискуссия**: future
+- **Дискуссия**: 17-proverka-byudzheta-v-pipeline
 - **Агент**: —
 - **Ветка**: —
 
@@ -253,15 +305,19 @@
 - **Агент**: qwen
 - **Ветка**: task/task-011-pole-protocol-v-agentconfig-qwen
 
-### TASK-020: Signal handling — setpgrp до handlers
+### TASK-025: Signal handling — setpgrp до handlers + getpgrp
 - **Статус**: open
 - **Приоритет**: P0
+- **Этап**: 1
 - **Зависимости**: —
 - **Файлы (новые)**: —
-- **Файлы (modify)**: forgerace/cli.py
-- **Описание**: В `main_with_signal_handling` порядок вызовов: signal.signal(SIGINT) → signal.signal(SIGTERM) → os.setpgrp(). Если SIGINT прилетает между установкой handler и setpgrp, killpg убьёт родительскую группу процессов (терминал). Fix: вызвать os.setpgrp() ДО установки signal handlers. Потерянный SIGINT между setpgrp и handler — приемлемый trade-off (пользователь нажмёт Ctrl+C ещё раз).
-- **Критерий готовности**: os.setpgrp() вызывается до signal.signal(), тест: Ctrl+C не убивает родительский терминал
-- **Дискуссия**: code-audit
+- **Файлы (modify)**: `forgerace/cli.py`
+- **Интеграция**: —
+- **Описание**: В `main_with_signal_handling` (строки 813–829) устранить race condition: 1) перенести `os.setpgrp()` ДО вызовов `signal.signal()`, 2) в `_force_exit` заменить `os.getpgid(os.getpid())` на `os.getpgrp()`, 3) удалить/обновить комментарий `# после handler — чтобы SIGINT между ними не потерялся`. Итоговый порядок: `os.setpgrp()` → `signal.signal(SIGINT, _force_exit)` → `signal.signal(SIGTERM, _force_exit)`.
+- **Запрещено**: устанавливать signal handlers до `os.setpgrp()`, использовать `os.getpgid(os.getpid())` вместо `os.getpgrp()`, оставлять старый комментарий без обновления
+- **Проверка**: `ruff check forgerace/cli.py && python -c "from forgerace.cli import main_with_signal_handling; print('import OK')"`
+- **Критерий готовности**: `os.setpgrp()` вызывается до `signal.signal()`, `_force_exit` использует `os.getpgrp()`, Ctrl+C из скрипта/Makefile не убивает родительскую группу процессов
+- **Дискуссия**: 20-signal-handling-setpgrp-do-handlers
 - **Агент**: —
 - **Ветка**: —
 
