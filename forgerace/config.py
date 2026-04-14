@@ -281,7 +281,7 @@ def validate_agent_commands(cfg: Config) -> None:
             )
         binary = shlex.split(cmd)[0]
         if not shutil.which(binary):
-            log.warning("Agent '%s': command '%s' not found in PATH (warning)", name, binary)
+            log.warning("Агент '%s': команда '%s' не найдена в PATH", name, cmd)
 
 
 def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None) -> Config:
