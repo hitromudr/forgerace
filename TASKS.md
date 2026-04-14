@@ -249,16 +249,50 @@
 - **Агент**: gemini
 - **Ветка**: task/task-016-dobavit-pole-estimated-usd-v-tokenusage-gemini
 
-### TASK-017: Проверка бюджета в pipeline
+### TASK-033: Graceful shutdown для прерывания subprocess
 - **Статус**: open
 - **Приоритет**: P1
-- **Этап**: 4
-- **Зависимости**: TASK-016
+- **Этап**: 1
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/agents.py
+- **Интеграция**: —
+- **Описание**: Реализовать функцию `_terminate_agent_process(proc)`, которая выполняет graceful shutdown: сначала `proc.terminate()`, затем `proc.wait(timeout=2)`, и только при зависании — `proc.kill()`. Функция должна логировать каждый этап и обрабатывать `subprocess.TimeoutExpired`.
+- **Запрещено**: Использовать `proc.kill()` без предварительного `proc.terminate()`; игнорировать `TimeoutExpired`; не логировать причину прерывания
+- **Проверка**: ruff check forgerace/agents.py && pytest tests/test_agents.py -v -k graceful_shutdown
+- **Критерий готовности**: Процесс агента корректно завершается с сохранением логов и состояния, fallback на kill только при зависании
+- **Дискуссия**: 17-proverka-byudzheta-v-pipeline
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-034: Возврат AgentProcessResult со статусом BUDGET_EXCEEDED
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 2
+- **Зависимости**: TASK-032, TASK-033
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/agents.py
+- **Интеграция**: `_run_agent_streaming` возвращает `AgentProcessResult(stderr="BUDGET_EXCEEDED")` при превышении бюджета
+- **Описание**: После выхода из цикла по причине превышения бюджета вызвать `_terminate_agent_process(proc)` и вернуть `AgentProcessResult` с `stderr="BUDGET_EXCEEDED"`. Это должен быть терминальный результат без retry-логики.
+- **Запрещено**: Возвращать стандартный error-код вместо "BUDGET_EXCEEDED"; добавлять retry-логику для этого статуса; смешивать с обработкой таймаутов
+- **Проверка**: ruff check forgerace/agents.py && pytest tests/test_agents.py -v -k budget_exceeded
+- **Критерий готовности**: `_run_agent_streaming` возвращает различимый результат BUDGET_EXCEEDED, который можно обработать на уровне pipeline
+- **Дискуссия**: 17-proverka-byudzheta-v-pipeline
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-035: Обработка BUDGET_EXCEEDED в pipeline.py
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 3
+- **Зависимости**: TASK-034
 - **Файлы (новые)**: —
 - **Файлы (modify)**: forgerace/pipeline.py
-- **Интеграция**: —
-- **Описание**: В pipeline (где запускается агент) добавить проверку `estimated_usd` против `budget_per_task_usd` из конфига. При превышении — убивать процесс агента (subprocess.terminate/kill), помечать задачу статусом BUDGET_EXCEEDED через `update_task_status`.
-- **Критерий готовности**: Агент останавливается при превышении бюджета, задача помечается BUDGET_EXCEEDED
+- **Интеграция**: В `run_single_agent` добавить ветку обработки `AgentProcessResult.stderr == "BUDGET_EXCEEDED"` с вызовом `update_task_status(task.id, "BUDGET_EXCEEDED")` и прерыванием выполнения задачи
+- **Описание**: В функции `run_single_agent` (`pipeline.py`) после получения результата от `_run_agent_streaming` проверить `stderr == "BUDGET_EXCEEDED"`. При совпадении — вызвать `update_task_status(task.id, "BUDGET_EXCEEDED")`, залогировать предупреждение и прервать выполнение (без retry). Статус должен быть терминальным.
+- **Запрещено**: Автоматический retry для статуса BUDGET_EXCEEDED; молчаливое игнорирование (обязателен log.warning); изменение статуса на другой (FAILED, ERROR и т.д.)
+- **Проверка**: ruff check forgerace/pipeline.py && pytest tests/test_pipeline.py -v -k budget_exceeded
+- **Критерий готовности**: Задача с превышенным бюджетом получает статус BUDGET_EXCEEDED в системе, выполнение прерывается без повторных попыток
 - **Дискуссия**: 17-proverka-byudzheta-v-pipeline
 - **Агент**: —
 - **Ветка**: —
@@ -329,7 +363,7 @@
 - **Файлы (modify)**: forgerace/config.py
 - **Описание**: После загрузки конфига добавить валидацию: 1) числовые поля (agent_timeout, max_parallel_tasks, max_retries, progress_timeout) — isinstance(int) и > 0, 2) команды агентов — shutil.which(command) при загрузке, warning если не найден, 3) пути (root_dir) — существование директории. При ошибках — log.error с конкретным сообщением и sys.exit(1). Обернуть tomllib.load в try/except TOMLDecodeError — вывести human-readable сообщение с указанием файла.
 - **Критерий готовности**: кривой TOML даёт понятное сообщение, agent_timeout="five" ловится при загрузке, несуществующая команда агента — warning
-- **Дискуссия**: code-audit
+- **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
 - **Агент**: —
 - **Ветка**: —
 
@@ -341,7 +375,7 @@
 - **Файлы (modify)**: forgerace/merge.py
 - **Описание**: В merge_to_develop после update-ref выполняется `git checkout merge_sha -- fname` в cfg.root_dir. Это: 1) модифицирует index и рабочее дерево пользователя без ведома, 2) перезатирает незакоммиченные изменения, 3) staged changes которые пользователь не делал. Fix: убрать блок синхронизации файлов (строки с checkout). Вместо этого — после update-ref вызвать `git read-tree` или оставить только update-ref. Пользователь сам синхронизирует рабочее дерево через `git checkout -- .` если нужно.
 - **Критерий готовности**: merge_to_develop не модифицирует рабочее дерево cfg.root_dir, только обновляет ref
-- **Дискуссия**: code-audit
+- **Дискуссия**: —
 - **Агент**: —
 - **Ветка**: —
 
@@ -353,7 +387,7 @@
 - **Файлы (modify)**: forgerace/pipeline.py, forgerace/cli.py
 - **Описание**: Сейчас при отсутствии агентов или задач pipeline молча завершается пустым прогоном. Fix: 1) в начале run_pipeline проверить cfg.agent_names — если пуст, log.error("Нет активных агентов. Включите хотя бы одного в forgerace.toml") и return, 2) FileNotFoundError на TASKS.md — перехватить в cli.py, вывести "TASKS.md не найден. Запустите forgerace init", 3) TOMLDecodeError — перехватить, вывести файл и ошибку.
 - **Критерий готовности**: пустой agents → понятное сообщение, нет TASKS.md → подсказка про init, кривой TOML → файл + ошибка
-- **Дискуссия**: code-audit
+- **Дискуссия**: —
 - **Агент**: —
 - **Ветка**: —
 
@@ -365,6 +399,6 @@
 - **Файлы (modify)**: forgerace/pipeline.py
 - **Описание**: verify_build делает `git diff --stat cfg.dev_branch` в worktree. Но merge_to_develop двигает указатель dev_branch (через update-ref). После мержа одной задачи у всех остальных агентов diff base сдвигается → has_changes=True даже если агент ничего не написал. Fix: при создании worktree сохранить base_sha (SHA коммита от которого создана ветка), и в verify_build использовать base_sha вместо cfg.dev_branch.
 - **Критерий готовности**: verify_build использует фиксированный base SHA, агент-пустышка не проходит валидацию после мержа другой задачи
-- **Дискуссия**: code-audit
+- **Дискуссия**: —
 - **Агент**: —
 - **Ветка**: —

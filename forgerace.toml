@@ -27,8 +27,42 @@ args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
 review_args = ["-p", "-", "--approval-mode", "yolo"]
 inactivity_timeout = 180
 
+# Когнитивные фреймы из frames/
+[frames.audit]
+description = "8 осей выживаемости решения"
+file = "frames/audit.md"
+
+[frames.wild]
+description = "дикие стратегии, инверсия, слом шаблонов"
+file = "frames/wild.md"
+
+[frames.price]
+description = "цена выбора, trade-off матрицы, арбитраж"
+file = "frames/price.md"
+
+[frames.theory]
+description = "от принципов к реализации"
+file = "frames/theory.md"
+
+[frames.evidence]
+description = "от фактов к обобщению"
+file = "frames/evidence.md"
+
+[frames.optimizer]
+description = "4-фазный разбор: grounding → divergence → red-teaming"
+file = "frames/optimizer.md"
+
+[frames.meta]
+description = "13 фреймворков: диалектика, теория игр, стоицизм..."
+file = "frames/meta.md"
+
+[frames.vectors]
+description = "10 когнитивных векторов: дедукция, инверсия, парадокс..."
+file = "frames/vectors.md"
+
+# Inline фреймы для быстрого аудита
 [frames.adversarial]
-description = "Adversarial red-team: find bugs, race conditions, edge cases, security holes"
+description = "Adversarial red-team: find bugs, race conditions, edge cases"
 content = """You are a hostile code reviewer. Your job is to BREAK things.
 For every module, answer:
 1. What fails under concurrent access? (threads, async, signals)
@@ -47,7 +81,6 @@ Analyze:
 3. Data flow — how does state propagate? Any global mutable state issues?
 4. Error propagation — do errors surface correctly or get lost?
 5. Configuration — is it validated? What happens with bad config?
-6. Naming — do names reflect what code actually does?
 Be concrete: point to specific code, not abstract principles."""
 
 [frames.user]
@@ -58,7 +91,6 @@ Find:
 2. Documentation gaps — what's not obvious without reading source code?
 3. Surprising behavior — what does the opposite of what you'd expect?
 4. Recovery — after something breaks, how hard is it to get back to working state?
-5. Edge cases in CLI — weird argument combos, missing files, permissions
 Be specific about the user scenario and what goes wrong."""
 
 [build]
