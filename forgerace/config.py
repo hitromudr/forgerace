@@ -403,7 +403,28 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     if "on_complete" in hooks:
         cfg.hook_on_complete = hooks["on_complete"]
 
+    validate_paths(cfg)
     return cfg
+
+
+def validate_paths(cfg: Config) -> None:
+    """Проверяет существование критических путей в конфигурации.
+
+    Fail-fast только для root_dir. Для остальных — warning.
+    """
+    from .config_errors import ConfigValidationError
+
+    # 1. root_dir — обязана существовать
+    if not cfg.root_dir.is_dir():
+        raise ConfigValidationError(f"root_dir '{cfg.root_dir}' не существует")
+
+    # 2. discuss_dir
+    if not cfg.discuss_dir.is_dir():
+        log.warning("Директория дискуссий '%s' не найдена. Она будет создана при необходимости.", cfg.discuss_dir)
+
+    # 3. agents_dir
+    if not cfg.agents_dir.is_dir():
+        log.warning("Директория агентов '%s' не найдена. Она будет создана при необходимости.", cfg.agents_dir)
 
 
 # Глобальный конфиг — инициализируется при первом импорте или через init_config()
