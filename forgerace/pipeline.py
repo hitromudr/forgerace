@@ -269,10 +269,12 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
             if stderr in ("NO_EDIT_ABORT", "CANCELLED", "PROGRESS_TIMEOUT"):
                 log.error(f"[{tag}] ✗ {stderr} — прекращаю попытки")
                 break
-            # Quota/auth — ретрай бесполезен
+            # Quota/auth — ретрай бесполезен, disable agent for this run
             if any(kw in combined for kw in ("quota exceeded", "rate limit", "unauthorized",
                                               "authentication", "api key", "401", "429")):
-                log.error(f"[{tag}] ✗ Квота/авторизация — пропускаю агента")
+                from .agents import _disabled_agents
+                _disabled_agents.add(agent_type)
+                log.error(f"[{tag}] ✗ Квота/авторизация — агент отключён до конца прогона")
                 break
             error_log = stderr
             continue
@@ -299,7 +301,9 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
             combined = f"{stdout_tail}\n{stderr_tail}".lower()
             if any(kw in combined for kw in ("quota exceeded", "rate limit", "unauthorized",
                                               "authentication", "api key", "401", "429")):
-                log.error(f"[{tag}] ✗ Квота/авторизация — пропускаю агента")
+                from .agents import _disabled_agents
+                _disabled_agents.add(agent_type)
+                log.error(f"[{tag}] ✗ Квота/авторизация — агент отключён до конца прогона")
                 break
             if stdout_tail:
                 log.warning(f"[{tag}] stdout (хвост): {stdout_tail[:200]}")
@@ -347,7 +351,12 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
 
     update_task_status(task.id, "in_progress:both")
 
-    agent_names = cfg.agent_names
+    from .agents import is_agent_disabled
+    agent_names = [n for n in cfg.agent_names if not is_agent_disabled(n)]
+    if not agent_names:
+        log.error(f"[{task.id}] ✗ Нет доступных агентов (все отключены)")
+        update_task_status(task.id, "blocked")
+        return False
     all_results = []
     passed = []
     cancel_event = threading.Event()  # сигнал отмены для проигравших
@@ -1129,7 +1138,11 @@ def run_pipeline(
     log.info(f"Утверждены и готовы: {[t.id for t in ready]}")
 
     batch = ready[:max_tasks]
-    agent_names = cfg.agent_names
+    from .agents import is_agent_disabled
+    agent_names = [n for n in cfg.agent_names if not is_agent_disabled(n)]
+    if not agent_names:
+        log.error("Нет доступных агентов (все отключены по квоте/авторизации)")
+        return
 
     is_competitive = cfg.mode == "competitive"
     if is_competitive:
