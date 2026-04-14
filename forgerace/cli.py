@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .config import cfg, init_config, run_hint
 from .discuss import discuss_chat, discuss_create, discuss_list, discuss_reply, discuss_show
-from .merge import ensure_develop_branch, merge_to_develop
+from .merge import merge_to_develop
 from .utils import C, R, agent_color
 from .pipeline import run_pipeline
 from .tasks import parse_tasks, update_task_status
@@ -48,7 +48,7 @@ def _build_init_toml(name: str, detected_agents: list[str], has_frames: bool) ->
         '[project]',
         f'name = "{name}"',
         'root = "."',
-        'dev_branch = "develop"',
+        '# dev_branch = "main"  # default: current branch',
         'discuss_dir = "docs/discuss"',
     ]
 
@@ -419,7 +419,6 @@ def show_status():
 
 def merge_pending_tasks():
     """Мержит все review-задачи в develop."""
-    ensure_develop_branch()
     tasks = parse_tasks()
     review_tasks = [t for t in tasks if t.status.startswith("review:")]
 

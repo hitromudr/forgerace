@@ -13,7 +13,7 @@ from .agents import AgentResult, build_prompt, run_agent_process
 from .config import cfg, run_hint, run_hook
 from .cost import TokenUsage
 from .decompose import assess_and_maybe_decompose, create_checkpoint_task
-from .merge import ensure_develop_branch, merge_to_develop
+from .merge import merge_to_develop
 from .review import code_review, get_changed_files, get_diff, send_to_rework, single_review
 from .tasks import (
     Task, find_ready_tasks, find_retryable_tasks, is_task_approved,
@@ -721,7 +721,7 @@ def _escalate_review_stall(task: Task, results: list, last_rv: dict):
 
 
 def preflight_check() -> bool:
-    """Проверяет develop на проблемы, пробует собрать через cfg.build_commands."""
+    """Проверяет текущую ветку на проблемы, пробует собрать через cfg.build_commands."""
     # Проверяем merge conflict маркеры (ищем в src/ если есть, иначе в корне)
     src_dir = cfg.root_dir / "src"
     search_dir = "src/" if src_dir.exists() else "."
@@ -744,7 +744,7 @@ def preflight_check() -> bool:
         if result.returncode != 0:
             stderr = result.stderr or ""
             if "error" in stderr.lower():
-                log.error(f"⚠ develop не собирается! {' '.join(cmd)} failed")
+                log.error(f"⚠ {cfg.dev_branch} не собирается! {' '.join(cmd)} failed")
                 log.error(stderr[-500:])
                 return False
 
@@ -944,8 +944,6 @@ def run_pipeline(
     """Основной цикл оркестратора."""
     if max_tasks is None:
         max_tasks = cfg.max_parallel_tasks
-
-    ensure_develop_branch()
 
     if not dry_run and not preflight_check():
         return

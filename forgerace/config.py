@@ -56,7 +56,7 @@ class Config:
 
     # --- Пути ---
     root_dir: Path = field(default_factory=lambda: Path.cwd())
-    dev_branch: str = "develop"
+    dev_branch: str = ""  # determined at runtime from current branch
     tasks_file_rel: str = "TASKS.md"
     discuss_dir_rel: str = "docs/discuss"
     agents_dir_rel: str = ".agents"
@@ -426,6 +426,14 @@ def init_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 break
             except Exception:
                 pass
+    # Определяем dev_branch из текущей ветки если не задан явно
+    if not cfg.dev_branch:
+        import subprocess
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=cfg.root_dir, capture_output=True, text=True,
+        )
+        cfg.dev_branch = (result.stdout.strip() or "main")
     # Создаём директории
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
 

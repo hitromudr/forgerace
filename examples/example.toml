@@ -5,7 +5,7 @@
 name = "my-project"
 context = "a web application with REST API and PostgreSQL backend"
 root = "."
-dev_branch = "develop"
+# dev_branch = "main"  # default: current branch
 tasks_file = "TASKS.md"
 discuss_dir = "docs/discuss"
 

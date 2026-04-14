@@ -8,15 +8,6 @@ from .utils import log, run_cmd
 _merge_lock = threading.Lock()
 
 
-def ensure_develop_branch():
-    """Создаёт ветку develop от master если её нет."""
-    result = run_cmd(
-        ["git", "branch", "--list", cfg.dev_branch], cwd=cfg.root_dir, check=False,
-    )
-    if not result.stdout.strip():
-        run_cmd(["git", "branch", cfg.dev_branch, "master"], cwd=cfg.root_dir)
-        log.info(f"Создана ветка {cfg.dev_branch} от master")
-
 
 def merge_to_develop(branch: str, task_id: str) -> bool:
     """Мержит task-ветку в develop без переключения веток.

@@ -4,7 +4,7 @@
 [project]
 name = "forgerace"
 root = "."
-dev_branch = "develop"
+# dev_branch = "main"  # default: current branch
 
 mode = "competitive"
 [agents.claude]
