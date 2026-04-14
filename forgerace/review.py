@@ -239,15 +239,15 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
     # If all agents disabled — auto-approve (no review possible)
     available = [n for n in all_agent_names if not is_agent_disabled(n)]
     if not available:
-        log.warning("    ⚠ Все агенты отключены (квота) — auto-approve без ревью")
+        log.error("    ✗ Все агенты отключены (квота) — ревью невозможно, задача → blocked")
         best = author_names[0]
         return {
-            "full_text": "(auto-approved: все ревьюеры отключены по квоте)",
-            "reviewer": "auto",
+            "full_text": "(все ревьюеры отключены по квоте)",
+            "reviewer": "none",
             "best": best,
-            "verdict": "APPROVED",
-            "comments": "",
-            "reason": "auto-approve: нет доступных ревьюеров",
+            "verdict": "error",
+            "comments": "Нет доступных ревьюеров — все агенты отключены по квоте",
+            "reason": "нет ревьюеров",
             "reviews": {},
         }
 
