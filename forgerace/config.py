@@ -2,6 +2,8 @@
 
 import logging
 import os
+import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -259,6 +261,29 @@ def _load_last_config() -> Optional[Path]:
     return None
 
 
+def validate_agent_commands(cfg: Config) -> None:
+    """Validate commands for all enabled agents.
+
+    For each enabled agent: parse command via shlex.split, check binary
+    existence via shutil.which. Empty command raises ConfigValidationError,
+    missing binary logs a warning.
+    """
+    from .config_errors import ConfigValidationError
+
+    for name, acfg in cfg.agents.items():
+        if not acfg.enabled:
+            continue
+        cmd = acfg.command
+        if not cmd or not cmd.strip():
+            raise ConfigValidationError(
+                message=f"Agent '{name}': empty command",
+                source="validation",
+            )
+        binary = shlex.split(cmd)[0]
+        if not shutil.which(binary):
+            log.warning("Agent '%s': command '%s' not found in PATH (warning)", name, binary)
+
+
 def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None) -> Config:
     """Загружает конфиг из TOML-файла. Если файла нет — возвращает дефолты.
 
@@ -402,6 +427,8 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     hooks = data.get("hooks", {})
     if "on_complete" in hooks:
         cfg.hook_on_complete = hooks["on_complete"]
+
+    validate_agent_commands(cfg)
 
     return cfg
 
