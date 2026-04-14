@@ -2,7 +2,7 @@
  TASKS — forgerace
 
 ### TASK-042: Реализация функции валидации и обновление схемы ревью
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: —
@@ -170,7 +170,7 @@
 - **Ветка**: —
 
 ### TASK-045: Создание блокировки и безопасной обертки в pipeline.py
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: —
@@ -304,7 +304,7 @@
 - **Ветка**: task/task-033-graceful-shutdown-dlya-preryvaniya-subpr-qwen
 
 ### TASK-034: Возврат AgentProcessResult со статусом BUDGET_EXCEEDED
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: TASK-032, TASK-033
@@ -410,7 +410,7 @@
 - **Ветка**: task/task-036-configvalidationerror-kastomnoe-isklyuch-qwen
 
 ### TASK-037: Валидация числовых полей конфига
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: TASK-036
@@ -422,11 +422,11 @@
 - **Проверка**: ruff check forgerace/config.py && python -c "from forgerace.config import Config, validate_numeric_fields; from forgerace.config_errors import ConfigValidationError; c = Config(); c.agent_timeout = -1; validate_numeric_fields(c)" 2>&1 | grep -q ConfigValidationError && echo "PASS"
 - **Критерий готовности**: некорректные числовые значения (отрицательные таймауты, float для max_parallel_tasks, progress_timeout >= agent_timeout) детектируются и бросают `ConfigValidationError` с понятным сообщением
 - **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-037-validatsiya-chislovyh-polej-konfiga-gemini
 
 ### TASK-038: Валидация команд агентов через shlex + shutil.which
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: TASK-036
@@ -442,7 +442,7 @@
 - **Ветка**: —
 
 ### TASK-039: Валидация root_dir — существование директории
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: TASK-036
@@ -454,11 +454,11 @@
 - **Проверка**: ruff check forgerace/config.py && python -c "from forgerace.config import Config, validate_paths; from forgerace.config_errors import ConfigValidationError; from pathlib import Path; c = Config(); c.root_dir = Path('/nonexistent_dir_xyz'); validate_paths(c)" 2>&1 | grep -q ConfigValidationError && echo "PASS"
 - **Критерий готовности**: несуществующий root_dir вызывает ConfigValidationError; отсутствующие discuss_dir/agents_dir — warning с подсказкой
 - **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-039-validatsiya-root-dir-sushchestvovanie-di-gemini
 
 ### TASK-040: Перехват ошибок загрузки конфига в cli.py
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: TASK-036
@@ -513,7 +513,7 @@
 - **Ветка**: task/task-022-mergepy-ubrat-checkout-v-osnovnoj-repo-qwen
 
 ### TASK-023: Явная ошибка при пустом списке агентов/задач
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P2
 - **Зависимости**: —
 - **Файлы (новые)**: —
@@ -525,7 +525,7 @@
 - **Ветка**: —
 
 ### TASK-024: verify_build — фиксировать base SHA до начала задачи
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Зависимости**: —
 - **Файлы (новые)**: —
