@@ -53,20 +53,6 @@ def merge_to_develop(branch: str, task_id: str) -> bool:
                           f"{(ref_result.stderr or ref_result.stdout or '')[:300]}")
                 return False
 
-            # Синхронизируем файлы из мержа (кроме TASKS.md и orchestrator.py)
-            changed = run_cmd(
-                ["git", "diff", "--name-only", f"{dev_sha}..{merge_sha}"],
-                cwd=merge_dir, check=False,
-            )
-            for fname in (changed.stdout or "").strip().splitlines():
-                fname = fname.strip()
-                if fname and fname not in ("TASKS.md", "orchestrator.py"):
-                    co = run_cmd(["git", "checkout", merge_sha, "--", fname],
-                                cwd=cfg.root_dir, check=False)
-                    if co.returncode != 0:
-                        log.error(f"  ✗ checkout sync failed for {fname}: "
-                                  f"{(co.stderr or co.stdout or '')[:200]}")
-
             log.info(f"  ✓ {branch} вмержен в {cfg.dev_branch}")
             return True
         finally:
