@@ -4,7 +4,7 @@ import random
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .agents import AgentResult, build_prompt, run_agent_process, run_reviewer
+from .agents import AgentResult, build_prompt, run_agent_process, run_reviewer, is_agent_disabled
 from .config import cfg, resolve_agent_frame
 from .tasks import Task, task_paths
 from .utils import log, run_cmd
@@ -235,15 +235,17 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
     author_names = list(diffs.keys())
 
     # Round-robin: каждый автор ревьюится ОДНИМ другим агентом (не N²)
-    # If only one agent available, use same agent with review_frame for self-review
+    # Disabled agents (quota/auth) are excluded; fallback to self-review with frame
     review_pairs = []
     for i, author in enumerate(author_names):
-        others = [n for n in all_agent_names if n != author]
+        others = [n for n in all_agent_names
+                  if n != author and not is_agent_disabled(n)]
         if others:
             reviewer = others[i % len(others)]
         elif cfg.review_frame and cfg.review_frame in cfg.frames:
-            # Self-review with cognitive frame
+            # Self-review with cognitive frame (all other agents disabled or single agent)
             reviewer = f"{author}+{cfg.review_frame}"
+            log.info(f"    Fallback: {author} ревьюит себя через +{cfg.review_frame}")
         else:
             reviewer = author
         review_pairs.append((reviewer, author))

@@ -470,8 +470,20 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
         )
 
 
+_QUOTA_KEYWORDS = ("quota exceeded", "rate limit", "unauthorized", "api key", "401", "429")
+_disabled_agents: set[str] = set()  # agents disabled at runtime (quota, auth errors)
+
+
+def is_agent_disabled(name: str) -> bool:
+    """Check if agent was disabled due to quota/auth errors."""
+    return name in _disabled_agents
+
+
 def run_reviewer(reviewer_type: str, prompt: str) -> str:
     """Вызывает агента в текстовом режиме для ревью."""
+    if reviewer_type in _disabled_agents:
+        log.warning("run_reviewer(%s) skipped — agent disabled (quota/auth)", reviewer_type)
+        return ""
     acfg = cfg.agents.get(reviewer_type)
     if acfg is None:
         return ""
@@ -498,6 +510,13 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     if result.returncode != 0:
         log.warning("run_reviewer(%s) exit code %d: %s",
                      reviewer_type, result.returncode, (result.stderr or "")[:500])
+    # Detect quota/auth errors and disable agent
+    combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    if any(kw in combined for kw in _QUOTA_KEYWORDS):
+        _disabled_agents.add(reviewer_type)
+        log.error("run_reviewer(%s) quota/auth error — agent disabled for this run",
+                   reviewer_type)
+        return ""
     if not (result.stdout or "").strip() and result.stderr:
         log.warning("run_reviewer(%s) empty stdout, stderr: %s",
                      reviewer_type, result.stderr[:500])
