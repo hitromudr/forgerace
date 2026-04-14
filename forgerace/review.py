@@ -33,7 +33,7 @@ def validate_review(data: dict) -> tuple[bool, str]:
         return False, "Данные должны быть словарем"
 
     # 1. Обработка вердикта и алиасов
-    verdict = str(data.get("verdict", "")).upper()
+    verdict = str(data.get("verdict", "")).strip().upper()
 
     target_verdict = None
     for name, info in REVIEW_SCHEMA["verdicts"].items():
@@ -63,6 +63,8 @@ def validate_review(data: dict) -> tuple[bool, str]:
     raw_issues = data.get("issues", [])
     if isinstance(raw_issues, str):
         raw_issues = [s.strip() for s in raw_issues.splitlines() if s.strip()]
+    elif not isinstance(raw_issues, list):
+        raw_issues = []
 
     normalized_issues = []
     for issue in raw_issues:
@@ -81,8 +83,9 @@ def validate_review(data: dict) -> tuple[bool, str]:
                 })
         elif isinstance(issue, dict):
             if "text" in issue:
-                issue.setdefault("severity", "major")
-                normalized_issues.append(issue)
+                new_issue = dict(issue)
+                new_issue.setdefault("severity", "major")
+                normalized_issues.append(new_issue)
 
     data["issues"] = normalized_issues
 
