@@ -5,7 +5,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agents import AgentResult, build_prompt, run_agent_process, run_reviewer
-from .config import cfg
+from .config import cfg, resolve_agent_frame
 from .tasks import Task, task_paths
 from .utils import log, run_cmd
 
@@ -125,6 +125,15 @@ NEEDS_WORK = нужны правки.
 Пиши на русском.
 """
 
+    # Resolve cognitive frame if reviewer has +frame suffix
+    frame_section = ""
+    actual_reviewer = reviewer
+    if "+" in reviewer:
+        model_name, frame_content = resolve_agent_frame(reviewer)
+        actual_reviewer = model_name
+        if frame_content:
+            frame_section = f"\n## Когнитивный фрейм ревьюера\n{frame_content}\n"
+
     try:
         # Собираем контекст: полные файлы из worktree + diff
         files_content = ""
@@ -158,12 +167,12 @@ NEEDS_WORK = нужны правки.
             except Exception:
                 pass
 
-        full_prompt = prompt
+        full_prompt = prompt + frame_section
         if files_content:
             full_prompt += f"\n## Полные файлы (код РЕАЛЬНО существует в репозитории)\n{files_content}"
         full_prompt += f"\n## Diff от {author}\n```diff\n{diff[:15000]}\n```"
 
-        review_text = run_reviewer(reviewer, full_prompt)
+        review_text = run_reviewer(actual_reviewer, full_prompt)
         if not review_text:
             return {"verdict": "error", "reviewer": reviewer, "author": author,
                     "full_text": "", "comments": "", "summary": "Пустой ответ"}
@@ -226,13 +235,17 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
     author_names = list(diffs.keys())
 
     # Round-robin: каждый автор ревьюится ОДНИМ другим агентом (не N²)
+    # If only one agent available, use same agent with review_frame for self-review
     review_pairs = []
     for i, author in enumerate(author_names):
         others = [n for n in all_agent_names if n != author]
-        if not others:
-            others = [author]
-        # Один ревьюер на автора — round-robin по списку
-        reviewer = others[i % len(others)]
+        if others:
+            reviewer = others[i % len(others)]
+        elif cfg.review_frame and cfg.review_frame in cfg.frames:
+            # Self-review with cognitive frame
+            reviewer = f"{author}+{cfg.review_frame}"
+        else:
+            reviewer = author
         review_pairs.append((reviewer, author))
 
     pairs_str = ", ".join(f"{rev}→{auth}" for rev, auth in review_pairs)
