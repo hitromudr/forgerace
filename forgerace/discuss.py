@@ -149,7 +149,7 @@ def discuss_chat(topic: str):
         _chat_commands = [
             *_agent_cmds, *_frame_cmds, "/both", "/all",
             "/solo", "/fresh",
-            "/show", "/stats", "/summary", "/compact", "/undo", "/reset", "/cd",
+            "/show", "/stats", "/summary", "/compact", "/drop", "/undo", "/reset", "/cd",
             "/tasks", "/ok", "/resolve", "/reopen",
             *_help_topics, "/help", "/exit",
         ]
@@ -375,6 +375,56 @@ def discuss_chat(topic: str):
             filepath.write_text(backup.read_text(encoding="utf-8"), encoding="utf-8")
             backup.unlink()
             print(f"  ✓ Восстановлено из {backup.name}")
+            continue
+        elif cmd == "/drop":
+            if not extra:
+                print(f"  {_C['red']}Укажи номер сообщения или имя агента. Пример: /drop 3, /drop -1, /drop claude{_C['reset']}")
+                continue
+            text_content = filepath.read_text(encoding="utf-8")
+            messages = _parse_messages(text_content)
+            if len(messages) < 2:
+                print(f"  {_C['red']}Нечего удалять — только заголовок{_C['reset']}")
+                continue
+            # Parse argument: number (1-based, negatives from end) or agent name
+            parts_drop = extra.split(None, 1)
+            arg = parts_drop[0]
+            drop_idx = None
+            try:
+                n = int(arg)
+                if n < 0:
+                    # -1 = last, -2 = second to last, etc.
+                    drop_idx = len(messages) + n
+                else:
+                    drop_idx = n
+            except ValueError:
+                # Agent name — find last message from this agent
+                agent_name = arg.lower()
+                occurrence = 1
+                if len(parts_drop) > 1 and parts_drop[1].isdigit():
+                    occurrence = int(parts_drop[1])
+                found = 0
+                for i in range(len(messages) - 1, 0, -1):
+                    if messages[i]["role"].lower() == agent_name:
+                        found += 1
+                        if found == occurrence:
+                            drop_idx = i
+                            break
+                if drop_idx is None:
+                    print(f"  {_C['red']}Сообщение от '{agent_name}' не найдено{_C['reset']}")
+                    continue
+            if drop_idx is not None and (drop_idx < 1 or drop_idx >= len(messages)):
+                print(f"  {_C['red']}Номер вне диапазона (1..{len(messages) - 1}){_C['reset']}")
+                continue
+            dropped = messages[drop_idx]
+            # Backup before dropping
+            backup = filepath.with_suffix(".md.bak")
+            backup.write_text(text_content, encoding="utf-8")
+            # Reconstruct without the dropped message
+            remaining = [m for i, m in enumerate(messages) if i != drop_idx]
+            filepath.write_text("".join(m["raw"] for m in remaining), encoding="utf-8")
+            body_preview = dropped["body"][:80].replace("\n", " ")
+            print(f"  ✓ Удалено сообщение #{drop_idx} @{dropped['role']}: {body_preview}...")
+            print(f"    Бэкап: {backup.name} (восстановить: /undo)")
             continue
         elif cmd == "/compact":
             keep = 4
@@ -1508,10 +1558,19 @@ def _print_help_detail(topic: str):
             "LLM-саммари дискуссии без закрытия.\n"
             "Выводит в терминал, не записывает в файл.",
         ),
+        "drop": (
+            "/drop <N | -N | agent [K]>",
+            "Удалить конкретное сообщение из дискуссии.\n"
+            "/drop 3       — удалить сообщение #3\n"
+            "/drop -1      — удалить последнее сообщение\n"
+            "/drop claude   — удалить последнее сообщение от claude\n"
+            "/drop gemini 2 — удалить предпоследнее от gemini\n"
+            "Создаёт бэкап. Восстановить: /undo",
+        ),
         "undo": (
             "/undo",
             "Восстановить дискуссию из .bak.\n"
-            "Работает после /reset, /compact, /tasks.",
+            "Работает после /reset, /compact, /drop, /tasks.",
         ),
         "cd": (
             "/cd <path>",
@@ -1649,6 +1708,7 @@ def _print_chat_help():
         (f"{Y}/stats{R}", 6, "размер, токены, участники"),
         (f"{Y}/summary{R}", 8, "саммари дискуссии (без закрытия)"),
         (f"{Y}/compact{R} {DIM}[N]{R}", len("/compact [N]"), "сжать ранние сообщения (оставить последние N)"),
+        (f"{Y}/drop{R} {DIM}<N|agent>{R}", len("/drop <N|agent>"), "удалить конкретное сообщение"),
         (f"{Y}/reset{R}", 6, "сбросить к интро, бэкап → .bak"),
         (f"{Y}/undo{R}", 5, "восстановить из .bak"),
         (f"{Y}/cd{R} {DIM}<path>{R}", len("/cd <path>"), "сменить рабочую директорию агентов"),
