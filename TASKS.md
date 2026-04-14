@@ -1,18 +1,44 @@
 
  TASKS — forgerace
 
-### TASK-026: Реализация бизнес-валидации ревью
+### TASK-042: Реализация функции валидации и обновление схемы ревью
 - **Статус**: open
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/review.py
+- **Интеграция**: —
+- **Описание**: Обновить `REVIEW_SCHEMA` (добавить `is_terminal`, `confidence_range`). Реализовать функцию `validate_review(data: dict) -> tuple[bool, str]`. Функция должна приводить `confidence` к `int` (принимая `float` или `int`), переименовать `NEEDS_WORK` в `NEEDS_REWORK` (с сохранением алиаса `NEEDS_WORK` для обратной совместимости). Добавить парсинг списка `issues` из строк формата `[severity] текст` в нормализованный `list[dict]`.
+- **Критерий готовности**: Функция `validate_review` написана, корректно обрабатывает входные данные, отклоняет неверный `confidence`, несовместимые статусы (APPROVED с критическими ошибками, REJECTED без ошибок). Схема `REVIEW_SCHEMA` обновлена.
+- **Дискуссия**: 2-validatsiya-revyu-s-biznes-pravilami
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-043: Покрытие логики ревью unit-тестами
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 2
+- **Зависимости**: TASK-042
 - **Файлы (новые)**: tests/test_review.py
+- **Файлы (modify)**: —
+- **Интеграция**: —
+- **Описание**: Написать 8-10 unit-тестов для проверки функции `validate_review` и логики парсинга `issues`. Тесты должны покрывать успешные сценарии (APPROVED без issues, NEEDS_REWORK с issues) и провальные (выход за пределы confidence, APPROVED с critical issues, REJECTED без issues).
+- **Критерий готовности**: Написаны и успешно проходят 8-10 тестов, проверяющих все бизнес-правила валидации ревью.
+- **Дискуссия**: 2-validatsiya-revyu-s-biznes-pravilami
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-044: Интеграция валидации в процесс ревью и оркестратор
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 2
+- **Зависимости**: TASK-042
+- **Файлы (новые)**: —
 - **Файлы (modify)**: forgerace/review.py, forgerace/pipeline.py
-- **Интеграция**: Интеграция вызова `validate_review` в `single_review` (вместо старой проверки `COMMENTS > 20`), обновление оркестратора для чтения `is_terminal` из схемы
-- **Описание**: Реализовать `validate_review(data: dict) -> tuple[bool, str]`. Обновить `REVIEW_SCHEMA` (добавить `is_terminal`, `confidence_range`). Принимать `confidence` как `int` и `float` (приводить к `int`). Обновить парсинг `issues` из промпта (в формате `[severity] текст`) и нормализовать их в `list[dict]`. Переименовать `NEEDS_WORK` в `NEEDS_REWORK` (добавив алиас для обратной совместимости). Реализовать завершение ветки оркестратором при статусе `REJECTED` на основе флага `is_terminal`. Удалить проверку длины комментариев > 20 символов. Написать 8-10 unit-тестов.
-- **Запрещено**: не хардкодить логику обработки REJECTED в оркестраторе (использовать `is_terminal` из схемы); не использовать строгую проверку `isinstance(confidence, int)` (обязательно поддерживать float); не использовать хардкод dict-схемы без возможности расширения.
-- **Проверка**: pytest tests/test_review.py -v
-- **Критерий готовности**: Функция валидации корректно отклоняет ревью, нарушающие бизнес-правила (APPROVED с critical issues, REJECTED/NEEDS_REWORK без issues, неверный confidence). Костыль проверки длины комментариев удален. При статусе REJECTED оркестратор немедленно завершает ветку агента без retry.
+- **Интеграция**: Использование `validate_review` в процессе выполнения задач
+- **Описание**: Интегрировать вызов `validate_review` в функцию `single_review` (в `forgerace/review.py`), полностью заменив старую проверку длины комментариев (`COMMENTS > 20`). В `forgerace/pipeline.py` обновить логику оркестратора: если от ревьюера получен статус `REJECTED` с установленным флагом `is_terminal`, оркестратор должен немедленно завершать ветку агента без попыток retry.
+- **Критерий готовности**: Костыль проверки длины комментариев удален. При получении терминального REJECTED оркестратор корректно обрывает исполнение агента для данной ветки без повторных запусков.
 - **Дискуссия**: 2-validatsiya-revyu-s-biznes-pravilami
 - **Агент**: —
 - **Ветка**: —
@@ -355,17 +381,112 @@
 - **Агент**: —
 - **Ветка**: —
 
-### TASK-021: Config validation — типы, диапазоны, PATH check
+### TASK-036: ConfigValidationError — кастомное исключение
 - **Статус**: open
 - **Приоритет**: P1
+- **Этап**: 1
 - **Зависимости**: —
-- **Файлы (новые)**: —
-- **Файлы (modify)**: forgerace/config.py
-- **Описание**: После загрузки конфига добавить валидацию: 1) числовые поля (agent_timeout, max_parallel_tasks, max_retries, progress_timeout) — isinstance(int) и > 0, 2) команды агентов — shutil.which(command) при загрузке, warning если не найден, 3) пути (root_dir) — существование директории. При ошибках — log.error с конкретным сообщением и sys.exit(1). Обернуть tomllib.load в try/except TOMLDecodeError — вывести human-readable сообщение с указанием файла.
-- **Критерий готовности**: кривой TOML даёт понятное сообщение, agent_timeout="five" ловится при загрузке, несуществующая команда агента — warning
+- **Файлы (новые)**: forgerace/config_errors.py
+- **Файлы (modify)**: —
+- **Интеграция**: добавить `from .config_errors import ConfigValidationError` в forgerace/__init__.py
+- **Описание**: Создать кастомное исключение `ConfigValidationError(Exception)` с полями `message: str` и `source: str` (файл конфига или "validation"). Добавить фабричную функцию `raise_config_error(message, source="")`, которая бросает `ConfigValidationError`. Исключение должно быть dataclass-совместимым для удобного тестирования.
+- **Запрещено**: использовать `sys.exit()` внутри модуля исключений; наследовать от `SystemExit` или `BaseException`; хардкодить сообщения об ошибках
+- **Проверка**: ruff check forgerace/config_errors.py && python -c "from forgerace.config_errors import ConfigValidationError; raise ConfigValidationError('test')"
+- **Критерий готовности**: `ConfigValidationError` импортируется, бросается и перехватывается как обычное исключение, содержит читаемое сообщение
 - **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
 - **Агент**: —
 - **Ветка**: —
+
+### TASK-037: Валидация числовых полей конфига
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-036
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/config.py
+- **Интеграция**: добавить функцию `validate_numeric_fields(cfg: Config) -> None` в config.py; вызвать её в конце `load_config()` перед `return cfg`
+- **Описание**: Реализовать `validate_numeric_fields(cfg: Config)`, которая проверяет: 1) `agent_timeout` — `isinstance(val, (int, float))` и `> 0`, привести к `float`; 2) `progress_timeout` — `isinstance(val, (int, float))` и `> 0`, привести к `float`; 3) `max_parallel_tasks` — строго `isinstance(val, int)` и `> 0`; 4) `max_retries` — `isinstance(val, int)` и `>= 0` (ноль допустим); 5) `max_concurrent` — `isinstance(val, int)` и `> 0`; 6) соотношение таймаутов: если `progress_timeout >= agent_timeout` — `log.warning` (не error). При нарушении — бросать `ConfigValidationError` с конкретным сообщением (имя поля, ожидаемый/фактический тип, значение).
+- **Запрещено**: использовать `sys.exit()` внутри валидации; проверять `max_retries > 0` (ноль — валидное значение); принимать float для `max_parallel_tasks` и `max_concurrent`; использовать `isinstance(val, int)` без проверки `bool` (bool — подкласс int в Python)
+- **Проверка**: ruff check forgerace/config.py && python -c "from forgerace.config import Config, validate_numeric_fields; from forgerace.config_errors import ConfigValidationError; c = Config(); c.agent_timeout = -1; validate_numeric_fields(c)" 2>&1 | grep -q ConfigValidationError && echo "PASS"
+- **Критерий готовности**: некорректные числовые значения (отрицательные таймауты, float для max_parallel_tasks, progress_timeout >= agent_timeout) детектируются и бросают `ConfigValidationError` с понятным сообщением
+- **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-038: Валидация команд агентов через shlex + shutil.which
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-036
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/config.py
+- **Интеграция**: добавить функцию `validate_agent_commands(cfg: Config) -> None` в config.py; вызвать её в конце `load_config()` перед `return cfg`
+- **Описание**: Реализовать `validate_agent_commands(cfg: Config)`, которая для каждого включённого агента: 1) парсит команду через `shlex.split(command)[0]` (берёт только бинарник, игнорируя аргументы); 2) проверяет наличие через `shutil.which(binary)`; 3) если бинарник не найден — `log.warning("Агент '{name}': команда '{cmd}' не найдена в PATH")`, НЕ ошибка; 4) если команда пустая — `ConfigValidationError`. Функция должна принимать dict распарсенных агентов, не работать с файловой системой напрямую.
+- **Запрещено**: вызывать `shutil.which` на всей строке команды (включая аргументы); использовать `os.system` для проверки; делать `sys.exit` при отсутствии команды (только warning); хардкодить список агентов
+- **Проверка**: ruff check forgerace/config.py && python -c "from forgerace.config import Config, validate_agent_commands; c = Config(); c.agents['test'] = type('A',(),{'command':'nonexistent_binary_xyz','enabled':True,'args':[],'review_args':[],'inactivity_timeout':300,'protocol':'cli','cognitive_frame':''})(); validate_agent_commands(c)" 2>&1 | grep -qi warning && echo "PASS"
+- **Критерий готовности**: команды агентов с аргументами (например "claude-cli --model sonnet") корректно проверяются по бинарнику; отсутствующие команды дают warning, пустые — ConfigValidationError
+- **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-039: Валидация root_dir — существование директории
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-036
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/config.py
+- **Интеграция**: добавить функцию `validate_paths(cfg: Config) -> None` в config.py; вызвать её в конце `load_config()` перед `return cfg`
+- **Описание**: Реализовать `validate_paths(cfg: Config)`, которая проверяет: 1) `cfg.root_dir` — директория существует (`Path.is_dir()`); если нет — `ConfigValidationError("root_dir '{path}' не существует")`. 2) `cfg.discuss_dir` — если указан явно, проверить существование; если нет — `log.warning` (не error, директория может быть создана позже). 3) `cfg.agents_dir` — аналогично. Fail-fast только для `root_dir`, для вспомогательных директорий — warning.
+- **Запрещено**: автоматически создавать директории (только проверка); использовать `sys.exit` внутри функции; проверять существование файлов вместо директорий; fail-fast для discuss_dir/agents_dir
+- **Проверка**: ruff check forgerace/config.py && python -c "from forgerace.config import Config, validate_paths; from forgerace.config_errors import ConfigValidationError; from pathlib import Path; c = Config(); c.root_dir = Path('/nonexistent_dir_xyz'); validate_paths(c)" 2>&1 | grep -q ConfigValidationError && echo "PASS"
+- **Критерий готовности**: несуществующий root_dir вызывает ConfigValidationError; отсутствующие discuss_dir/agents_dir — warning с подсказкой
+- **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-040: Перехват ошибок загрузки конфига в cli.py
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-036
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/cli.py
+- **Интеграция**: обернуть вызов `init_config()` в `main()` (строка ~728) в try/except; добавить `from .config_errors import ConfigValidationError`
+- **Описание**: В `main()` обернуть `init_config(config_path=args.config, root_dir=args.root)` в try/except с обработкой: 1) `ConfigValidationError` — `log.error("Ошибка конфигурации: {e.message}")` + `sys.exit(1)`; 2) `tomllib.TOMLDecodeError` — `log.error("Ошибка парсинга TOML в {config_path}: {e}")` с указанием строки/колонки из исключения + `sys.exit(1)`; 3) `FileNotFoundError` — `log.error("Файл конфига не найден: {path}. Запустите 'forgerace init' или укажите --config")` + `sys.exit(1)`. Обработка должна быть в точке входа (cli.py), не в config.py.
+- **Запрещено**: использовать `sys.exit` внутри config.py; перехватывать все исключения через bare `except`; молча игнорировать ошибки; дублировать логику валидации из config.py
+- **Проверка**: ruff check forgerace/cli.py && python -c "from forgerace.cli import main; import sys; sys.argv = ['forgerace', '--config', '/nonexistent.toml', 'run']; main()" 2>&1 | grep -qi "не найден\|init" && echo "PASS"
+- **Критерий готовности**: отсутствующий файл конфига — понятное сообщение с подсказкой про init; кривой TOML — сообщение с файлом и позицией ошибки; ошибка валидации — конкретное сообщение о проблемном поле
+- **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-041: Юнит-тесты валидации конфига
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-037, TASK-038, TASK-039, TASK-040
+- **Файлы (новые)**: tests/test_config_validation.py
+- **Файлы (modify)**: —
+- **Интеграция**: —
+- **Описание**: Написать 12-15 юнит-тестов для функций валидации без работы с файловой системой. Тест-кейсы: 1) валидный конфиг — проходит; 2) agent_timeout = -1 — ConfigValidationError; 3) agent_timeout = "string" — ConfigValidationError; 4) agent_timeout = 0.5 (float) — проходит, приводится к float; 5) max_retries = 0 — проходит; 6) max_retries = -1 — ConfigValidationError; 7) max_parallel_tasks = 2.5 — ConfigValidationError; 8) progress_timeout >= agent_timeout — warning; 9) команда агента = "" — ConfigValidationError; 10) команда с аргументами — проверяется только бинарник; 11) root_dir не существует — ConfigValidationError; 12) discuss_dir не существует — warning. Использовать pytest, мокировать `shutil.which` и `Path.is_dir`.
+- **Запрещено**: использовать реальную файловую систему в тестах (только моки); тестировать через CLI (только unit-уровень); дублировать логику валидации в тестах; использовать `unittest.TestCase` вместо pytest
+- **Проверка**: ruff check tests/test_config_validation.py && pytest tests/test_config_validation.py -v
+- **Критерий готовности**: все 12-15 тестов проходят, покрывая валидные/невалидные кейсы для числовых полей, команд и путей; тесты не зависят от файловой системы
+- **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
+- **Агент**: —
+- **Ветка**: —
+
+Блок задач добавлен в TASKS.md. Структура:
+
+- **TASK-036** — `ConfigValidationError` (базовое исключение, без зависимостей)
+- **TASK-037** — валидация числовых полей (зависит от TASK-036)
+- **TASK-038** — валидация команд агентов (зависит от TASK-036)
+- **TASK-039** — валидация путей (зависит от TASK-036)
+- **TASK-040** — перехват ошибок в cli.py (зависит от TASK-036)
+- **TASK-041** — юнит-тесты (зависит от TASK-037, 038, 039, 040)
+
+**Параллелизм**: TASK-037, 038, 039, 040 могут выполняться параллельно — все зависят только от TASK-036 и работают с разными функциями/файлами.
 
 ### TASK-022: merge.py — убрать checkout в основной repo
 - **Статус**: open
