@@ -2,10 +2,14 @@
 
 import logging
 import os
+import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+from .config_errors import ConfigValidationError
 
 log = logging.getLogger(__name__)
 
@@ -259,6 +263,33 @@ def _load_last_config() -> Optional[Path]:
     return None
 
 
+def validate_agent_commands(cfg: Config) -> None:
+    """Проверяет наличие бинарников для всех включённых агентов."""
+    for name, acfg in cfg.agents.items():
+        if not acfg.enabled:
+            continue
+
+        if not isinstance(acfg.command, str):
+            raise ConfigValidationError(f"Агент '{name}': команда должна быть строкой")
+        
+        cmd = acfg.command.strip()
+        if not cmd:
+            raise ConfigValidationError(f"Агент '{name}': команда не может быть пустой")
+
+        # Парсим только бинарник, игнорируя аргументы
+        try:
+            parts = shlex.split(cmd)
+        except ValueError as e:
+            raise ConfigValidationError(f"Агент '{name}': ошибка разбора команды: {e}")
+            
+        if not parts:
+            raise ConfigValidationError(f"Агент '{name}': команда не может быть пустой")
+        binary = parts[0]
+
+        if not shutil.which(binary):
+            log.warning("Агент '%s': команда '%s' не найдена в PATH", name, cmd)
+
+
 def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None) -> Config:
     """Загружает конфиг из TOML-файла. Если файла нет — возвращает дефолты.
 
@@ -282,6 +313,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
         config_path = _load_last_config()
 
     if config_path is None or not config_path.exists() or tomllib is None:
+        validate_agent_commands(cfg)
         return cfg
 
     _save_last_config(config_path)
@@ -403,6 +435,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     if "on_complete" in hooks:
         cfg.hook_on_complete = hooks["on_complete"]
 
+    validate_agent_commands(cfg)
     return cfg
 
 
