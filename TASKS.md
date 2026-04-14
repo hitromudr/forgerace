@@ -252,3 +252,63 @@
 - **Дискуссия**: future
 - **Агент**: qwen
 - **Ветка**: task/task-011-pole-protocol-v-agentconfig-qwen
+
+### TASK-020: Signal handling — setpgrp до handlers
+- **Статус**: open
+- **Приоритет**: P0
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/cli.py
+- **Описание**: В `main_with_signal_handling` порядок вызовов: signal.signal(SIGINT) → signal.signal(SIGTERM) → os.setpgrp(). Если SIGINT прилетает между установкой handler и setpgrp, killpg убьёт родительскую группу процессов (терминал). Fix: вызвать os.setpgrp() ДО установки signal handlers. Потерянный SIGINT между setpgrp и handler — приемлемый trade-off (пользователь нажмёт Ctrl+C ещё раз).
+- **Критерий готовности**: os.setpgrp() вызывается до signal.signal(), тест: Ctrl+C не убивает родительский терминал
+- **Дискуссия**: code-audit
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-021: Config validation — типы, диапазоны, PATH check
+- **Статус**: open
+- **Приоритет**: P1
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/config.py
+- **Описание**: После загрузки конфига добавить валидацию: 1) числовые поля (agent_timeout, max_parallel_tasks, max_retries, progress_timeout) — isinstance(int) и > 0, 2) команды агентов — shutil.which(command) при загрузке, warning если не найден, 3) пути (root_dir) — существование директории. При ошибках — log.error с конкретным сообщением и sys.exit(1). Обернуть tomllib.load в try/except TOMLDecodeError — вывести human-readable сообщение с указанием файла.
+- **Критерий готовности**: кривой TOML даёт понятное сообщение, agent_timeout="five" ловится при загрузке, несуществующая команда агента — warning
+- **Дискуссия**: code-audit
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-022: merge.py — убрать checkout в основной repo
+- **Статус**: open
+- **Приоритет**: P1
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/merge.py
+- **Описание**: В merge_to_develop после update-ref выполняется `git checkout merge_sha -- fname` в cfg.root_dir. Это: 1) модифицирует index и рабочее дерево пользователя без ведома, 2) перезатирает незакоммиченные изменения, 3) staged changes которые пользователь не делал. Fix: убрать блок синхронизации файлов (строки с checkout). Вместо этого — после update-ref вызвать `git read-tree` или оставить только update-ref. Пользователь сам синхронизирует рабочее дерево через `git checkout -- .` если нужно.
+- **Критерий готовности**: merge_to_develop не модифицирует рабочее дерево cfg.root_dir, только обновляет ref
+- **Дискуссия**: code-audit
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-023: Явная ошибка при пустом списке агентов/задач
+- **Статус**: open
+- **Приоритет**: P2
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/pipeline.py, forgerace/cli.py
+- **Описание**: Сейчас при отсутствии агентов или задач pipeline молча завершается пустым прогоном. Fix: 1) в начале run_pipeline проверить cfg.agent_names — если пуст, log.error("Нет активных агентов. Включите хотя бы одного в forgerace.toml") и return, 2) FileNotFoundError на TASKS.md — перехватить в cli.py, вывести "TASKS.md не найден. Запустите forgerace init", 3) TOMLDecodeError — перехватить, вывести файл и ошибку.
+- **Критерий готовности**: пустой agents → понятное сообщение, нет TASKS.md → подсказка про init, кривой TOML → файл + ошибка
+- **Дискуссия**: code-audit
+- **Агент**: —
+- **Ветка**: —
+
+### TASK-024: verify_build — фиксировать base SHA до начала задачи
+- **Статус**: open
+- **Приоритет**: P1
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/pipeline.py
+- **Описание**: verify_build делает `git diff --stat cfg.dev_branch` в worktree. Но merge_to_develop двигает указатель dev_branch (через update-ref). После мержа одной задачи у всех остальных агентов diff base сдвигается → has_changes=True даже если агент ничего не написал. Fix: при создании worktree сохранить base_sha (SHA коммита от которого создана ветка), и в verify_build использовать base_sha вместо cfg.dev_branch.
+- **Критерий готовности**: verify_build использует фиксированный base SHA, агент-пустышка не проходит валидацию после мержа другой задачи
+- **Дискуссия**: code-audit
+- **Агент**: —
+- **Ветка**: —
