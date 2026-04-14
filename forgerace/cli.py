@@ -1,13 +1,13 @@
 """CLI точка входа: argparse, команды run/discuss/status/merge-pending."""
 
 import argparse
-import logging
 import os
 import signal
 import sys
 from pathlib import Path
 
-from .config import cfg, init_config, run_hint
+from .config import cfg, init_config, run_hint, tomllib
+from .config_errors import ConfigValidationError
 from .discuss import discuss_chat, discuss_create, discuss_list, discuss_reply, discuss_show
 from .merge import merge_to_develop
 from .utils import C, R, agent_color
@@ -170,7 +170,7 @@ def _generate_brief(cwd: Path, brief_path: Path):
         if files:
             # Ограничиваем до 100 файлов
             file_list = files.split("\n")[:100]
-            context_parts.append(f"## Структура файлов\n" + "\n".join(file_list))
+            context_parts.append("## Структура файлов\n" + "\n".join(file_list))
     except Exception:
         pass
 
@@ -401,7 +401,6 @@ def show_status():
             ready_marker = f" {C['green']}◀ ready{R}" if tid in ready_ids and s == "open" else ""
             print(f"{prefix}{color}{icon}{R} {C['bold']}{tid}{R}: {t.name}{ready_marker}")
             for child in unlocks.get(tid, []):
-                connector = "  " + "│ " * indent + "├─"
                 # Не печатаем connector отдельно — он часть дочернего вызова
                 _print_tree(child, indent + 1)
 
@@ -499,9 +498,9 @@ def _cmd_mode(mode_name: str):
     mode_color = C['cyan'] if mode_name == "competitive" else C['magenta']
     print(f"  Режим: {mode_color}{C['bold']}{mode_name}{R}")
     if mode_name == "competitive":
-        print(f"  Все агенты на каждую задачу, race-to-merge")
+        print("  Все агенты на каждую задачу, race-to-merge")
     else:
-        print(f"  Задачи распределяются по агентам round-robin")
+        print("  Задачи распределяются по агентам round-robin")
 
 
 def _cmd_agent_toggle(agent_name: str, enable: bool):
@@ -523,7 +522,7 @@ def _cmd_agent_toggle(agent_name: str, enable: bool):
 
     # Ищем enabled в секции агента или добавляем
     lines = content.splitlines()
-    section_idx = next(i for i, l in enumerate(lines) if l.strip() == section)
+    section_idx = next(i for i, line in enumerate(lines) if line.strip() == section)
 
     # Найдём конец секции (следующая [секция] или EOF)
     end_idx = len(lines)
@@ -725,7 +724,23 @@ def main():
 
     # Инициализация конфига
     # --root имеет приоритет; если не указан — TOML root; если и его нет — CWD
-    init_config(config_path=args.config, root_dir=args.root)
+    try:
+        if args.config and not args.config.exists():
+            raise FileNotFoundError(str(args.config))
+        init_config(config_path=args.config, root_dir=args.root)
+    except ConfigValidationError as e:
+        log.error(f"Ошибка конфигурации: {e.message}")
+        sys.exit(1)
+    except FileNotFoundError as e:
+        path = e.args[0] if e.args else (args.config or "forgerace.toml")
+        log.error(f"Файл конфига не найден: {path}. Запустите 'forgerace init' или укажите --config")
+        sys.exit(1)
+    except Exception as e:
+        if tomllib and isinstance(e, tomllib.TOMLDecodeError):
+            log.error(f"Ошибка парсинга TOML в {args.config or 'forgerace.toml'}: {e}")
+            sys.exit(1)
+        raise e
+
     setup_logging(verbose=args.verbose)
 
     # Дискуссии
