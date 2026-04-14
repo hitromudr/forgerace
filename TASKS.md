@@ -2,7 +2,7 @@
  TASKS — forgerace
 
 ### TASK-042: Реализация функции валидации и обновление схемы ревью
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: —
@@ -44,7 +44,7 @@
 - **Ветка**: —
 
 ### TASK-003: Rework counter и TaskState
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: TASK-002
@@ -170,7 +170,7 @@
 - **Ветка**: —
 
 ### TASK-028: Механизм блокировки записи в TASKS.md
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: —
@@ -186,7 +186,7 @@
 - **Ветка**: —
 
 ### TASK-029: Основной цикл оркестрации на TaskQueue
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: TASK-027
@@ -276,7 +276,7 @@
 - **Ветка**: task/task-016-dobavit-pole-estimated-usd-v-tokenusage-gemini
 
 ### TASK-033: Graceful shutdown для прерывания subprocess
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: —
@@ -288,8 +288,8 @@
 - **Проверка**: ruff check forgerace/agents.py && pytest tests/test_agents.py -v -k graceful_shutdown
 - **Критерий готовности**: Процесс агента корректно завершается с сохранением логов и состояния, fallback на kill только при зависании
 - **Дискуссия**: 17-proverka-byudzheta-v-pipeline
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: qwen
+- **Ветка**: task/task-033-graceful-shutdown-dlya-preryvaniya-subpr-qwen
 
 ### TASK-034: Возврат AgentProcessResult со статусом BUDGET_EXCEEDED
 - **Статус**: open
@@ -366,7 +366,7 @@
 - **Ветка**: task/task-011-pole-protocol-v-agentconfig-qwen
 
 ### TASK-025: Signal handling — setpgrp до handlers + getpgrp
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P0
 - **Этап**: 1
 - **Зависимости**: —
@@ -378,11 +378,11 @@
 - **Проверка**: `ruff check forgerace/cli.py && python -c "from forgerace.cli import main_with_signal_handling; print('import OK')"`
 - **Критерий готовности**: `os.setpgrp()` вызывается до `signal.signal()`, `_force_exit` использует `os.getpgrp()`, Ctrl+C из скрипта/Makefile не убивает родительскую группу процессов
 - **Дискуссия**: 20-signal-handling-setpgrp-do-handlers
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: qwen
+- **Ветка**: task/task-025-signal-handling-setpgrp-do-handlers-getp-qwen
 
 ### TASK-036: ConfigValidationError — кастомное исключение
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: —
@@ -394,8 +394,8 @@
 - **Проверка**: ruff check forgerace/config_errors.py && python -c "from forgerace.config_errors import ConfigValidationError; raise ConfigValidationError('test')"
 - **Критерий готовности**: `ConfigValidationError` импортируется, бросается и перехватывается как обычное исключение, содержит читаемое сообщение
 - **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: qwen
+- **Ветка**: task/task-036-configvalidationerror-kastomnoe-isklyuch-qwen
 
 ### TASK-037: Валидация числовых полей конфига
 - **Статус**: open
@@ -489,7 +489,7 @@
 **Параллелизм**: TASK-037, 038, 039, 040 могут выполняться параллельно — все зависят только от TASK-036 и работают с разными функциями/файлами.
 
 ### TASK-022: merge.py — убрать checkout в основной repo
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Зависимости**: —
 - **Файлы (новые)**: —
@@ -497,11 +497,11 @@
 - **Описание**: В merge_to_develop после update-ref выполняется `git checkout merge_sha -- fname` в cfg.root_dir. Это: 1) модифицирует index и рабочее дерево пользователя без ведома, 2) перезатирает незакоммиченные изменения, 3) staged changes которые пользователь не делал. Fix: убрать блок синхронизации файлов (строки с checkout). Вместо этого — после update-ref вызвать `git read-tree` или оставить только update-ref. Пользователь сам синхронизирует рабочее дерево через `git checkout -- .` если нужно.
 - **Критерий готовности**: merge_to_develop не модифицирует рабочее дерево cfg.root_dir, только обновляет ref
 - **Дискуссия**: —
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: qwen
+- **Ветка**: task/task-022-mergepy-ubrat-checkout-v-osnovnoj-repo-qwen
 
 ### TASK-023: Явная ошибка при пустом списке агентов/задач
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P2
 - **Зависимости**: —
 - **Файлы (новые)**: —
@@ -513,7 +513,7 @@
 - **Ветка**: —
 
 ### TASK-024: verify_build — фиксировать base SHA до начала задачи
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Зависимости**: —
 - **Файлы (новые)**: —
