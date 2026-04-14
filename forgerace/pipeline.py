@@ -25,6 +25,17 @@ from .utils import log, run_cmd, is_valid_path, C, R, agent_color
 from .worktree import cleanup_worktrees, create_worktree, remove_worktree
 
 
+# --- TASKS.md lock & safe wrapper ---
+
+tasks_md_lock = threading.Lock()
+
+
+def safe_update_task_status(*args, **kwargs):
+    """Thread-safe wrapper around update_task_status."""
+    with tasks_md_lock:
+        return update_task_status(*args, **kwargs)
+
+
 # --- Heartbeat ---
 
 _active_agents: dict[str, tuple[str, Path, float]] = {}
