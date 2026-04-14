@@ -955,6 +955,10 @@ def run_pipeline(
     auto: bool = False,
 ):
     """Основной цикл оркестратора."""
+    if not cfg.agent_names:
+        log.error("Нет активных агентов. Включите хотя бы одного в forgerace.toml")
+        return
+
     if max_tasks is None:
         max_tasks = cfg.max_parallel_tasks
 
