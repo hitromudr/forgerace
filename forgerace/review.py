@@ -14,6 +14,90 @@ _DIFF_MAX = 20000
 _DIFF_EXCLUDE = ["*.yaml", "*.yml", "*.json", "*.lock", "*.log", "*.csv", "*.bin"]
 
 
+REVIEW_SCHEMA = {
+    "verdicts": {
+        "APPROVED": {"is_terminal": True},
+        "NEEDS_REWORK": {"is_terminal": False, "aliases": ["NEEDS_WORK"]},
+        "REJECTED": {"is_terminal": True},
+    },
+    "confidence_range": (0, 100),
+}
+
+
+def validate_review(data: dict) -> tuple[bool, str]:
+    """
+    Валидирует данные ревью, нормализует вердикт и список замечаний.
+    Возвращает (успех, сообщение_об_ошибке).
+    """
+    if not isinstance(data, dict):
+        return False, "Данные должны быть словарем"
+
+    # 1. Обработка вердикта и алиасов
+    verdict = str(data.get("verdict", "")).upper()
+
+    target_verdict = None
+    for name, info in REVIEW_SCHEMA["verdicts"].items():
+        if verdict == name or verdict in info.get("aliases", []):
+            target_verdict = name
+            break
+
+    if not target_verdict:
+        return False, f"Недопустимый вердикт: {verdict}"
+
+    data["verdict"] = target_verdict
+
+    # 2. Обработка уверенности (confidence)
+    confidence_raw = data.get("confidence", 100)
+    try:
+        # Принимаем float или int, приводим к int
+        confidence = int(float(confidence_raw))
+    except (ValueError, TypeError):
+        return False, f"Некорректное значение confidence: {confidence_raw}"
+
+    low, high = REVIEW_SCHEMA["confidence_range"]
+    if not (low <= confidence <= high):
+        return False, f"Confidence {confidence} вне диапазона [{low}, {high}]"
+    data["confidence"] = confidence
+
+    # 3. Парсинг замечаний (issues)
+    raw_issues = data.get("issues", [])
+    if isinstance(raw_issues, str):
+        raw_issues = [s.strip() for s in raw_issues.splitlines() if s.strip()]
+
+    normalized_issues = []
+    for issue in raw_issues:
+        if isinstance(issue, str):
+            # [severity] текст
+            match = re.match(r"^\[(.*?)\]\s*(.*)", issue)
+            if match:
+                normalized_issues.append({
+                    "severity": match.group(1).lower(),
+                    "text": match.group(2).strip()
+                })
+            else:
+                normalized_issues.append({
+                    "severity": "major",
+                    "text": issue.strip()
+                })
+        elif isinstance(issue, dict):
+            if "text" in issue:
+                issue.setdefault("severity", "major")
+                normalized_issues.append(issue)
+
+    data["issues"] = normalized_issues
+
+    # 4. Проверка совместимости статуса
+    has_critical = any(i.get("severity") == "critical" for i in normalized_issues)
+
+    if target_verdict == "APPROVED" and has_critical:
+        return False, "Нельзя аппрувить код с критическими ошибками"
+
+    if target_verdict == "REJECTED" and not normalized_issues:
+        return False, "REJECTED требует указания хотя бы одной проблемы"
+
+    return True, ""
+
+
 def get_diff(result: AgentResult, task: Task | None = None) -> str:
     """Получает diff агента относительно develop. Исключает бинарники и дампы."""
     exclude_args = []
@@ -91,7 +175,7 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
         bloat_warning = f"""
 ⚠ ВНИМАНИЕ: diff содержит {diff_lines} строк — это подозрительно много.
 Проверь: агент мог ПЕРЕПИСАТЬ файлы целиком вместо точечных правок.
-Если агент удалил/заменил существующий код без необходимости — это NEEDS_WORK.
+Если агент удалил/заменил существующий код без необходимости — это NEEDS_REWORK.
 """
 
     prompt = f"""Ты ревьюер кода. Ты проверяешь реализацию агента {author} для задачи {task.id}.
@@ -115,12 +199,12 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
 - ОБЯЗАТЕЛЬНО закончи выводом VERDICT/COMMENTS/SUMMARY.
 
 ## Формат ответа — строго:
-VERDICT: APPROVED или NEEDS_WORK
-COMMENTS: <что проверено и какие проблемы. При APPROVED — докажи что проверил. При NEEDS_WORK — конкретные замечания.>
+VERDICT: APPROVED или NEEDS_REWORK
+COMMENTS: <что проверено и какие проблемы. При APPROVED — докажи что проверил. При NEEDS_REWORK — конкретные замечания.>
 SUMMARY: <итог в 1-2 строки>
 
 APPROVED = код готов к мержу.
-NEEDS_WORK = нужны правки.
+NEEDS_REWORK = нужны правки.
 - Файлы из `.gitignore` НЕ могут быть изменены — не требуй их правки.
 Пиши на русском.
 """
@@ -181,17 +265,17 @@ NEEDS_WORK = нужны правки.
         comments_match = re.search(r"\**COMMENTS\**:\s*(.+?)(?=\n\**SUMMARY\**:|\Z)", review_text, re.IGNORECASE | re.DOTALL)
         summary_match = re.search(r"\**SUMMARY\**:\s*(.+)", review_text, re.IGNORECASE)
 
-        verdict = verdict_match.group(1).upper() if verdict_match else "NEEDS_WORK"
+        verdict = verdict_match.group(1).upper() if verdict_match else "NEEDS_REWORK"
         comments = comments_match.group(1).strip() if comments_match else ""
 
         # APPROVED без обоснования — невалидное ревью
         if verdict == "APPROVED" and len(comments) < 20:
-            log.warning(f"[{reviewer}] APPROVED без обоснования — понижаю до NEEDS_WORK")
-            verdict = "NEEDS_WORK"
+            log.warning(f"[{reviewer}] APPROVED без обоснования — понижаю до NEEDS_REWORK")
+            verdict = "NEEDS_REWORK"
             comments = "Ревьюер не обосновал APPROVED. Требуется повторное ревью с конкретным анализом."
 
-        # NEEDS_WORK с ложным замечанием "не компилируется" — если сборка прошла, отклоняем
-        if verdict == "NEEDS_WORK":
+        # NEEDS_REWORK с ложным замечанием "не компилируется" — если сборка прошла, отклоняем
+        if verdict == "NEEDS_REWORK":
             build_fail_phrases = [
                 "не компилируется", "не собирается", "ошибка компиляции",
                 "compilation error", "does not compile", "build fails",
@@ -199,7 +283,7 @@ NEEDS_WORK = нужны правки.
             comments_lower = comments.lower()
             has_build_claim = any(p in comments_lower for p in build_fail_phrases)
             if has_build_claim and build_passed:
-                log.warning(f"[{reviewer}] NEEDS_WORK утверждает что не компилируется, но сборка прошла — повышаю до APPROVED")
+                log.warning(f"[{reviewer}] NEEDS_REWORK утверждает что не компилируется, но сборка прошла — повышаю до APPROVED")
                 verdict = "APPROVED"
                 comments = f"(автокоррекция: ревьюер ложно заявил о проблемах компиляции, сборка прошла)\n{comments}"
 
@@ -317,7 +401,7 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
     else:
         # Никто не получил полного одобрения — берём с максимумом approve
         best = max(author_names, key=_approval_count)
-        verdict = "NEEDS_WORK"
+        verdict = "NEEDS_REWORK"
         # Собираем замечания от тех кто не одобрил лучшего
         nw_comments = [rv.get("comments", "") for rv in reviews_by_author[best]
                        if rv["verdict"] != "APPROVED" and rv.get("comments", "").strip()]
