@@ -11,8 +11,9 @@ from .utils import log, is_valid_path
 _assessed_tasks: set[str] = set()
 
 
-def assess_and_maybe_decompose(task: Task) -> bool:
+def assess_and_maybe_decompose(task: Task, agent_name: str = "") -> bool:
     """Оценивает сложность задачи через LLM. Если > max — разбивает.
+    agent_name — конкретный агент для оценки, иначе round-robin.
     Возвращает True если задача была декомпозирована."""
     if task.id in _assessed_tasks:
         return False
@@ -98,14 +99,15 @@ COMPLEXITY: N
     log.info(f"  🔍 Оценка сложности {task.id}...")
     from .agents import run_text_agent
 
-    # Пробуем всех агентов по очереди (round-robin) до успешной декомпозиции
-    agent_names = cfg.agent_names
+    # agent_name задан — используем его, иначе round-robin с fallback
+    agent_names = [agent_name] if agent_name else list(cfg.agent_names)
     complexity = None
     tasks_block = ""
     new_task_ids = []
 
     for attempt_num in range(len(agent_names)):
-        output = run_text_agent(prompt, timeout=120, tag=task.id)
+        cur_agent = agent_names[attempt_num % len(agent_names)]
+        output = run_text_agent(prompt, timeout=120, tag=task.id, agent_name=cur_agent)
         if not output:
             continue
 

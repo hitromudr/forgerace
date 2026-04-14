@@ -724,96 +724,83 @@ def main():
         return
 
     # Инициализация конфига
-    try:
-        init_config(config_path=args.config, root_dir=args.root)
-    except Exception as e:
-        if "TOMLDecodeError" in type(e).__name__:
-            from .config import find_config
-            path = args.config or find_config(args.root) or "forgerace.toml"
-            print(f"  {C['red']}Ошибка в конфиге {path}: {e}{R}")
-            sys.exit(1)
-        raise
-
+    # --root имеет приоритет; если не указан — TOML root; если и его нет — CWD
+    init_config(config_path=args.config, root_dir=args.root)
     setup_logging(verbose=args.verbose)
 
-    try:
-        # Дискуссии
-        if args.command == "discuss":
-            if args.disc_cmd == "new":
-                discuss_create(args.topic, args.question, args.author)
-            elif args.disc_cmd == "reply":
-                discuss_reply(args.topic, args.agent)
-            elif args.disc_cmd == "list":
-                discuss_list()
-            elif args.disc_cmd == "show":
-                discuss_show(args.topic)
-            elif args.disc_cmd == "chat":
-                discuss_chat(args.topic)
-            elif args.disc_cmd == "regen":
-                from .discuss import _post_resolve
-                filepath = cfg.discuss_dir / f"{args.topic}.md"
-                if not filepath.exists():
-                    log.error(f"Дискуссия {args.topic} не найдена")
-                elif "РЕЗОЛЮЦИЯ" not in filepath.read_text(encoding="utf-8"):
-                    log.error(f"Дискуссия {args.topic} не закрыта (нет РЕЗОЛЮЦИИ)")
-                else:
-                    _post_resolve(filepath)
+    # Дискуссии
+    if args.command == "discuss":
+        if args.disc_cmd == "new":
+            discuss_create(args.topic, args.question, args.author)
+        elif args.disc_cmd == "reply":
+            discuss_reply(args.topic, args.agent)
+        elif args.disc_cmd == "list":
+            discuss_list()
+        elif args.disc_cmd == "show":
+            discuss_show(args.topic)
+        elif args.disc_cmd == "chat":
+            discuss_chat(args.topic)
+        elif args.disc_cmd == "regen":
+            from .discuss import _post_resolve
+            filepath = cfg.discuss_dir / f"{args.topic}.md"
+            if not filepath.exists():
+                log.error(f"Дискуссия {args.topic} не найдена")
+            elif "РЕЗОЛЮЦИЯ" not in filepath.read_text(encoding="utf-8"):
+                log.error(f"Дискуссия {args.topic} не закрыта (нет РЕЗОЛЮЦИИ)")
             else:
-                disc_p.print_help()
-            return
+                _post_resolve(filepath)
+        else:
+            disc_p.print_help()
+        return
 
-        # agents
-        if args.command == "agents":
-            if args.agents_cmd == "list" or args.agents_cmd is None:
-                _cmd_agents_list()
-            elif args.agents_cmd == "on":
-                _cmd_agent_toggle(args.agent_name, True)
-            elif args.agents_cmd == "off":
-                _cmd_agent_toggle(args.agent_name, False)
-            return
+    # agents
+    if args.command == "agents":
+        if args.agents_cmd == "list" or args.agents_cmd is None:
+            _cmd_agents_list()
+        elif args.agents_cmd == "on":
+            _cmd_agent_toggle(args.agent_name, True)
+        elif args.agents_cmd == "off":
+            _cmd_agent_toggle(args.agent_name, False)
+        return
 
-        # mode
-        if args.command == "mode":
-            if args.mode_name:
-                _cmd_mode(args.mode_name)
-            else:
-                mode_color = C['cyan'] if cfg.mode == "competitive" else C['magenta']
-                print(f"  Режим: {mode_color}{C['bold']}{cfg.mode}{R}")
-            return
+    # mode
+    if args.command == "mode":
+        if args.mode_name:
+            _cmd_mode(args.mode_name)
+        else:
+            mode_color = C['cyan'] if cfg.mode == "competitive" else C['magenta']
+            print(f"  Режим: {mode_color}{C['bold']}{cfg.mode}{R}")
+        return
 
-        # merge-pending
-        if args.command == "merge-pending":
-            merge_pending_tasks()
-            return
+    # merge-pending
+    if args.command == "merge-pending":
+        merge_pending_tasks()
+        return
 
-        # status
-        if args.command == "status":
-            show_status()
-            return
+    # status
+    if args.command == "status":
+        show_status()
+        return
 
-        # run
-        if args.command == "run":
-            max_tasks = args.max_tasks or cfg.max_parallel_tasks
-            log.info("=" * 60)
-            log.info("ForgeRace запущен")
-            log.info(f"Корень: {cfg.root_dir}")
-            log.info(f"Агенты: {cfg.agent_names}")
-            log.info(f"Макс. задач: {max_tasks}")
-            log.info("=" * 60)
+    # run
+    if args.command != "run":
+        return
 
-            run_pipeline(
-                specific_task=getattr(args, "task", None),
-                dry_run=getattr(args, "dry_run", False),
-                max_tasks=max_tasks,
-                retry=getattr(args, "retry", False),
-                auto=getattr(args, "auto", False),
-            )
-            return
-    except FileNotFoundError as e:
-        if "TASKS.md" in str(e):
-            print(f"  {C['red']}TASKS.md не найден. Запустите {C['bold']}forgerace init{R}")
-            sys.exit(1)
-        raise
+    max_tasks = args.max_tasks or cfg.max_parallel_tasks
+    log.info("=" * 60)
+    log.info("ForgeRace запущен")
+    log.info(f"Корень: {cfg.root_dir}")
+    log.info(f"Агенты: {cfg.agent_names}")
+    log.info(f"Макс. задач: {max_tasks}")
+    log.info("=" * 60)
+
+    run_pipeline(
+        specific_task=getattr(args, "task", None),
+        dry_run=getattr(args, "dry_run", False),
+        max_tasks=max_tasks,
+        retry=getattr(args, "retry", False),
+        auto=getattr(args, "auto", False),
+    )
 
     # os._exit(0) вызывается внутри run_pipeline
 

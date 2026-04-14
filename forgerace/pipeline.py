@@ -955,10 +955,6 @@ def run_pipeline(
     auto: bool = False,
 ):
     """Основной цикл оркестратора."""
-    if not cfg.agent_names:
-        log.error("Нет активных агентов. Включите хотя бы одного в forgerace.toml")
-        return
-
     if max_tasks is None:
         max_tasks = cfg.max_parallel_tasks
 
@@ -1095,11 +1091,17 @@ def run_pipeline(
             log.info(f"[DRY RUN] {t.id} ({t.name})")
         return
 
-    # Декомпозиция — параллельно для всех задач
+    # Декомпозиция — каждый агент оценивает свои задачи (round-robin по агентам)
+    # Квота детектится здесь: если агент не ответил — он disabled
     final_ready = []
     decomposed = False
+    agent_list = list(cfg.agent_names)
     with ThreadPoolExecutor(max_workers=len(approved)) as pool:
-        futures = {pool.submit(assess_and_maybe_decompose, t): t for t in approved}
+        futures = {}
+        for i, t in enumerate(approved):
+            agent = agent_list[i % len(agent_list)] if agent_list else ""
+            f = pool.submit(assess_and_maybe_decompose, t, agent)
+            futures[f] = t
         for f in as_completed(futures):
             t = futures[f]
             if f.result():

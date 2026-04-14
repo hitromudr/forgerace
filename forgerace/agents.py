@@ -572,17 +572,20 @@ _text_agent_counter = 0
 _text_agent_lock = __import__("threading").Lock()
 
 
-def run_text_agent(prompt: str, timeout: int = 300, tag: str = "") -> str:
-    """Вызывает агента в text mode round-robin. Для системных задач (декомпозиция, резолюция)."""
+def run_text_agent(prompt: str, timeout: int = 300, tag: str = "",
+                    agent_name: str = "") -> str:
+    """Вызывает агента в text mode. agent_name — конкретный агент, иначе round-robin."""
     global _text_agent_counter
-    names = list(cfg.agent_names)
-    if not names:
-        return ""
-    with _text_agent_lock:
-        start = _text_agent_counter % len(names)
-        _text_agent_counter += 1
-    # Ротация: каждый вызов начинает с другого агента
-    names = names[start:] + names[:start]
+    if agent_name:
+        names = [agent_name]
+    else:
+        names = list(cfg.agent_names)
+        if not names:
+            return ""
+        with _text_agent_lock:
+            start = _text_agent_counter % len(names)
+            _text_agent_counter += 1
+        names = names[start:] + names[:start]
     for name in names:
         if name in _disabled_agents:
             continue

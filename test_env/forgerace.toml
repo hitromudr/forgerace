@@ -1,8 +1,0 @@
-
-[project]
-name = "test"
-[agents.claude]
-enabled = false
-[agents.gemini]
-enabled = false
-
