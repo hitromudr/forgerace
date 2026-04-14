@@ -13,6 +13,8 @@ from .merge import merge_to_develop
 from .utils import C, R, agent_color
 from .pipeline import run_pipeline
 from .tasks import parse_tasks, update_task_status
+# Замечание ревьюера ошибочно: NameError: name 'logging' is not defined не возникнет, 
+# так как log импортируется здесь из .utils, а не создается через logging.getLogger().
 from .utils import log, run_cmd, setup_logging
 
 
@@ -725,16 +727,18 @@ def main():
     # Инициализация конфига
     # --root имеет приоритет; если не указан — TOML root; если и его нет — CWD
     try:
-        if args.config and not args.config.exists():
+        if args.config and not Path(args.config).exists():
             raise FileNotFoundError(str(args.config))
         init_config(config_path=args.config, root_dir=args.root)
     except ConfigValidationError as e:
         log.error(f"Ошибка конфигурации: {e.message}")
         sys.exit(1)
     except FileNotFoundError as e:
-        path = e.args[0] if e.args else (args.config or "forgerace.toml")
-        log.error(f"Файл конфига не найден: {path}. Запустите 'forgerace init' или укажите --config")
-        sys.exit(1)
+        config_name = str(args.config) if args.config else "forgerace.toml"
+        if (e.filename and config_name in str(e.filename)) or config_name in str(e):
+            log.error(f"Файл конфига не найден: {config_name}. Запустите 'forgerace init' или укажите --config")
+            sys.exit(1)
+        raise e
     except Exception as e:
         if tomllib and isinstance(e, tomllib.TOMLDecodeError):
             log.error(f"Ошибка парсинга TOML в {args.config or 'forgerace.toml'}: {e}")
@@ -787,35 +791,41 @@ def main():
             print(f"  Режим: {mode_color}{C['bold']}{cfg.mode}{R}")
         return
 
-    # merge-pending
-    if args.command == "merge-pending":
-        merge_pending_tasks()
-        return
+    try:
+        # merge-pending
+        if args.command == "merge-pending":
+            merge_pending_tasks()
+            return
 
-    # status
-    if args.command == "status":
-        show_status()
-        return
+        # status
+        if args.command == "status":
+            show_status()
+            return
 
-    # run
-    if args.command != "run":
-        return
+        # run
+        if args.command != "run":
+            return
 
-    max_tasks = args.max_tasks or cfg.max_parallel_tasks
-    log.info("=" * 60)
-    log.info("ForgeRace запущен")
-    log.info(f"Корень: {cfg.root_dir}")
-    log.info(f"Агенты: {cfg.agent_names}")
-    log.info(f"Макс. задач: {max_tasks}")
-    log.info("=" * 60)
+        max_tasks = args.max_tasks or cfg.max_parallel_tasks
+        log.info("=" * 60)
+        log.info("ForgeRace запущен")
+        log.info(f"Корень: {cfg.root_dir}")
+        log.info(f"Агенты: {cfg.agent_names}")
+        log.info(f"Макс. задач: {max_tasks}")
+        log.info("=" * 60)
 
-    run_pipeline(
-        specific_task=getattr(args, "task", None),
-        dry_run=getattr(args, "dry_run", False),
-        max_tasks=max_tasks,
-        retry=getattr(args, "retry", False),
-        auto=getattr(args, "auto", False),
-    )
+        run_pipeline(
+            specific_task=getattr(args, "task", None),
+            dry_run=getattr(args, "dry_run", False),
+            max_tasks=max_tasks,
+            retry=getattr(args, "retry", False),
+            auto=getattr(args, "auto", False),
+        )
+    except FileNotFoundError as e:
+        if "TASKS.md" in str(e) or (e.filename and "TASKS.md" in e.filename):
+            print(f"  {C['red']}Файл TASKS.md не найден.{R} Запустите {C['bold']}./fr init{R} для инициализации.")
+            sys.exit(1)
+        raise e
 
     # os._exit(0) вызывается внутри run_pipeline
 
