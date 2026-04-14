@@ -1,12 +1,19 @@
 """Модель задачи, парсер TASKS.md, обновление статусов."""
 
 import json
+import os
 import re
+import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 from .config import cfg
 from .utils import log, run_cmd, slugify, is_valid_path
+
+# Global lock for all TASKS.md write operations (read-modify-write).
+# Prevents race conditions when multiple threads update the file concurrently.
+_tasks_file_lock = threading.Lock()
 
 
 # --- Модель задачи ---
@@ -77,53 +84,74 @@ def _parse_deps(deps_str: str) -> list[str]:
     return [d.strip() for d in re.findall(r"TASK-\d+", deps_str)]
 
 
+# --- Atomic write helper ---
+
+def _atomic_write(path: Path, content: str):
+    """Write content to path atomically via tempfile + os.rename."""
+    dir_path = path.parent
+    fd, tmp_path = tempfile.mkstemp(dir=str(dir_path), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.rename(tmp_path, str(path))
+    except BaseException:
+        # Clean up temp file on any failure
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 # --- Обновление статусов ---
 
 def update_task_status(task_id: str, new_status: str, agent: str = "", branch: str = ""):
     """Обновляет статус задачи в TASKS.md (в основном репозитории)."""
-    tasks_file = cfg.tasks_file
-    lines = tasks_file.read_text(encoding="utf-8").splitlines()
-    in_task = False
-    result = []
+    with _tasks_file_lock:
+        tasks_file = cfg.tasks_file
+        lines = tasks_file.read_text(encoding="utf-8").splitlines()
+        in_task = False
+        result = []
 
-    for line in lines:
-        if line.startswith(f"### {task_id}:"):
-            in_task = True
-        elif line.startswith("### TASK-"):
-            in_task = False
+        for line in lines:
+            if line.startswith(f"### {task_id}:"):
+                in_task = True
+            elif line.startswith("### TASK-"):
+                in_task = False
 
-        if in_task:
-            if line.startswith("- **Статус**:"):
-                line = f"- **Статус**: {new_status}"
-            elif agent and line.startswith("- **Агент**:"):
-                line = f"- **Агент**: {agent}"
-            elif branch and line.startswith("- **Ветка**:"):
-                line = f"- **Ветка**: {branch}"
+            if in_task:
+                if line.startswith("- **Статус**:"):
+                    line = f"- **Статус**: {new_status}"
+                elif agent and line.startswith("- **Агент**:"):
+                    line = f"- **Агент**: {agent}"
+                elif branch and line.startswith("- **Ветка**:"):
+                    line = f"- **Ветка**: {branch}"
 
-        result.append(line)
+            result.append(line)
 
-    tasks_file.write_text("\n".join(result) + "\n", encoding="utf-8")
+        _atomic_write(tasks_file, "\n".join(result) + "\n")
 
 
 def link_task_discussion(task_id: str, topic: str):
     """Прописывает дискуссию в TASKS.md для задачи."""
-    tasks_file = cfg.tasks_file
-    lines = tasks_file.read_text(encoding="utf-8").splitlines()
-    in_task = False
-    result = []
+    with _tasks_file_lock:
+        tasks_file = cfg.tasks_file
+        lines = tasks_file.read_text(encoding="utf-8").splitlines()
+        in_task = False
+        result = []
 
-    for line in lines:
-        if line.startswith(f"### {task_id}:"):
-            in_task = True
-        elif line.startswith("### TASK-"):
-            in_task = False
+        for line in lines:
+            if line.startswith(f"### {task_id}:"):
+                in_task = True
+            elif line.startswith("### TASK-"):
+                in_task = False
 
-        if in_task and line.startswith("- **Дискуссия**:"):
-            line = f"- **Дискуссия**: {topic}"
+            if in_task and line.startswith("- **Дискуссия**:"):
+                line = f"- **Дискуссия**: {topic}"
 
-        result.append(line)
+            result.append(line)
 
-    tasks_file.write_text("\n".join(result) + "\n", encoding="utf-8")
+        _atomic_write(tasks_file, "\n".join(result) + "\n")
 
 
 # --- Топик дискуссии ---

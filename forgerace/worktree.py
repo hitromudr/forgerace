@@ -7,6 +7,23 @@ from pathlib import Path
 from .config import cfg
 from .utils import log, run_cmd
 
+
+def _rmtree_onerror(func, path, exc_info):
+    """Log rmtree failures instead of silently ignoring them (Python <3.12)."""
+    log.warning("rmtree failed: %s(%s): %s", func.__name__, path, exc_info[1])
+
+
+def _rmtree_onexc(func, path, exc):
+    """Log rmtree failures instead of silently ignoring them (Python 3.12+)."""
+    log.warning("rmtree failed: %s(%s): %s", func.__name__, path, exc)
+
+
+import sys as _sys
+_rmtree_kwargs = (
+    {"onexc": _rmtree_onexc} if _sys.version_info >= (3, 12)
+    else {"onerror": _rmtree_onerror}
+)
+
 _worktree_lock = threading.Lock()
 
 
@@ -27,7 +44,7 @@ def _create_worktree_impl(agent_num: int, branch: str) -> Path:
                 cwd=cfg.root_dir, check=False)
         # Если git worktree remove не справился — удаляем руками
         if agent_dir.exists():
-            shutil.rmtree(agent_dir, ignore_errors=True)
+            shutil.rmtree(agent_dir, **_rmtree_kwargs)
 
     # Чистим worktree list от мёртвых записей
     run_cmd(["git", "worktree", "prune"], cwd=cfg.root_dir, check=False)
@@ -64,7 +81,7 @@ def remove_worktree(agent_num: int):
                 cwd=cfg.root_dir, check=False)
         # Fallback: если git не справился
         if agent_dir.exists():
-            shutil.rmtree(agent_dir, ignore_errors=True)
+            shutil.rmtree(agent_dir, **_rmtree_kwargs)
         log.info(f"Worktree удалён: {agent_dir}")
     # Чистим мёртвые записи
     run_cmd(["git", "worktree", "prune"], cwd=cfg.root_dir, check=False)
@@ -76,5 +93,5 @@ def cleanup_worktrees(results: list) -> None:
         try:
             agent_num = int(r.workdir.name.split("-")[-1])
             remove_worktree(agent_num)
-        except (ValueError, AttributeError):
-            pass
+        except (ValueError, AttributeError) as exc:
+            log.warning("cleanup_worktrees: skipping result %r: %s", r, exc)

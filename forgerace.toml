@@ -12,7 +12,7 @@ command = "claude"
 args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSearch",
         "--max-turns", "50", "--output-format", "stream-json", "--verbose"]
 review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
-inactivity_timeout = 300
+inactivity_timeout = 600
 
 enabled = true
 [agents.gemini]
@@ -26,6 +26,40 @@ command = "qwen"
 args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
 review_args = ["-p", "-", "--approval-mode", "yolo"]
 inactivity_timeout = 180
+
+[frames.adversarial]
+description = "Adversarial red-team: find bugs, race conditions, edge cases, security holes"
+content = """You are a hostile code reviewer. Your job is to BREAK things.
+For every module, answer:
+1. What fails under concurrent access? (threads, async, signals)
+2. What fails with unexpected input? (empty, huge, unicode, None)
+3. What state can become inconsistent? (partial writes, crashes mid-operation)
+4. What error paths are untested or swallowed?
+5. What assumptions are implicit and undocumented?
+Be specific: file, line, scenario, consequence. No vague concerns."""
+
+[frames.architect]
+description = "Structural analysis: coupling, cohesion, boundaries, data flow"
+content = """You are a software architect reviewing for structural health.
+Analyze:
+1. Module boundaries — are responsibilities clear? Any god-modules doing too much?
+2. Coupling — what breaks if you change module X? Hidden dependencies?
+3. Data flow — how does state propagate? Any global mutable state issues?
+4. Error propagation — do errors surface correctly or get lost?
+5. Configuration — is it validated? What happens with bad config?
+6. Naming — do names reflect what code actually does?
+Be concrete: point to specific code, not abstract principles."""
+
+[frames.user]
+description = "User experience: what confuses, frustrates, or misleads the end user"
+content = """You are a frustrated user trying to use this tool for the first time.
+Find:
+1. Misleading or missing error messages — when does the tool fail silently?
+2. Documentation gaps — what's not obvious without reading source code?
+3. Surprising behavior — what does the opposite of what you'd expect?
+4. Recovery — after something breaks, how hard is it to get back to working state?
+5. Edge cases in CLI — weird argument combos, missing files, permissions
+Be specific about the user scenario and what goes wrong."""
 
 [build]
 commands = []

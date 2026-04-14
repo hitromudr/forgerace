@@ -4,7 +4,7 @@ import re
 import subprocess
 
 from .config import cfg, run_hint
-from .tasks import Task, parse_tasks, task_paths
+from .tasks import Task, parse_tasks, task_paths, _tasks_file_lock, _atomic_write
 from .utils import log, is_valid_path
 
 # Кэш: задачи, которые уже оценивались и не требуют декомпозиции
@@ -156,15 +156,16 @@ COMPLEXITY: N
     insert_tasks_into_tasksmd(tasks_block, task.id)
     if new_task_ids:
         last_subtask = new_task_ids[-1]
-        content = cfg.tasks_file.read_text(encoding="utf-8")
-        lines = content.splitlines()
-        for i, line in enumerate(lines):
-            if "**Зависимости**" in line and task.id in line:
-                if i > 0 and any(tid in lines[i - 1] for tid in new_task_ids):
-                    continue
-                lines[i] = line.replace(task.id, last_subtask)
-                log.info(f"  🔗 Обновлена зависимость: {task.id} → {last_subtask} в строке {i + 1}")
-        cfg.tasks_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with _tasks_file_lock:
+            content = cfg.tasks_file.read_text(encoding="utf-8")
+            lines = content.splitlines()
+            for i, line in enumerate(lines):
+                if "**Зависимости**" in line and task.id in line:
+                    if i > 0 and any(tid in lines[i - 1] for tid in new_task_ids):
+                        continue
+                    lines[i] = line.replace(task.id, last_subtask)
+                    log.info(f"  🔗 Обновлена зависимость: {task.id} → {last_subtask} в строке {i + 1}")
+            _atomic_write(cfg.tasks_file, "\n".join(lines) + "\n")
 
     # Валидируем зависимости подзадач
     all_tasks = parse_tasks()
@@ -200,19 +201,20 @@ COMPLEXITY: N
 
 def insert_tasks_into_tasksmd(tasks_block: str, linked_task_id: str):
     """Вставляет сгенерированные задачи в TASKS.md."""
-    content = cfg.tasks_file.read_text(encoding="utf-8")
+    with _tasks_file_lock:
+        content = cfg.tasks_file.read_text(encoding="utf-8")
 
-    if linked_task_id:
-        pattern = rf"(### {re.escape(linked_task_id)}: .+?)(?=\n### TASK-|\n---|\Z)"
-        m = re.search(pattern, content, re.DOTALL)
-        if m:
-            content = content[:m.start()] + tasks_block.rstrip() + "\n" + content[m.end():]
+        if linked_task_id:
+            pattern = rf"(### {re.escape(linked_task_id)}: .+?)(?=\n### TASK-|\n---|\Z)"
+            m = re.search(pattern, content, re.DOTALL)
+            if m:
+                content = content[:m.start()] + tasks_block.rstrip() + "\n" + content[m.end():]
+            else:
+                content = _append_before_footer(content, tasks_block)
         else:
             content = _append_before_footer(content, tasks_block)
-    else:
-        content = _append_before_footer(content, tasks_block)
 
-    cfg.tasks_file.write_text(content, encoding="utf-8")
+        _atomic_write(cfg.tasks_file, content)
 
 
 def _append_before_footer(content: str, tasks_block: str) -> str:

@@ -467,7 +467,7 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     elif reviewer_type == "qwen":
         cmd = [acfg.command, "-p", "-", "--output-format", "text", "--approval-mode", "yolo"]
     elif reviewer_type == "gemini":
-        cmd = [acfg.command, "-p", "--output-format", "text"]
+        cmd = [acfg.command, "-p", "", "--output-format", "text"]
     elif reviewer_type == "codex":
         cmd = [acfg.command, "exec", "--full-auto"]
     else:
@@ -475,9 +475,10 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
         for arg in acfg.review_args:
             if arg != "{prompt}":
                 cmd.append(arg)
+    timeout = acfg.inactivity_timeout or 300
     result = subprocess.run(
         cmd, cwd=cfg.root_dir, input=prompt,
-        capture_output=True, text=True, timeout=300,
+        capture_output=True, text=True, timeout=timeout,
     )
     return (result.stdout or "").strip()
 
