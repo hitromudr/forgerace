@@ -1137,8 +1137,8 @@ def run_pipeline(
     log.info(f"Утверждены и готовы: {[t.id for t in ready]}")
 
     batch = ready[:max_tasks]
-    from .agents import is_agent_disabled
-    agent_names = [n for n in cfg.agent_names if not is_agent_disabled(n)]
+    from .agents import is_agent_disabled, preflight_check_agents
+    agent_names = preflight_check_agents()
     if not agent_names:
         log.error("Нет доступных агентов (все отключены по квоте/авторизации)")
         return

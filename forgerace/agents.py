@@ -479,6 +479,51 @@ def is_agent_disabled(name: str) -> bool:
     return name in _disabled_agents
 
 
+def check_agent_quota(name: str) -> bool:
+    """Quick health check: send a tiny prompt, return True if agent responds."""
+    acfg = cfg.agents.get(name)
+    if acfg is None:
+        return False
+    if name == "claude":
+        cmd = [acfg.command, "-p", "-", "--output-format", "text", "--max-turns", "1"]
+    elif name == "gemini":
+        cmd = [acfg.command, "-p", "", "--output-format", "text"]
+    elif name == "qwen":
+        cmd = [acfg.command, "-p", "-", "--output-format", "text", "--approval-mode", "yolo"]
+    else:
+        cmd = [acfg.command, "-p", "hi"]
+    try:
+        result = subprocess.run(
+            cmd, input="Reply with exactly: OK", cwd=cfg.root_dir,
+            capture_output=True, text=True, timeout=30,
+        )
+        stderr_lower = (result.stderr or "").lower()
+        if any(kw in stderr_lower for kw in _QUOTA_KEYWORDS):
+            _disabled_agents.add(name)
+            log.error("check_agent_quota(%s): квота исчерпана — отключён", name)
+            return False
+        if result.returncode != 0:
+            log.warning("check_agent_quota(%s): exit code %d", name, result.returncode)
+            return False
+        return True
+    except subprocess.TimeoutExpired:
+        log.warning("check_agent_quota(%s): таймаут 30с", name)
+        return True  # timeout != quota, agent might be slow
+
+
+def preflight_check_agents() -> list[str]:
+    """Check all enabled agents for quota before task execution. Returns available agent names."""
+    available = []
+    for name in cfg.agent_names:
+        log.info(f"  🔍 Проверка квоты: {name}...")
+        if check_agent_quota(name):
+            available.append(name)
+            log.info(f"  ✓ {name} — доступен")
+        else:
+            log.warning(f"  ✗ {name} — недоступен (квота/ошибка)")
+    return available
+
+
 def run_reviewer(reviewer_type: str, prompt: str) -> str:
     """Вызывает агента в текстовом режиме для ревью."""
     if reviewer_type in _disabled_agents:
