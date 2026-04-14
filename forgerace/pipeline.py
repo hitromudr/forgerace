@@ -114,9 +114,8 @@ def check_already_done(task: Task) -> bool:
     return False
 
 
-def verify_build(workdir: Path, task: Task | None = None,
-                  base_sha: str | None = None) -> tuple[bool, str]:
-    """Проверяет сборку в worktree. base_sha — фиксированный SHA от которого создана ветка."""
+def verify_build(workdir: Path, task: Task | None = None) -> tuple[bool, str]:
+    """Проверяет сборку в worktree."""
     if task and task.files_new and task.files_new.strip() != "—":
         missing = []
         for f in task.files_new.split(","):
@@ -126,8 +125,7 @@ def verify_build(workdir: Path, task: Task | None = None,
         if missing:
             return False, f"Файлы задачи не созданы: {', '.join(missing)}"
 
-    diff_ref = base_sha or cfg.dev_branch
-    diff = run_cmd(["git", "diff", "--stat", diff_ref], cwd=workdir, check=False)
+    diff = run_cmd(["git", "diff", "--stat", cfg.dev_branch], cwd=workdir, check=False)
     has_changes = bool((diff.stdout or "").strip())
     status = run_cmd(["git", "status", "--porcelain"], cwd=workdir, check=False)
     has_new_files = bool((status.stdout or "").strip())
@@ -240,10 +238,6 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
         return AgentResult(agent_type=agent_type, branch=branch,
                            workdir=cfg.agents_dir / f"agent-{agent_num}", success=False)
 
-    # Fix base SHA before any merges move dev_branch pointer
-    base_sha_result = run_cmd(["git", "rev-parse", "HEAD"], cwd=workdir, check=False)
-    base_sha = (base_sha_result.stdout or "").strip()
-
     tag = f"{task.id}/{agent_type}"
     log.info(f"  ▶ [{tag}] agent-{agent_num}")
     _register_agent(tag, task.id, workdir)
@@ -298,7 +292,7 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
         if is_design:
             ok, error_log = verify_design_task(workdir, task)
         else:
-            ok, error_log = verify_build(workdir, task, base_sha=base_sha)
+            ok, error_log = verify_build(workdir, task)
 
         if not ok and "не внёс никаких изменений" in error_log:
             stdout_tail = (result.stdout or "")[-500:].strip()

@@ -12,8 +12,8 @@
 - **Описание**: Обновить `REVIEW_SCHEMA` (добавить `is_terminal`, `confidence_range`). Реализовать функцию `validate_review(data: dict) -> tuple[bool, str]`. Функция должна приводить `confidence` к `int` (принимая `float` или `int`), переименовать `NEEDS_WORK` в `NEEDS_REWORK` (с сохранением алиаса `NEEDS_WORK` для обратной совместимости). Добавить парсинг списка `issues` из строк формата `[severity] текст` в нормализованный `list[dict]`.
 - **Критерий готовности**: Функция `validate_review` написана, корректно обрабатывает входные данные, отклоняет неверный `confidence`, несовместимые статусы (APPROVED с критическими ошибками, REJECTED без ошибок). Схема `REVIEW_SCHEMA` обновлена.
 - **Дискуссия**: 2-validatsiya-revyu-s-biznes-pravilami
-- **Агент**: claude
-- **Ветка**: task/task-042-realizatsiya-funktsii-validatsii-i-obnov-claude
+- **Агент**: gemini
+- **Ветка**: task/task-042-realizatsiya-funktsii-validatsii-i-obnov-gemini
 
 ### TASK-043: Покрытие логики ревью unit-тестами
 - **Статус**: open
@@ -180,8 +180,8 @@
 - **Описание**: Создать `tasks_md_lock = threading.Lock()` на уровне модуля `pipeline.py`. Реализовать функцию `safe_update_task_status(*args, **kwargs)`, которая вызывает оригинальный `update_task_status` строго внутри блока `with tasks_md_lock:`. Использование функции-обертки позволит избежать массового изменения отступов в 30+ местах (что было причиной предыдущих провалов).
 - **Критерий готовности**: В файле объявлен лок и присутствует функция `safe_update_task_status`, синтаксис файла корректен.
 - **Дискуссия**: 15-integratsiya-taskqueue-v-pipelinepy
-- **Агент**: claude
-- **Ветка**: task/task-045-sozdanie-blokirovki-i-bezopasnoj-obertki-claude
+- **Агент**: gemini
+- **Ветка**: task/task-045-sozdanie-blokirovki-i-bezopasnoj-obertki-gemini
 
 ### TASK-046: Перевод обновлений TASKS.md на потокобезопасную функцию
 - **Статус**: open
@@ -438,8 +438,8 @@
 - **Проверка**: ruff check forgerace/config.py && python -c "from forgerace.config import Config, validate_agent_commands; c = Config(); c.agents['test'] = type('A',(),{'command':'nonexistent_binary_xyz','enabled':True,'args':[],'review_args':[],'inactivity_timeout':300,'protocol':'cli','cognitive_frame':''})(); validate_agent_commands(c)" 2>&1 | grep -qi warning && echo "PASS"
 - **Критерий готовности**: команды агентов с аргументами (например "claude-cli --model sonnet") корректно проверяются по бинарнику; отсутствующие команды дают warning, пустые — ConfigValidationError
 - **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
-- **Агент**: claude
-- **Ветка**: task/task-038-validatsiya-komand-agentov-cherez-shlex--claude
+- **Агент**: gemini
+- **Ветка**: task/task-038-validatsiya-komand-agentov-cherez-shlex--gemini
 
 ### TASK-039: Валидация root_dir — существование директории
 - **Статус**: done
@@ -458,7 +458,7 @@
 - **Ветка**: task/task-039-validatsiya-root-dir-sushchestvovanie-di-gemini
 
 ### TASK-040: Перехват ошибок загрузки конфига в cli.py
-- **Статус**: in_progress:both
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: TASK-036
@@ -470,8 +470,8 @@
 - **Проверка**: ruff check forgerace/cli.py && python -c "from forgerace.cli import main; import sys; sys.argv = ['forgerace', '--config', '/nonexistent.toml', 'run']; main()" 2>&1 | grep -qi "не найден\|init" && echo "PASS"
 - **Критерий готовности**: отсутствующий файл конфига — понятное сообщение с подсказкой про init; кривой TOML — сообщение с файлом и позицией ошибки; ошибка валидации — конкретное сообщение о проблемном поле
 - **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-040-perehvat-oshibok-zagruzki-konfiga-v-clip-gemini
 
 ### TASK-041: Юнит-тесты валидации конфига
 - **Статус**: open
@@ -513,7 +513,7 @@
 - **Ветка**: task/task-022-mergepy-ubrat-checkout-v-osnovnoj-repo-qwen
 
 ### TASK-023: Явная ошибка при пустом списке агентов/задач
-- **Статус**: in_progress:both
+- **Статус**: done
 - **Приоритет**: P2
 - **Зависимости**: —
 - **Файлы (новые)**: —
@@ -521,11 +521,11 @@
 - **Описание**: Сейчас при отсутствии агентов или задач pipeline молча завершается пустым прогоном. Fix: 1) в начале run_pipeline проверить cfg.agent_names — если пуст, log.error("Нет активных агентов. Включите хотя бы одного в forgerace.toml") и return, 2) FileNotFoundError на TASKS.md — перехватить в cli.py, вывести "TASKS.md не найден. Запустите forgerace init", 3) TOMLDecodeError — перехватить, вывести файл и ошибку.
 - **Критерий готовности**: пустой agents → понятное сообщение, нет TASKS.md → подсказка про init, кривой TOML → файл + ошибка
 - **Дискуссия**: —
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-023-yavnaya-oshibka-pri-pustom-spiske-agento-gemini
 
 ### TASK-024: verify_build — фиксировать base SHA до начала задачи
-- **Статус**: in_progress:both
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Зависимости**: —
 - **Файлы (новые)**: —

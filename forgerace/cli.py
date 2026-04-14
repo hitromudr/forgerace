@@ -1,20 +1,18 @@
 """CLI точка входа: argparse, команды run/discuss/status/merge-pending."""
 
 import argparse
+import logging
 import os
 import signal
 import sys
 from pathlib import Path
 
-from .config import cfg, init_config, run_hint, tomllib
-from .config_errors import ConfigValidationError
+from .config import cfg, init_config, run_hint
 from .discuss import discuss_chat, discuss_create, discuss_list, discuss_reply, discuss_show
 from .merge import merge_to_develop
 from .utils import C, R, agent_color
 from .pipeline import run_pipeline
 from .tasks import parse_tasks, update_task_status
-# Замечание ревьюера ошибочно: NameError: name 'logging' is not defined не возникнет, 
-# так как log импортируется здесь из .utils, а не создается через logging.getLogger().
 from .utils import log, run_cmd, setup_logging
 
 
@@ -172,7 +170,7 @@ def _generate_brief(cwd: Path, brief_path: Path):
         if files:
             # Ограничиваем до 100 файлов
             file_list = files.split("\n")[:100]
-            context_parts.append("## Структура файлов\n" + "\n".join(file_list))
+            context_parts.append(f"## Структура файлов\n" + "\n".join(file_list))
     except Exception:
         pass
 
@@ -403,6 +401,7 @@ def show_status():
             ready_marker = f" {C['green']}◀ ready{R}" if tid in ready_ids and s == "open" else ""
             print(f"{prefix}{color}{icon}{R} {C['bold']}{tid}{R}: {t.name}{ready_marker}")
             for child in unlocks.get(tid, []):
+                connector = "  " + "│ " * indent + "├─"
                 # Не печатаем connector отдельно — он часть дочернего вызова
                 _print_tree(child, indent + 1)
 
@@ -500,9 +499,9 @@ def _cmd_mode(mode_name: str):
     mode_color = C['cyan'] if mode_name == "competitive" else C['magenta']
     print(f"  Режим: {mode_color}{C['bold']}{mode_name}{R}")
     if mode_name == "competitive":
-        print("  Все агенты на каждую задачу, race-to-merge")
+        print(f"  Все агенты на каждую задачу, race-to-merge")
     else:
-        print("  Задачи распределяются по агентам round-robin")
+        print(f"  Задачи распределяются по агентам round-robin")
 
 
 def _cmd_agent_toggle(agent_name: str, enable: bool):
@@ -524,7 +523,7 @@ def _cmd_agent_toggle(agent_name: str, enable: bool):
 
     # Ищем enabled в секции агента или добавляем
     lines = content.splitlines()
-    section_idx = next(i for i, line in enumerate(lines) if line.strip() == section)
+    section_idx = next(i for i, l in enumerate(lines) if l.strip() == section)
 
     # Найдём конец секции (следующая [секция] или EOF)
     end_idx = len(lines)
@@ -726,25 +725,7 @@ def main():
 
     # Инициализация конфига
     # --root имеет приоритет; если не указан — TOML root; если и его нет — CWD
-    try:
-        if args.config and not Path(args.config).exists():
-            raise FileNotFoundError(str(args.config))
-        init_config(config_path=args.config, root_dir=args.root)
-    except ConfigValidationError as e:
-        log.error(f"Ошибка конфигурации: {e.message}")
-        sys.exit(1)
-    except FileNotFoundError as e:
-        config_name = str(args.config) if args.config else "forgerace.toml"
-        if (e.filename and config_name in str(e.filename)) or config_name in str(e):
-            log.error(f"Файл конфига не найден: {config_name}. Запустите 'forgerace init' или укажите --config")
-            sys.exit(1)
-        raise e
-    except Exception as e:
-        if tomllib and isinstance(e, tomllib.TOMLDecodeError):
-            log.error(f"Ошибка парсинга TOML в {args.config or 'forgerace.toml'}: {e}")
-            sys.exit(1)
-        raise e
-
+    init_config(config_path=args.config, root_dir=args.root)
     setup_logging(verbose=args.verbose)
 
     # Дискуссии
@@ -791,41 +772,35 @@ def main():
             print(f"  Режим: {mode_color}{C['bold']}{cfg.mode}{R}")
         return
 
-    try:
-        # merge-pending
-        if args.command == "merge-pending":
-            merge_pending_tasks()
-            return
+    # merge-pending
+    if args.command == "merge-pending":
+        merge_pending_tasks()
+        return
 
-        # status
-        if args.command == "status":
-            show_status()
-            return
+    # status
+    if args.command == "status":
+        show_status()
+        return
 
-        # run
-        if args.command != "run":
-            return
+    # run
+    if args.command != "run":
+        return
 
-        max_tasks = args.max_tasks or cfg.max_parallel_tasks
-        log.info("=" * 60)
-        log.info("ForgeRace запущен")
-        log.info(f"Корень: {cfg.root_dir}")
-        log.info(f"Агенты: {cfg.agent_names}")
-        log.info(f"Макс. задач: {max_tasks}")
-        log.info("=" * 60)
+    max_tasks = args.max_tasks or cfg.max_parallel_tasks
+    log.info("=" * 60)
+    log.info("ForgeRace запущен")
+    log.info(f"Корень: {cfg.root_dir}")
+    log.info(f"Агенты: {cfg.agent_names}")
+    log.info(f"Макс. задач: {max_tasks}")
+    log.info("=" * 60)
 
-        run_pipeline(
-            specific_task=getattr(args, "task", None),
-            dry_run=getattr(args, "dry_run", False),
-            max_tasks=max_tasks,
-            retry=getattr(args, "retry", False),
-            auto=getattr(args, "auto", False),
-        )
-    except FileNotFoundError as e:
-        if "TASKS.md" in str(e) or (e.filename and "TASKS.md" in e.filename):
-            print(f"  {C['red']}Файл TASKS.md не найден.{R} Запустите {C['bold']}./fr init{R} для инициализации.")
-            sys.exit(1)
-        raise e
+    run_pipeline(
+        specific_task=getattr(args, "task", None),
+        dry_run=getattr(args, "dry_run", False),
+        max_tasks=max_tasks,
+        retry=getattr(args, "retry", False),
+        auto=getattr(args, "auto", False),
+    )
 
     # os._exit(0) вызывается внутри run_pipeline
 
