@@ -236,14 +236,28 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
 
     # Round-robin: каждый автор ревьюится ОДНИМ другим агентом (не N²)
     # Disabled agents (quota/auth) are excluded; fallback to self-review with frame
+    # If all agents disabled — auto-approve (no review possible)
+    available = [n for n in all_agent_names if not is_agent_disabled(n)]
+    if not available:
+        log.warning("    ⚠ Все агенты отключены (квота) — auto-approve без ревью")
+        best = author_names[0]
+        return {
+            "full_text": "(auto-approved: все ревьюеры отключены по квоте)",
+            "reviewer": "auto",
+            "best": best,
+            "verdict": "APPROVED",
+            "comments": "",
+            "reason": "auto-approve: нет доступных ревьюеров",
+            "reviews": {},
+        }
+
     review_pairs = []
     for i, author in enumerate(author_names):
-        others = [n for n in all_agent_names
-                  if n != author and not is_agent_disabled(n)]
+        others = [n for n in available if n != author]
         if others:
             reviewer = others[i % len(others)]
         elif cfg.review_frame and cfg.review_frame in cfg.frames:
-            # Self-review with cognitive frame (all other agents disabled or single agent)
+            # Self-review with cognitive frame (single available agent)
             reviewer = f"{author}+{cfg.review_frame}"
             log.info(f"    Fallback: {author} ревьюит себя через +{cfg.review_frame}")
         else:
