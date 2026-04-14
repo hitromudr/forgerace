@@ -470,7 +470,7 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
         )
 
 
-_QUOTA_KEYWORDS = ("quota exceeded", "rate limit", "unauthorized", "api key", "401", "429")
+_QUOTA_KEYWORDS = ("quota exceeded", "rate limit", "api key", "429")
 _disabled_agents: set[str] = set()  # agents disabled at runtime (quota, auth errors)
 
 
@@ -510,9 +510,9 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     if result.returncode != 0:
         log.warning("run_reviewer(%s) exit code %d: %s",
                      reviewer_type, result.returncode, (result.stderr or "")[:500])
-    # Detect quota/auth errors and disable agent
-    combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-    if any(kw in combined for kw in _QUOTA_KEYWORDS):
+    # Detect quota/auth errors in stderr only (stdout may contain code with these words)
+    stderr_lower = (result.stderr or "").lower()
+    if any(kw in stderr_lower for kw in _QUOTA_KEYWORDS):
         _disabled_agents.add(reviewer_type)
         log.error("run_reviewer(%s) quota/auth error — agent disabled for this run",
                    reviewer_type)

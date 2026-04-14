@@ -263,15 +263,15 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
 
         if result.returncode != 0:
             stderr = result.stderr or result.stdout or "Агент упал без вывода"
-            combined = f"{result.stdout or ''}\n{stderr}".lower()
             log.warning(f"[{tag}] Агент завершился с ошибкой (код {result.returncode})")
             # NO_EDIT_ABORT / CANCELLED — не ретраим, агент зацикливается
             if stderr in ("NO_EDIT_ABORT", "CANCELLED", "PROGRESS_TIMEOUT"):
                 log.error(f"[{tag}] ✗ {stderr} — прекращаю попытки")
                 break
-            # Quota/auth — ретрай бесполезен, disable agent for this run
-            if any(kw in combined for kw in ("quota exceeded", "rate limit", "unauthorized",
-                                              "authentication", "api key", "401", "429")):
+            # Quota/auth — check stderr only (stdout may contain code with these words)
+            stderr_lower = (result.stderr or "").lower()
+            if any(kw in stderr_lower for kw in ("quota exceeded", "rate limit",
+                                                   "api key", "429")):
                 from .agents import _disabled_agents
                 _disabled_agents.add(agent_type)
                 log.error(f"[{tag}] ✗ Квота/авторизация — агент отключён до конца прогона")
@@ -297,10 +297,9 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
         if not ok and "не внёс никаких изменений" in error_log:
             stdout_tail = (result.stdout or "")[-500:].strip()
             stderr_tail = (result.stderr or "")[-300:].strip()
-            # Quota/auth в stdout — не ретраить
-            combined = f"{stdout_tail}\n{stderr_tail}".lower()
-            if any(kw in combined for kw in ("quota exceeded", "rate limit", "unauthorized",
-                                              "authentication", "api key", "401", "429")):
+            # Quota/auth — check stderr only (stdout may contain code with these words)
+            if any(kw in (stderr_tail or "").lower() for kw in ("quota exceeded", "rate limit",
+                                                                  "api key", "429")):
                 from .agents import _disabled_agents
                 _disabled_agents.add(agent_type)
                 log.error(f"[{tag}] ✗ Квота/авторизация — агент отключён до конца прогона")
