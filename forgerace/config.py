@@ -269,18 +269,25 @@ def validate_agent_commands(cfg: Config) -> None:
         if not acfg.enabled:
             continue
 
+        if not isinstance(acfg.command, str):
+            raise ConfigValidationError(f"Агент '{name}': команда должна быть строкой")
+        
         cmd = acfg.command.strip()
         if not cmd:
             raise ConfigValidationError(f"Агент '{name}': команда не может быть пустой")
 
         # Парсим только бинарник, игнорируя аргументы
-        parts = shlex.split(cmd)
+        try:
+            parts = shlex.split(cmd)
+        except ValueError as e:
+            raise ConfigValidationError(f"Агент '{name}': ошибка разбора команды: {e}")
+            
         if not parts:
             raise ConfigValidationError(f"Агент '{name}': команда не может быть пустой")
         binary = parts[0]
 
         if not shutil.which(binary):
-            logging.warning("Агент '%s': команда '%s' не найдена в PATH", name, binary)
+            log.warning("Агент '%s': команда '%s' не найдена в PATH", name, cmd)
 
 
 def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None) -> Config:
