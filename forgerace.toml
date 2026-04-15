@@ -27,7 +27,7 @@ args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
 review_args = ["-p", "-", "--approval-mode", "yolo"]
 inactivity_timeout = 180
 
-[agents.deepseek]
+[agents.llama]
 protocol = "openai"
 base_url = "https://integrate.api.nvidia.com/v1"
 api_key = "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"
