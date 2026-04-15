@@ -5,7 +5,7 @@ import os
 import re
 import tempfile
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import cfg
@@ -36,9 +36,7 @@ class Task:
     agent: str          # claude / gemini / —
     branch: str         # task/001-frame-allocator / —
     discussion: str     # 001-scheduler-design / —
-    rework_count: int = 0
-    last_attempts: list[dict] = field(default_factory=list)
-    raw_section: str = ""    # исходный markdown-блок
+    raw_section: str    # исходный markdown-блок
 
 
 # --- Парсер TASKS.md ---
@@ -53,22 +51,6 @@ def parse_tasks(path: Path | None = None) -> list[Task]:
 
     tasks = []
     for raw, task_id in matches:
-        # Извлекаем rework_count (int)
-        rework_str = _field(raw, r"\*\*Переделки\*\*:\s*(.+)", "0")
-        rework_count = int(rework_str) if rework_str.isdigit() else 0
-
-        # Извлекаем last_attempts (JSON list)
-        attempts_raw = _field(raw, r"\*\*Последние попытки\*\*:\s*(.+)", "[]")
-        last_attempts = []
-        if attempts_raw and attempts_raw != "—":
-            try:
-                last_attempts = json.loads(attempts_raw)
-                if not isinstance(last_attempts, list):
-                    last_attempts = []
-            except (json.JSONDecodeError, TypeError):
-                log.warning(f"⚠ {task_id}: ошибка парсинга JSON в 'Последние попытки'")
-                last_attempts = []
-
         tasks.append(Task(
             id=task_id,
             name=_field(raw, r"### TASK-\d+: (.+)"),
@@ -86,16 +68,14 @@ def parse_tasks(path: Path | None = None) -> list[Task]:
             agent=_field(raw, r"\*\*Агент\*\*:\s*(.+)"),
             branch=_field(raw, r"\*\*Ветка\*\*:\s*(.+)"),
             discussion=_field(raw, r"\*\*Дискуссия\*\*:\s*(.+)"),
-            rework_count=rework_count,
-            last_attempts=last_attempts,
             raw_section=raw.strip(),
         ))
     return tasks
 
 
-def _field(text: str, pattern: str, default: str = "") -> str:
+def _field(text: str, pattern: str) -> str:
     m = re.search(pattern, text)
-    return m.group(1).strip() if m else default
+    return m.group(1).strip() if m else ""
 
 
 def _parse_deps(deps_str: str) -> list[str]:
