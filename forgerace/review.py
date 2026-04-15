@@ -172,7 +172,15 @@ NEEDS_WORK = нужны правки.
             full_prompt += f"\n## Полные файлы (код РЕАЛЬНО существует в репозитории)\n{files_content}"
         full_prompt += f"\n## Diff от {author}\n```diff\n{diff[:15000]}\n```"
 
-        review_text = run_reviewer(actual_reviewer, full_prompt)
+        # Retry on transient API errors (empty response)
+        review_text = ""
+        for _retry in range(3):
+            review_text = run_reviewer(actual_reviewer, full_prompt)
+            if review_text:
+                break
+            if is_agent_disabled(actual_reviewer):
+                break  # quota, no point retrying
+            log.warning(f"[{reviewer}] пустой ответ, retry {_retry + 1}/3...")
         if not review_text:
             return {"verdict": "error", "reviewer": reviewer, "author": author,
                     "full_text": "", "comments": "", "summary": "Пустой ответ"}
