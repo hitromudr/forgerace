@@ -617,39 +617,7 @@ def run_text_agent(prompt: str, timeout: int = 300, tag: str = "",
 # --- Промпты ---
 
 
-def build_rework_prompt(attempts: list[dict]) -> str:
-    """Превращает историю попыток в структурированный текст."""
-    if not attempts:
-        return ""
-
-    res = "\n## ИСТОРИЯ ПРЕДЫДУЩИХ ПОПЫТОК\n"
-    for att in attempts:
-        num = att.get("number", "?")
-        res += f"\n### Попытка №{num}\n"
-
-        # Diff (если есть)
-        diff = att.get("diff", "")
-        if diff:
-            # Ограничиваем размер diff в истории, чтобы не съест контекст
-            if len(diff) > 4000:
-                diff = diff[:4000] + "\n... (обрезано)"
-            res += f"Предложенный вариант (diff):\n```diff\n{diff}\n```\n"
-
-        # Ошибки сборки
-        error = att.get("error", "")
-        if error:
-            res += f"Результат сборки/тестов: ОШИБКА\n```\n{error[-2000:]}\n```\n"
-
-        # Замечания ревьюера
-        comments = att.get("reviewer_comments", "")
-        if comments:
-            res += f"Замечания ревьюера:\n{comments}\n"
-
-    res += "\nВнимательно проанализируй причины неудач выше и не повторяй старых ошибок в текущем решении.\n"
-    return res
-
-
-def build_prompt(task: Task, error_log: str = "", agent_type: str = "", attempts: list[dict] | None = None) -> str:
+def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
     """Формирует промпт для агента."""
     # Claude CLI сам читает CLAUDE.md — не дублируем. Остальным агентам инжектим.
     project_section = ""
@@ -703,11 +671,7 @@ def build_prompt(task: Task, error_log: str = "", agent_type: str = "", attempts
 {cfg.test_instruction}
 """
 
-    if attempts:
-        next_attempt = len(attempts) + 1
-        prompt += f"\n## ТЕКУЩАЯ ПОПЫТКА: №{next_attempt}\n"
-        prompt += build_rework_prompt(attempts)
-    elif error_log:
+    if error_log:
         log_head = error_log[-4000:]
         prompt += f"""
 ## ПРЕДЫДУЩАЯ ПОПЫТКА ПРОВАЛИЛАСЬ
@@ -737,4 +701,3 @@ class AgentResult:
     # Ревьюер: В `AgentResult` нет поля `usage: TokenUsage`.
     # Ответ: Замечание ошибочно, поле `usage` присутствует.
     usage: TokenUsage = field(default_factory=TokenUsage)
-    history: list[dict] = field(default_factory=list)
