@@ -14,103 +14,6 @@ _DIFF_MAX = 20000
 _DIFF_EXCLUDE = ["*.yaml", "*.yml", "*.json", "*.lock", "*.log", "*.csv", "*.bin"]
 
 
-REVIEW_SCHEMA = {
-    "verdicts": {
-        "APPROVED": {"is_terminal": True},
-        "NEEDS_REWORK": {"is_terminal": False, "aliases": ["NEEDS_WORK"]},
-        "REJECTED": {"is_terminal": True},
-    },
-    "confidence_range": (0, 100),
-}
-
-
-def validate_review(data: dict) -> tuple[bool, str]:
-    """
-    Валидирует данные ревью, нормализует вердикт и список замечаний.
-    Возвращает (успех, сообщение_об_ошибке).
-    """
-    if not isinstance(data, dict):
-        return False, "Данные должны быть словарем"
-
-    # 1. Обработка вердикта и алиасов
-    verdict = str(data.get("verdict", "")).strip().upper()
-
-    target_verdict = None
-    for name, info in REVIEW_SCHEMA["verdicts"].items():
-        if verdict == name or verdict in info.get("aliases", []):
-            target_verdict = name
-            break
-
-    if not target_verdict:
-        return False, f"Недопустимый вердикт: {verdict}"
-
-    # 2. Обработка уверенности (confidence)
-    confidence_raw = data.get("confidence", 100)
-    try:
-        # Принимаем float или int, приводим к int
-        confidence = int(float(confidence_raw))
-    except (ValueError, TypeError, OverflowError):
-        return False, f"Некорректное значение confidence: {confidence_raw}"
-
-    low, high = REVIEW_SCHEMA["confidence_range"]
-    if not (low <= confidence <= high):
-        return False, f"Confidence {confidence} вне диапазона [{low}, {high}]"
-
-    # 3. Парсинг замечаний (issues)
-    raw_issues = data.get("issues", [])
-    if isinstance(raw_issues, str):
-        raw_issues = [s.strip() for s in raw_issues.splitlines() if s.strip()]
-    elif isinstance(raw_issues, (list, tuple, set)):
-        raw_issues = list(raw_issues)
-    else:
-        raw_issues = []
-
-    normalized_issues = []
-    for issue in raw_issues:
-        if isinstance(issue, str):
-            # [severity] текст
-            match = re.match(r"^\[(.*?)\]\s*(.*)", issue)
-            if match:
-                normalized_issues.append({
-                    "severity": match.group(1).lower(),
-                    "text": match.group(2).strip()
-                })
-            else:
-                normalized_issues.append({
-                    "severity": "major",
-                    "text": issue.strip()
-                })
-        elif isinstance(issue, dict):
-            if "text" in issue:
-                new_issue = dict(issue)
-                severity = new_issue.get("severity")
-                if isinstance(severity, str) and severity.strip():
-                    new_issue["severity"] = severity.strip().lower()
-                else:
-                    new_issue["severity"] = "major"
-                normalized_issues.append(new_issue)
-            else:
-                return False, "Замечание в формате словаря должно содержать ключ 'text'"
-        else:
-            return False, "Замечание должно быть строкой или словарем"
-
-    # 4. Проверка совместимости статуса
-    has_critical = any(i.get("severity") == "critical" for i in normalized_issues)
-
-    if target_verdict == "APPROVED" and has_critical:
-        return False, "Нельзя аппрувить код с критическими ошибками"
-
-    if target_verdict == "REJECTED" and not normalized_issues:
-        return False, "REJECTED требует указания хотя бы одной проблемы"
-
-    # Мутации данных происходят только после успешного прохождения всех проверок
-    data["verdict"] = target_verdict
-    data["confidence"] = confidence
-    data["issues"] = normalized_issues
-
-    return True, ""
-
-
 def get_diff(result: AgentResult, task: Task | None = None) -> str:
     """Получает diff агента относительно develop. Исключает бинарники и дампы."""
     exclude_args = []
@@ -278,30 +181,17 @@ NEEDS_WORK = нужны правки.
         comments_match = re.search(r"\**COMMENTS\**:\s*(.+?)(?=\n\**SUMMARY\**:|\Z)", review_text, re.IGNORECASE | re.DOTALL)
         summary_match = re.search(r"\**SUMMARY\**:\s*(.+)", review_text, re.IGNORECASE)
 
-        verdict = verdict_match.group(1).upper() if verdict_match else "NEEDS_REWORK"
+        verdict = verdict_match.group(1).upper() if verdict_match else "NEEDS_WORK"
         comments = comments_match.group(1).strip() if comments_match else ""
 
-        review_data = {
-            "verdict": verdict,
-            "issues": comments,
-        }
-        
-        is_valid, error_msg = validate_review(review_data)
-        
-        if not is_valid:
-            log.warning(f"[{reviewer}] Ошибка валидации ревью: {error_msg} — понижаю до NEEDS_REWORK")
-            verdict = "NEEDS_REWORK"
-            comments = f"(автокоррекция: невалидный формат или ответ ревьюера: {error_msg})\n{comments}"
-            is_terminal = False
-        else:
-            verdict = review_data["verdict"]
-            is_terminal = REVIEW_SCHEMA["verdicts"].get(verdict, {}).get("is_terminal", False)
-            issues_texts = [f"[{i.get('severity', 'major').upper()}] {i.get('text', '')}" for i in review_data["issues"]]
-            if issues_texts:
-                comments = "\n".join(issues_texts)
+        # APPROVED без обоснования — невалидное ревью
+        if verdict == "APPROVED" and len(comments) < 20:
+            log.warning(f"[{reviewer}] APPROVED без обоснования — понижаю до NEEDS_WORK")
+            verdict = "NEEDS_WORK"
+            comments = "Ревьюер не обосновал APPROVED. Требуется повторное ревью с конкретным анализом."
 
-        # NEEDS_REWORK с ложным замечанием "не компилируется" — если сборка прошла, отклоняем
-        if verdict in ("NEEDS_WORK", "NEEDS_REWORK"):
+        # NEEDS_WORK с ложным замечанием "не компилируется" — если сборка прошла, отклоняем
+        if verdict == "NEEDS_WORK":
             build_fail_phrases = [
                 "не компилируется", "не собирается", "ошибка компиляции",
                 "compilation error", "does not compile", "build fails",
@@ -309,10 +199,9 @@ NEEDS_WORK = нужны правки.
             comments_lower = comments.lower()
             has_build_claim = any(p in comments_lower for p in build_fail_phrases)
             if has_build_claim and build_passed:
-                log.warning(f"[{reviewer}] NEEDS_REWORK утверждает что не компилируется, но сборка прошла — повышаю до APPROVED")
+                log.warning(f"[{reviewer}] NEEDS_WORK утверждает что не компилируется, но сборка прошла — повышаю до APPROVED")
                 verdict = "APPROVED"
                 comments = f"(автокоррекция: ревьюер ложно заявил о проблемах компиляции, сборка прошла)\n{comments}"
-                is_terminal = True
 
         return {
             "verdict": verdict,
@@ -321,7 +210,6 @@ NEEDS_WORK = нужны правки.
             "full_text": review_text,
             "comments": comments,
             "summary": summary_match.group(1).strip() if summary_match else "",
-            "is_terminal": is_terminal,
         }
     except Exception as e:
         return {"verdict": "error", "reviewer": reviewer, "author": author,
@@ -426,19 +314,10 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
         verdict = "APPROVED"
         reason = f"{best} одобрен всеми ревьюерами"
         comments = ""
-        is_terminal = True
     else:
         # Никто не получил полного одобрения — берём с максимумом approve
         best = max(author_names, key=_approval_count)
-        verdict = "NEEDS_REWORK"
-        is_terminal = False
-        
-        for rv in reviews_by_author[best]:
-            if rv.get("verdict") == "REJECTED" and rv.get("is_terminal"):
-                verdict = "REJECTED"
-                is_terminal = True
-                break
-
+        verdict = "NEEDS_WORK"
         # Собираем замечания от тех кто не одобрил лучшего
         nw_comments = [rv.get("comments", "") for rv in reviews_by_author[best]
                        if rv["verdict"] != "APPROVED" and rv.get("comments", "").strip()]
@@ -453,7 +332,6 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
         "comments": comments,
         "reason": reason,
         "reviews": reviews,
-        "is_terminal": is_terminal,
     }
 
 

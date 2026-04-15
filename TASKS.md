@@ -30,7 +30,7 @@
 - **Ветка**: task/task-043-pokrytie-logiki-revyu-unit-testami-gemini
 
 ### TASK-047: Интеграция validate_review в forgerace/review.py
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: —
@@ -40,11 +40,11 @@
 - **Описание**: В функции `single_review` необходимо найти и полностью удалить старую проверку на минимальную длину комментария (костыль вида `COMMENTS > 20`). Вместо неё нужно импортировать и интегрировать вызов `validate_review` для проверки ответа агента-ревьюера. Убедиться, что возвращаемый вердикт корректно пробрасывается (включая статус и флаг `is_terminal`).
 - **Критерий готовности**: Функция `single_review` использует `validate_review` для оценки результата, старый костыль удален.
 - **Дискуссия**: 2-validatsiya-revyu-s-biznes-pravilami
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-047-integratsiya-validate-review-v-forgerace-gemini
 
 ### TASK-048: Обработка терминального отказа (is_terminal) в оркестраторе
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: —
@@ -54,11 +54,11 @@
 - **Описание**: Обновить логику оркестратора в `forgerace/pipeline.py` (там, где обрабатываются результаты ревью и принимаются решения о повторных запусках/retry). Добавить проверку: если возвращенный статус `REJECTED` и в данных ревью установлен флаг `is_terminal`, оркестратор должен немедленно завершать текущую ветку агента без каких-либо попыток retry.
 - **Критерий готовности**: При получении терминального REJECTED оркестратор корректно и безопасно обрывает исполнение агента для данной ветки (не пытается запустить retry).
 - **Дискуссия**: 2-validatsiya-revyu-s-biznes-pravilami
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-048-potokobezopasnost-metodov-taskqueue-gemini
 
 ### TASK-003: Rework counter и TaskState
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: TASK-002
@@ -212,7 +212,7 @@
 - **Ветка**: task/task-046-perevod-obnovlenij-tasksmd-na-potokobezo-gemini
 
 ### TASK-047: Подготовка и инициализация TaskQueue в pipeline.py
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: —
@@ -224,7 +224,7 @@
 - **Дискуссия**: 15-integratsiya-taskqueue-v-pipelinepy
 
 ### TASK-048: Потокобезопасность методов TaskQueue
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: —
@@ -338,7 +338,7 @@
 - **Ветка**: task/task-033-graceful-shutdown-dlya-preryvaniya-subpr-qwen
 
 ### TASK-034: Возврат AgentProcessResult со статусом BUDGET_EXCEEDED
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: TASK-032, TASK-033
@@ -350,8 +350,8 @@
 - **Проверка**: ruff check forgerace/agents.py && pytest tests/test_agents.py -v -k budget_exceeded
 - **Критерий готовности**: `_run_agent_streaming` возвращает различимый результат BUDGET_EXCEEDED, который можно обработать на уровне pipeline
 - **Дискуссия**: 17-proverka-byudzheta-v-pipeline
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-034-vozvrat-agentprocessresult-so-statusom-b-gemini
 
 ### TASK-035: Обработка BUDGET_EXCEEDED в pipeline.py
 - **Статус**: open
