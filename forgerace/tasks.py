@@ -1,11 +1,11 @@
 """Модель задачи, парсер TASKS.md, обновление статусов."""
 
-import json  # REVIEW: import json уже присутствует в файле
+import json
 import os
 import re
 import tempfile
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import cfg
@@ -37,8 +37,6 @@ class Task:
     branch: str         # task/001-frame-allocator / —
     discussion: str     # 001-scheduler-design / —
     raw_section: str    # исходный markdown-блок
-    rework_count: int = 0
-    last_attempts: list[dict] = field(default_factory=list)
 
 
 # --- Парсер TASKS.md ---
@@ -53,7 +51,7 @@ def parse_tasks(path: Path | None = None) -> list[Task]:
 
     tasks = []
     for raw, task_id in matches:
-        task = Task(
+        tasks.append(Task(
             id=task_id,
             name=_field(raw, r"### TASK-\d+: (.+)"),
             status=_field(raw, r"\*\*Статус\*\*:\s*(.+)"),
@@ -71,18 +69,7 @@ def parse_tasks(path: Path | None = None) -> list[Task]:
             branch=_field(raw, r"\*\*Ветка\*\*:\s*(.+)"),
             discussion=_field(raw, r"\*\*Дискуссия\*\*:\s*(.+)"),
             raw_section=raw.strip(),
-        )
-        rc_str = _field(raw, r"\*\*Reworks\*\*:\s*(\d+)")
-        task.rework_count = int(rc_str) if rc_str.isdigit() else 0
-        la_str = _field(raw, r"\*\*Attempts\*\*:\s*(.+)")
-        if la_str and la_str != "—":
-            try:
-                parsed = json.loads(la_str)
-                if isinstance(parsed, list):
-                    task.last_attempts = parsed
-            except json.JSONDecodeError:
-                pass
-        tasks.append(task)
+        ))
     return tasks
 
 
@@ -118,67 +105,29 @@ def _atomic_write(path: Path, content: str):
 
 # --- Обновление статусов ---
 
-def update_task_status(task_id: str, new_status: str, agent: str = "", branch: str = "", rework_count: int | None = None, last_attempts: list[dict] | None = None):
+def update_task_status(task_id: str, new_status: str, agent: str = "", branch: str = ""):
     """Обновляет статус задачи в TASKS.md (в основном репозитории)."""
     with _tasks_file_lock:
         tasks_file = cfg.tasks_file
         lines = tasks_file.read_text(encoding="utf-8").splitlines()
         in_task = False
-        in_metadata = False
         result = []
-        seen_reworks = False
-        seen_attempts = False
 
         for line in lines:
             if line.startswith(f"### {task_id}:"):
                 in_task = True
-                in_metadata = True
-                seen_reworks = False
-                seen_attempts = False
-                result.append(line)
-                continue
             elif line.startswith("### TASK-"):
-                if in_task and in_metadata:
-                    if rework_count is not None and not seen_reworks:
-                        result.append(f"- **Reworks**: {rework_count}")
-                    if last_attempts is not None and not seen_attempts:
-                        result.append(f"- **Attempts**: {json.dumps(last_attempts, ensure_ascii=False)}")
                 in_task = False
-                in_metadata = False
 
             if in_task:
-                if in_metadata:
-                    if line.startswith("- **"):
-                        if line.startswith("- **Статус**:"):
-                            line = f"- **Статус**: {new_status}"
-                        elif agent and line.startswith("- **Агент**:"):
-                            line = f"- **Агент**: {agent}"
-                        elif branch and line.startswith("- **Ветка**:"):
-                            line = f"- **Ветка**: {branch}"
-                        elif line.startswith("- **Reworks**:"):
-                            if rework_count is not None:
-                                line = f"- **Reworks**: {rework_count}"
-                            seen_reworks = True
-                        elif line.startswith("- **Attempts**:"):
-                            if last_attempts is not None:
-                                line = f"- **Attempts**: {json.dumps(last_attempts, ensure_ascii=False)}"
-                            seen_attempts = True
-                    else:
-                        if rework_count is not None and not seen_reworks:
-                            result.append(f"- **Reworks**: {rework_count}")
-                            seen_reworks = True
-                        if last_attempts is not None and not seen_attempts:
-                            result.append(f"- **Attempts**: {json.dumps(last_attempts, ensure_ascii=False)}")
-                            seen_attempts = True
-                        in_metadata = False
+                if line.startswith("- **Статус**:"):
+                    line = f"- **Статус**: {new_status}"
+                elif agent and line.startswith("- **Агент**:"):
+                    line = f"- **Агент**: {agent}"
+                elif branch and line.startswith("- **Ветка**:"):
+                    line = f"- **Ветка**: {branch}"
 
             result.append(line)
-
-        if in_task and in_metadata:
-            if rework_count is not None and not seen_reworks:
-                result.append(f"- **Reworks**: {rework_count}")
-            if last_attempts is not None and not seen_attempts:
-                result.append(f"- **Attempts**: {json.dumps(last_attempts, ensure_ascii=False)}")
 
         _atomic_write(tasks_file, "\n".join(result) + "\n")
 
