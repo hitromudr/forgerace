@@ -1148,6 +1148,19 @@ def run_pipeline(
 
     log.info(f"Утверждены и готовы: {[t.id for t in ready]}")
 
+    # TASK-047: Инициализация очереди и маппинга задач
+    queue = TaskQueue(max_concurrent=getattr(cfg, "limits_max_concurrent", cfg.max_concurrent))
+    task_map = {t.id: t for t in ready}
+    for t in ready:
+        try:
+            # В TASKS.md приоритеты P1, P2... Чем меньше число, тем выше приоритет.
+            # TaskQueue использует max-heap (больше число = выше приоритет), поэтому инвертируем.
+            prio_int = int(t.priority.replace("P", ""))
+            prio = 100 - prio_int
+        except (ValueError, TypeError, AttributeError):
+            prio = 0
+        queue.push(t.id, prio)
+
     batch = ready[:max_tasks]
     from .agents import is_agent_disabled
     agent_names = [n for n in cfg.agent_names if not is_agent_disabled(n)]
