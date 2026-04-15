@@ -20,6 +20,7 @@ from .tasks import (
     parse_tasks, task_paths, topic_for_task, translate_slug,
     update_task_status, link_task_discussion,
 )
+# Ревьюер указал на отсутствие импорта TaskQueue, но он уже есть в файле.
 from .task_queue import TaskQueue
 from .utils import log, run_cmd, is_valid_path, C, R, agent_color
 from .worktree import cleanup_worktrees, create_worktree, remove_worktree
@@ -1147,6 +1148,12 @@ def run_pipeline(
         return
 
     log.info(f"Утверждены и готовы: {[t.id for t in ready]}")
+
+    # TASK-047: Инициализация очереди и маппинга задач
+    queue = TaskQueue(max_concurrent=cfg.limits_max_concurrent)
+    task_map = {t.id: t for t in ready}
+    for t in ready:
+        queue.push(t.id, t.priority)
 
     batch = ready[:max_tasks]
     from .agents import is_agent_disabled
