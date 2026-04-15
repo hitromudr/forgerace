@@ -44,7 +44,7 @@
 - **Ветка**: task/task-047-integratsiya-validate-review-v-forgerace-gemini
 
 ### TASK-050: Поддержка REJECTED и IS_TERMINAL в review.py
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: —
@@ -92,7 +92,7 @@
 - **Дискуссия**: 2-validatsiya-revyu-s-biznes-pravilami
 
 ### TASK-003: Rework counter и TaskState
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: TASK-002
@@ -102,8 +102,8 @@
 - **Описание**: Добавить dataclass `TaskState` с полями `rework_count: int`, `last_attempts: list[str]` (последние 3 diff summary). Реализовать `build_rework_prompt(task, state) -> str` — формирует блок промпта с историей предыдущих неудачных попыток. Добавить параметр `max_reworks` в `[limits]` (дефолт 3), с возможностью переопределения через `<!-- config: max_reworks=N -->` в теле задачи TASKS.md.
 - **Критерий готовности**: `TaskState` хранит историю попыток, `build_rework_prompt` генерирует summary, `max_reworks` читается из конфига и задачи
 - **Дискуссия**: future
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-003-rework-counter-i-taskstate-gemini
 
 ### TASK-004: Интеграция rework counter в pipeline
 - **Статус**: open
@@ -258,7 +258,7 @@
 - **Дискуссия**: 15-integratsiya-taskqueue-v-pipelinepy
 
 ### TASK-048: Потокобезопасность методов TaskQueue
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: —
@@ -388,7 +388,7 @@
 - **Ветка**: task/task-034-vozvrat-agentprocessresult-so-statusom-b-gemini
 
 ### TASK-035: Обработка BUDGET_EXCEEDED в pipeline.py
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 3
 - **Зависимости**: TASK-034
@@ -400,8 +400,8 @@
 - **Проверка**: ruff check forgerace/pipeline.py && pytest tests/test_pipeline.py -v -k budget_exceeded
 - **Критерий готовности**: Задача с превышенным бюджетом получает статус BUDGET_EXCEEDED в системе, выполнение прерывается без повторных попыток
 - **Дискуссия**: 17-proverka-byudzheta-v-pipeline
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-035-obrabotka-budget-exceeded-v-pipelinepy-gemini
 
 ### TASK-018: Вывод итоговой стоимости в лог
 - **Статус**: done

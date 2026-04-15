@@ -5,7 +5,7 @@ import os
 import re
 import tempfile
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import cfg
@@ -17,28 +17,6 @@ _tasks_file_lock = threading.Lock()
 
 
 # --- Модель задачи ---
-
-@dataclass
-class TaskState:
-    rework_count: int = 0
-    last_attempts: list[str] = field(default_factory=list)  # последние 3 diff summary
-
-
-def build_rework_prompt(task: 'Task', state: TaskState) -> str:
-    """Формирует блок промпта с историей предыдущих неудачных попыток."""
-    if not state.last_attempts:
-        return ""
-
-    prompt = "\n## ПРЕДЫДУЩИЕ НЕУДАЧНЫЕ ПОПЫТКИ\n"
-    prompt += f"Эта задача уже возвращалась на доработку {state.rework_count} раз(а).\n"
-    prompt += "Вот краткое описание последних попыток (diff summary):\n\n"
-
-    for i, attempt in enumerate(state.last_attempts, 1):
-        prompt += f"### Попытка {i}:\n{attempt}\n\n"
-
-    prompt += "Проанализируй эти ошибки и не повторяй их. Твоё решение должно полностью удовлетворять критериям готовности.\n"
-    return prompt
-
 
 @dataclass
 class Task:
@@ -59,14 +37,6 @@ class Task:
     branch: str         # task/001-frame-allocator / —
     discussion: str     # 001-scheduler-design / —
     raw_section: str    # исходный markdown-блок
-
-    @property
-    def max_reworks(self) -> int:
-        """Возвращает лимит доработок для задачи (с учётом переопределения в markdown)."""
-        m = re.search(r"<!-- config: max_reworks=(\d+) -->", self.raw_section)
-        if m:
-            return int(m.group(1))
-        return getattr(cfg, "max_reworks", 3)
 
 
 # --- Парсер TASKS.md ---

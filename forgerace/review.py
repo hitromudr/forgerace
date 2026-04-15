@@ -115,15 +115,12 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
 - ОБЯЗАТЕЛЬНО закончи выводом VERDICT/COMMENTS/SUMMARY.
 
 ## Формат ответа — строго:
-VERDICT: APPROVED, NEEDS_WORK или REJECTED
-IS_TERMINAL: TRUE или FALSE
-COMMENTS: <что проверено и какие проблемы. При APPROVED — докажи что проверил. При NEEDS_WORK/REJECTED — конкретные замечания.>
+VERDICT: APPROVED или NEEDS_WORK
+COMMENTS: <что проверено и какие проблемы. При APPROVED — докажи что проверил. При NEEDS_WORK — конкретные замечания.>
 SUMMARY: <итог в 1-2 строки>
 
 APPROVED = код готов к мержу.
-NEEDS_WORK = нужны правки (агент попробует исправить).
-REJECTED = фундаментальные ошибки, задача не может быть решена этим путём или агент полностью не справился.
-IS_TERMINAL: TRUE означает, что дальнейшие попытки доработки (rework) этого агента бессмысленны.
+NEEDS_WORK = нужны правки.
 - Файлы из `.gitignore` НЕ могут быть изменены — не требуй их правки.
 Пиши на русском.
 """
@@ -185,23 +182,14 @@ IS_TERMINAL: TRUE означает, что дальнейшие попытки �
                 break  # quota, no point retrying
             log.warning(f"[{reviewer}] пустой ответ, retry {_retry + 1}/3...")
         if not review_text:
-            return {"verdict": "error", "is_terminal": False, "reviewer": reviewer, "author": author,
+            return {"verdict": "error", "reviewer": reviewer, "author": author,
                     "full_text": "", "comments": "", "summary": "Пустой ответ"}
 
         verdict_match = re.search(r"\**VERDICT\**:\s*\**(\w+)\**", review_text, re.IGNORECASE)
-        terminal_match = re.search(r"\**IS_TERMINAL\**:\s*\**(\w+)\**", review_text, re.IGNORECASE)
         comments_match = re.search(r"\**COMMENTS\**:\s*(.+?)(?=\n\**SUMMARY\**:|\Z)", review_text, re.IGNORECASE | re.DOTALL)
         summary_match = re.search(r"\**SUMMARY\**:\s*(.+)", review_text, re.IGNORECASE)
 
         verdict = verdict_match.group(1).upper() if verdict_match else "NEEDS_WORK"
-        is_terminal = terminal_match.group(1).upper() == "TRUE" if terminal_match else False
-
-        if verdict not in ["APPROVED", "NEEDS_WORK", "REJECTED"]:
-            verdict = "NEEDS_WORK"
-
-        if verdict == "REJECTED":
-            is_terminal = True
-
         comments = comments_match.group(1).strip() if comments_match else ""
 
         # APPROVED без обоснования — невалидное ревью
@@ -225,7 +213,6 @@ IS_TERMINAL: TRUE означает, что дальнейшие попытки �
 
         return {
             "verdict": verdict,
-            "is_terminal": is_terminal,
             "reviewer": reviewer,
             "author": author,
             "full_text": review_text,
@@ -233,7 +220,7 @@ IS_TERMINAL: TRUE означает, что дальнейшие попытки �
             "summary": summary_match.group(1).strip() if summary_match else "",
         }
     except Exception as e:
-        return {"verdict": "error", "is_terminal": False, "reviewer": reviewer, "author": author,
+        return {"verdict": "error", "reviewer": reviewer, "author": author,
                 "full_text": "", "comments": "", "summary": f"Ошибка: {e}"}
 
 
@@ -267,7 +254,6 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
             "reviewer": "none",
             "best": best,
             "verdict": "error",
-            "is_terminal": False,
             "comments": "Нет доступных ревьюеров — все агенты отключены по квоте",
             "reason": "нет ревьюеров",
             "reviews": {},
@@ -330,7 +316,6 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
         return sum(1 for rv in reviews_by_author[author] if rv["verdict"] == "APPROVED")
 
     fully_approved = [a for a in author_names if _all_approved(a)]
-    is_terminal = False
 
     if fully_approved:
         best = fully_approved[0]
@@ -340,31 +325,18 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
     else:
         # Никто не получил полного одобрения — берём с максимумом approve
         best = max(author_names, key=_approval_count)
-        
-        # Если хотя бы один ревьюер для best поставил REJECTED, 
-        # то общий вердикт тоже REJECTED (если нет full approval)
-        has_rejected = any(rv["verdict"] == "REJECTED" for rv in reviews_by_author[best])
-        if has_rejected:
-            verdict = "REJECTED"
-        else:
-            verdict = "NEEDS_WORK"
-
+        verdict = "NEEDS_WORK"
         # Собираем замечания от тех кто не одобрил лучшего
         nw_comments = [rv.get("comments", "") for rv in reviews_by_author[best]
                        if rv["verdict"] != "APPROVED" and rv.get("comments", "").strip()]
         comments = "\n\n".join(nw_comments)
         reason = f"{best} получил {_approval_count(best)}/{len(reviews_by_author[best])} одобрений"
 
-    # Флаг is_terminal пробрасывается от лучшего результата
-    if any(rv.get("is_terminal") for rv in reviews_by_author[best]):
-        is_terminal = True
-
     return {
         "full_text": full_text,
         "reviewer": "cross-review",
         "best": best,
         "verdict": verdict,
-        "is_terminal": is_terminal,
         "comments": comments,
         "reason": reason,
         "reviews": reviews,
