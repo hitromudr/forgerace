@@ -23,9 +23,9 @@ from .tasks import (
 from .task_queue import TaskQueue
 from .utils import log, run_cmd, is_valid_path, C, R, agent_color
 from .worktree import cleanup_worktrees, create_worktree, remove_worktree
- 
- 
- # --- Heartbeat ---
+
+
+# --- Heartbeat ---
 _active_agents: dict[str, tuple[str, Path, float]] = {}
 _active_agents_lock = threading.Lock()
 
@@ -392,10 +392,16 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             if result.code_lines > 500:
                 log.warning(f"[{task.id}/{result.agent_type}] ⚠ раздутый diff ({result.code_lines} строк) — возможно переписал файлы целиком")
 
-            # Race: первый финишировавший → ревью ВСЕМИ остальными
-            reviewers = [n for n in agent_names if n != result.agent_type]
+            # Race: первый финишировавший → ревью другими (или self+frame)
+            from .agents import is_agent_disabled
+            reviewers = [n for n in agent_names
+                         if n != result.agent_type and not is_agent_disabled(n)]
             if not reviewers:
-                reviewers = [result.agent_type]
+                if cfg.review_frame and cfg.review_frame in cfg.frames:
+                    reviewers = [f"{result.agent_type}+{cfg.review_frame}"]
+                    log.info(f"    Fallback: саморевью через +{cfg.review_frame}")
+                else:
+                    reviewers = [result.agent_type]
             diff = get_diff(result, task)
             changed = get_changed_files(result, task)
             log.info(f"[{task.id}/ревью] {', '.join(reviewers)} проверяют {result.agent_type}")
