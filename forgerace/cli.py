@@ -790,7 +790,8 @@ def main():
     log.info("=" * 60)
     log.info("ForgeRace запущен")
     log.info(f"Корень: {cfg.root_dir}")
-    log.info(f"Агенты: {cfg.agent_names}")
+    colored_names = [f"{agent_color(n)}{n}{R}" for n in cfg.agent_names]
+    log.info(f"Агенты: [{', '.join(colored_names)}]")
     log.info(f"Макс. задач: {max_tasks}")
     log.info("=" * 60)
 
