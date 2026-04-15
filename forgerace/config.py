@@ -74,6 +74,7 @@ class Config:
     agent_timeout: int = 900
     build_timeout: int = 120
     max_review_rounds: int = 3
+    max_reworks: int = 3
     review_frame: str = "adversarial"  # cognitive frame for self-review when only one agent
     max_task_complexity: int = 3
     progress_timeout: int = 600  # kill агента если diff не меняется N секунд (10 мин)
