@@ -20,9 +20,8 @@ from .tasks import (
     parse_tasks, task_paths, topic_for_task, translate_slug,
     update_task_status, link_task_discussion,
 )
-from .task_queue import TaskQueue
 from .utils import log, run_cmd, is_valid_path, C, R, agent_color
-from .worktree import cleanup_worktrees, create_worktree, remove_worktree
+from .worktree import cleanup_worktrees, create_worktree
 
 
 # --- Heartbeat ---
@@ -264,6 +263,12 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
         if result.returncode != 0:
             stderr = result.stderr or result.stdout or "Агент упал без вывода"
             log.warning(f"[{tag}] Агент завершился с ошибкой (код {result.returncode})")
+
+            if result.stderr == "BUDGET_EXCEEDED":
+                log.warning(f"[{tag}] ✗ Бюджет токенов превышен (BUDGET_EXCEEDED)")
+                update_task_status(task.id, "BUDGET_EXCEEDED")
+                break
+
             # NO_EDIT_ABORT / CANCELLED — не ретраим, агент зацикливается
             if stderr in ("NO_EDIT_ABORT", "CANCELLED", "PROGRESS_TIMEOUT"):
                 log.error(f"[{tag}] ✗ {stderr} — прекращаю попытки")
@@ -410,7 +415,6 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                                            workdir=result.workdir)
                     review_futures[f] = rev
                 verdicts = {}
-                rework_started = False
                 for f in as_completed(review_futures):
                     rev = review_futures[f]
                     rv = f.result()
@@ -730,7 +734,7 @@ def _escalate_review_stall(task: Task, results: list, last_rv: dict):
     print(f"    {summary}")
 
     print(f"\n  {C['yellow']}Решение требуется от techlead.{R}")
-    print(f"  Варианты: исправить задачу, поменять ревьюера, или approve вручную.")
+    print("  Варианты: исправить задачу, поменять ревьюера, или approve вручную.")
     print(f"{C['red']}{C['bold']}{'═' * 60}{R}\n")
 
 
@@ -940,10 +944,10 @@ def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
             check_result = run_cmd(
                 ["bash", "-c", check_cmd], cwd=cfg.root_dir, timeout=300, check=False)
             if check_result.returncode == 0:
-                print(f"  ✅ check PASSED — этап закрыт")
+                print("  ✅ check PASSED — этап закрыт")
             else:
                 stderr = (check_result.stderr or check_result.stdout or "")[-500:]
-                print(f"  ❌ check FAILED — создаю задачу на фикс...")
+                print("  ❌ check FAILED — создаю задачу на фикс...")
                 create_checkpoint_task(stderr)
         else:
             _print_flow_guide(tasks)
@@ -1075,7 +1079,7 @@ def run_pipeline(
                     discuss_reply(topic, agent_name)
             print(f"\n{'═' * 60}")
             print(f"  {t.id}: {t.name}")
-            print(f"  Обсуди подход и утверди через /ok")
+            print("  Обсуди подход и утверди через /ok")
             print(f"{'═' * 60}\n")
             discuss_chat(topic)
 
