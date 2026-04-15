@@ -5,7 +5,7 @@ import os
 import re
 import tempfile
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import cfg
@@ -37,8 +37,6 @@ class Task:
     branch: str         # task/001-frame-allocator / —
     discussion: str     # 001-scheduler-design / —
     raw_section: str    # исходный markdown-блок
-    rework_count: int = 0
-    last_attempts: list[dict] = field(default_factory=list)
 
 
 # --- Парсер TASKS.md ---

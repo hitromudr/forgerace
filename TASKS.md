@@ -124,7 +124,7 @@ In `pipeline.py`, `stuck` isn't a terminal task status yet, just a local variabl
 COMPLEXITY: 4
 
 ### TASK-060: Расширение моделей данных Config и Task
-- **Статус**: blocked
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: —
