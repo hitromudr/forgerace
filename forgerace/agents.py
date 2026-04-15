@@ -524,6 +524,39 @@ def preflight_check_agents() -> list[str]:
     return available
 
 
+def _call_openai_api(acfg, prompt: str, timeout: int = 300) -> str:
+    """Call OpenAI-compatible API (nvidia, openrouter, etc.)."""
+    import urllib.request
+    import urllib.error
+
+    url = acfg.base_url.rstrip("/") + "/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {acfg.api_key}",
+    }
+    body = json.dumps({
+        "model": acfg.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 4096,
+        "temperature": 0.3,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"].strip()
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="ignore")[:500]
+        log.warning("OpenAI API error %d: %s", e.code, err_body)
+        if e.code in (429, 401, 403):
+            return ""
+        return ""
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        log.warning("OpenAI API request failed: %s", e)
+        return ""
+
+
 def run_reviewer(reviewer_type: str, prompt: str) -> str:
     """Вызывает агента в текстовом режиме для ревью."""
     if reviewer_type in _disabled_agents:
@@ -533,7 +566,11 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     if acfg is None:
         return ""
 
-    # Все агенты получают промпт через stdin (избегаем лимита аргументов ОС)
+    # OpenAI-compatible API (nvidia, openrouter, etc.)
+    if acfg.protocol == "openai":
+        return _call_openai_api(acfg, prompt, acfg.inactivity_timeout or 300)
+
+    # CLI agents — prompt via stdin
     if reviewer_type == "claude":
         cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
     elif reviewer_type == "qwen":
@@ -593,6 +630,16 @@ def run_text_agent(prompt: str, timeout: int = 300, tag: str = "",
         if not acfg:
             continue
         try:
+            # OpenAI-compatible API
+            if acfg.protocol == "openai":
+                text = _call_openai_api(acfg, prompt, timeout)
+                if text:
+                    if tag:
+                        log.info(f"  [{tag}] → {name}")
+                    return text
+                continue
+
+            # CLI agents
             cmd = [acfg.command] + [a for a in acfg.review_args if a != "{prompt}"]
             result = subprocess.run(
                 cmd, cwd=cfg.root_dir, input=prompt,

@@ -28,13 +28,17 @@ class FrameConfig:
 @dataclass
 class AgentConfig:
     """Конфиг одного агента."""
-    command: str
+    command: str = ""
     args: list[str] = field(default_factory=list)
     review_args: list[str] = field(default_factory=list)
     inactivity_timeout: int = 300
     enabled: bool = True
-    protocol: str = "cli"  # "cli" или "mcp"
+    protocol: str = "cli"  # "cli", "openai"
     cognitive_frame: str = ""  # legacy: inline фрейм (используется если нет frames)
+    # OpenAI-compatible API settings (protocol = "openai")
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
 
 
 @dataclass
@@ -325,6 +329,9 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 enabled=acfg.get("enabled", True),
                 protocol=acfg.get("protocol", "cli"),
                 cognitive_frame=acfg.get("cognitive_frame", ""),
+                base_url=acfg.get("base_url", ""),
+                api_key=acfg.get("api_key", ""),
+                model=acfg.get("model", ""),
             )
 
     # [frames.*]
