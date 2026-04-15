@@ -23,6 +23,7 @@ class TaskQueue:
     def __init__(self, max_concurrent: int = 3):
         self._heap: list[tuple[int, str]] = []
         self._counter = 0  # для стабильной сортировки при равных приоритетах
+        self._lock = threading.Lock()
         self.limiter = ConcurrencyLimiter(max_concurrent)
     
     def push(self, task_id: str, priority: int) -> None:
@@ -34,8 +35,9 @@ class TaskQueue:
             priority: Приоритет (чем больше число, тем выше приоритет).
         """
         # (-priority, counter, task_id) — counter для стабильности при равных приоритетах
-        heapq.heappush(self._heap, (-priority, self._counter, task_id))
-        self._counter += 1
+        with self._lock:
+            heapq.heappush(self._heap, (-priority, self._counter, task_id))
+            self._counter += 1
     
     def pop(self) -> Optional[str]:
         """
@@ -44,10 +46,11 @@ class TaskQueue:
         Returns:
             task_id задачи с наивысшим приоритетом или None, если очередь пуста.
         """
-        if not self._heap:
-            return None
-        _, _, task_id = heapq.heappop(self._heap)
-        return task_id
+        with self._lock:
+            if not self._heap:
+                return None
+            _, _, task_id = heapq.heappop(self._heap)
+            return task_id
     
     def empty(self) -> bool:
         """
@@ -56,15 +59,18 @@ class TaskQueue:
         Returns:
             True, если очередь пуста.
         """
-        return len(self._heap) == 0
+        with self._lock:
+            return len(self._heap) == 0
     
     def __len__(self) -> int:
         """Возвращает количество задач в очереди."""
-        return len(self._heap)
+        with self._lock:
+            return len(self._heap)
     
     def __bool__(self) -> bool:
         """Возвращает True, если очередь не пуста."""
-        return bool(self._heap)
+        with self._lock:
+            return bool(self._heap)
 
     def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> Future:
         """Proxy к limiter.submit() для удобства."""
