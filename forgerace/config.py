@@ -166,7 +166,14 @@ CONFIDENCE: XX%
 
     @property
     def agent_names(self) -> list[str]:
+        """All enabled agents (CLI + API) — for review, decomposition, discussions."""
         return [name for name, acfg in self.agents.items() if acfg.enabled]
+
+    @property
+    def cli_agent_names(self) -> list[str]:
+        """CLI-only agents — for task execution (writing code in worktree)."""
+        return [name for name, acfg in self.agents.items()
+                if acfg.enabled and acfg.protocol == "cli"]
 
 
 # Путь к конфигу, переданный через CLI (заполняется в init_config)

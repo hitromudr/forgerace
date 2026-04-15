@@ -538,6 +538,11 @@ def _call_openai_api(acfg, prompt: str, timeout: int = 300) -> str:
         "Content-Type": "application/json",
         "Authorization": f"Bearer {acfg.api_key}",
     }
+    # Truncate prompt to avoid API limits (most models handle ~30K chars)
+    max_prompt_chars = 30000
+    if len(prompt) > max_prompt_chars:
+        prompt = prompt[:max_prompt_chars] + "\n\n... (обрезано)"
+
     body = json.dumps({
         "model": acfg.model,
         "messages": [{"role": "user", "content": prompt}],
@@ -552,12 +557,11 @@ def _call_openai_api(acfg, prompt: str, timeout: int = 300) -> str:
             return data["choices"][0]["message"]["content"].strip()
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8", errors="ignore")[:500]
-        log.warning("OpenAI API error %d: %s", e.code, err_body)
-        if e.code in (429, 401, 403):
-            return ""
+        log.warning("OpenAI API (%s) error %d: %s", acfg.model, e.code, err_body)
         return ""
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
-        log.warning("OpenAI API request failed: %s", e)
+    except (urllib.error.URLError, TimeoutError, ConnectionError,
+            json.JSONDecodeError, OSError) as e:
+        log.warning("OpenAI API (%s) request failed: %s", acfg.model, e)
         return ""
 
 

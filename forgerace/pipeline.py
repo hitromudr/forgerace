@@ -351,9 +351,9 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
     update_task_status(task.id, "in_progress:both")
 
     from .agents import is_agent_disabled
-    agent_names = [n for n in cfg.agent_names if not is_agent_disabled(n)]
+    agent_names = [n for n in cfg.cli_agent_names if not is_agent_disabled(n)]
     if not agent_names:
-        log.error(f"[{task.id}] ✗ Нет доступных агентов (все отключены)")
+        log.error(f"[{task.id}] ✗ Нет доступных CLI-агентов")
         update_task_status(task.id, "blocked")
         return False
     all_results = []
@@ -1150,9 +1150,10 @@ def run_pipeline(
 
     batch = ready[:max_tasks]
     from .agents import is_agent_disabled
-    agent_names = [n for n in cfg.agent_names if not is_agent_disabled(n)]
+    # CLI agents only for task execution (API agents can't write code in worktree)
+    agent_names = [n for n in cfg.cli_agent_names if not is_agent_disabled(n)]
     if not agent_names:
-        log.error("Нет доступных агентов (все отключены по квоте/авторизации)")
+        log.error("Нет доступных CLI-агентов для выполнения задач")
         return
 
     is_competitive = cfg.mode == "competitive"
