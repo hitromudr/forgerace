@@ -3,6 +3,7 @@
 import json
 import select
 import subprocess
+import threading
 import time
 # Ревьюер: Нет импорта `field` из `dataclasses`.
 # Ответ: Замечание ошибочно, импорт присутствует.
@@ -33,7 +34,6 @@ def _log_claude_event(tag: str, event: dict, usage_acc: TokenUsage | None = None
             tool = block.get("name", "?")
             inp = block.get("input", {})
             # Нормализация имён (Qwen: read_file, write_file, run_shell_command, grep_search)
-            tool_lower = tool.lower()
             if tool in ("Read", "read_file"):
                 path = inp.get("file_path", inp.get("absolute_path", "?")).rsplit("/", 1)[-1]
                 log.info(f"[{tag}] 📖 Read {path}")
@@ -272,10 +272,9 @@ def _run_agent_streaming(
     log_event_fn,
     activity_check_fn,
     extract_result_fn,
-    cancel_event: "threading.Event | None" = None,
+    cancel_event: threading.Event | None = None,
 ) -> AgentProcessResult:
     """Общий цикл запуска агента со стримингом."""
-    import threading
     stdout_lines = []
     deadline = time.time() + cfg.agent_timeout
     last_activity = time.time()
@@ -307,6 +306,12 @@ def _run_agent_streaming(
                 _terminate_agent_process(proc)
                 log.info(f"[{tag}] 🛑 Отменён (другой агент победил)")
                 return AgentProcessResult(returncode=1, stdout="", stderr="CANCELLED", usage=usage_acc)
+
+            # Budget check: лимит на задачу (TASK-034)
+            if cfg.budget_per_task_usd is not None and usage_acc.estimated_usd > cfg.budget_per_task_usd:
+                _terminate_agent_process(proc)
+                log.error(f"[{tag}] 💸 Бюджет превышен (${usage_acc.estimated_usd:.4f} > ${cfg.budget_per_task_usd:.4f})")
+                return AgentProcessResult(returncode=1, stdout="", stderr="BUDGET_EXCEEDED", usage=usage_acc)
 
             if time.time() - last_activity > inactivity_timeout:
                 _terminate_agent_process(proc)
@@ -423,9 +428,8 @@ def _gemini_extract_result(stdout_lines: list[str]) -> str:
 
 
 def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
-                      cancel_event: "threading.Event | None" = None) -> AgentProcessResult:
+                      cancel_event: threading.Event | None = None) -> AgentProcessResult:
     """Запускает агента нужного типа. cancel_event — для отмены при race-win."""
-    import threading
     acfg = cfg.agents.get(agent_name)
     if acfg is None:
         raise ValueError(f"Неизвестный агент: {agent_name}. Доступны: {cfg.agent_names}")
