@@ -26,6 +26,7 @@ from .worktree import cleanup_worktrees, create_worktree, remove_worktree
 
 
 # --- Heartbeat ---
+
 _active_agents: dict[str, tuple[str, Path, float]] = {}
 _active_agents_lock = threading.Lock()
 
@@ -113,7 +114,7 @@ def check_already_done(task: Task) -> bool:
     return False
 
 
-def verify_build(workdir: Path, task: Task | None = None, base_sha: str | None = None) -> tuple[bool, str]:
+def verify_build(workdir: Path, task: Task | None = None) -> tuple[bool, str]:
     """Проверяет сборку в worktree."""
     if task and task.files_new and task.files_new.strip() != "—":
         missing = []
@@ -124,8 +125,7 @@ def verify_build(workdir: Path, task: Task | None = None, base_sha: str | None =
         if missing:
             return False, f"Файлы задачи не созданы: {', '.join(missing)}"
 
-    base = base_sha or cfg.dev_branch
-    diff = run_cmd(["git", "diff", "--stat", base], cwd=workdir, check=False)
+    diff = run_cmd(["git", "diff", "--stat", cfg.dev_branch], cwd=workdir, check=False)
     has_changes = bool((diff.stdout or "").strip())
     status = run_cmd(["git", "status", "--porcelain"], cwd=workdir, check=False)
     has_new_files = bool((status.stdout or "").strip())
@@ -168,15 +168,14 @@ def verify_design_task(workdir: Path, task: Task) -> tuple[bool, str]:
     return True, ""
 
 
-def collect_metrics(workdir: Path, task: Task, base_sha: str | None = None) -> dict:
+def collect_metrics(workdir: Path, task: Task) -> dict:
     """Собирает метрики реализации."""
     metrics = {"binary_size": 0, "code_lines": 0}
 
-    base = base_sha or cfg.dev_branch
     # Считаем lines: сначала по файлам задачи, fallback — весь diff
     paths = task_paths(task) if task else []
     for attempt_paths in ([paths, []] if paths else [[]]):
-        diff_cmd = ["git", "diff", "--numstat", base]
+        diff_cmd = ["git", "diff", "--numstat", cfg.dev_branch]
         if attempt_paths:
             diff_cmd += ["--"] + attempt_paths
         diff_result = run_cmd(diff_cmd, cwd=workdir, check=False)
@@ -232,11 +231,6 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
     slug = translate_slug(task.name)
     branch = f"task/{task.id.lower()}-{slug}-{agent_type}"
     run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
-
-    # Фиксируем base SHA до начала работы агента
-    base_sha_res = run_cmd(["git", "rev-parse", cfg.dev_branch], cwd=cfg.root_dir, check=False)
-    base_sha = base_sha_res.stdout.strip() if base_sha_res.returncode == 0 else cfg.dev_branch
-
     try:
         workdir = create_worktree(agent_num, branch)
     except (RuntimeError, Exception) as e:
@@ -298,7 +292,7 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
         if is_design:
             ok, error_log = verify_design_task(workdir, task)
         else:
-            ok, error_log = verify_build(workdir, task, base_sha=base_sha)
+            ok, error_log = verify_build(workdir, task)
 
         if not ok and "не внёс никаких изменений" in error_log:
             stdout_tail = (result.stdout or "")[-500:].strip()
@@ -318,7 +312,7 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
         if ok:
             log.info(f"[{tag}/код] ✓ сборка ок, ждём ревью")
             _unregister_agent(tag)
-            metrics = collect_metrics(workdir, task, base_sha=base_sha)
+            metrics = collect_metrics(workdir, task)
             cost = _get_usage_cost(total_usage, agent_type)
             log.info(f"[{tag}] Стоимость: ${cost:.2f}")
             return AgentResult(

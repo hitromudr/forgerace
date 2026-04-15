@@ -16,7 +16,7 @@
 - **Ветка**: task/task-042-realizatsiya-funktsii-validatsii-i-obnov-gemini
 
 ### TASK-043: Покрытие логики ревью unit-тестами
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: TASK-042
@@ -26,11 +26,11 @@
 - **Описание**: Написать 8-10 unit-тестов для проверки функции `validate_review` и логики парсинга `issues`. Тесты должны покрывать успешные сценарии (APPROVED без issues, NEEDS_REWORK с issues) и провальные (выход за пределы confidence, APPROVED с critical issues, REJECTED без issues).
 - **Критерий готовности**: Написаны и успешно проходят 8-10 тестов, проверяющих все бизнес-правила валидации ревью.
 - **Дискуссия**: 2-validatsiya-revyu-s-biznes-pravilami
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-043-pokrytie-logiki-revyu-unit-testami-gemini
 
 ### TASK-044: Интеграция валидации в процесс ревью и оркестратор
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: TASK-042
@@ -184,7 +184,7 @@
 - **Ветка**: task/task-045-sozdanie-blokirovki-i-bezopasnoj-obertki-gemini
 
 ### TASK-046: Перевод обновлений TASKS.md на потокобезопасную функцию
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: TASK-045
@@ -194,8 +194,8 @@
 - **Описание**: Найти все места записи статусов задач в `pipeline.py` (более 30 вызовов `update_task_status`) и переименовать вызовы на `safe_update_task_status`. 
 - **Критерий готовности**: Внутри `pipeline.py` не осталось незащищенных вызовов обновления `TASKS.md`, одновременные апдейты из нескольких потоков не приводят к повреждению файла.
 - **Дискуссия**: 15-integratsiya-taskqueue-v-pipelinepy
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-046-perevod-obnovlenij-tasksmd-na-potokobezo-gemini
 
 ### TASK-029: Основной цикл оркестрации на TaskQueue
 - **Статус**: blocked
@@ -474,7 +474,7 @@
 - **Ветка**: task/task-040-perehvat-oshibok-zagruzki-konfiga-v-clip-gemini
 
 ### TASK-041: Юнит-тесты валидации конфига
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: TASK-037, TASK-038, TASK-039, TASK-040
@@ -486,8 +486,8 @@
 - **Проверка**: ruff check tests/test_config_validation.py && pytest tests/test_config_validation.py -v
 - **Критерий готовности**: все 12-15 тестов проходят, покрывая валидные/невалидные кейсы для числовых полей, команд и путей; тесты не зависят от файловой системы
 - **Дискуссия**: 21-config-validation-tipy-diapazony-path-ch
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-041-yunit-testy-validatsii-konfiga-gemini
 
 Блок задач добавлен в TASKS.md. Структура:
 
@@ -525,7 +525,7 @@
 - **Ветка**: task/task-023-yavnaya-oshibka-pri-pustom-spiske-agento-gemini
 
 ### TASK-024: verify_build — фиксировать base SHA до начала задачи
-- **Статус**: blocked
+- **Статус**: done
 - **Приоритет**: P1
 - **Зависимости**: —
 - **Файлы (новые)**: —
@@ -533,5 +533,5 @@
 - **Описание**: verify_build делает `git diff --stat cfg.dev_branch` в worktree. Но merge_to_develop двигает указатель dev_branch (через update-ref). После мержа одной задачи у всех остальных агентов diff base сдвигается → has_changes=True даже если агент ничего не написал. Fix: при создании worktree сохранить base_sha (SHA коммита от которого создана ветка), и в verify_build использовать base_sha вместо cfg.dev_branch.
 - **Критерий готовности**: verify_build использует фиксированный base SHA, агент-пустышка не проходит валидацию после мержа другой задачи
 - **Дискуссия**: —
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: gemini
+- **Ветка**: task/task-024-verify-build-fiksirovat-base-sha-do-gemini
