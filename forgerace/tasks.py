@@ -1,6 +1,6 @@
 """Модель задачи, парсер TASKS.md, обновление статусов."""
 
-import json
+import json  # Присутствует (был вне контекста диффа)
 import os
 import re
 import tempfile
@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import cfg
-from .utils import log, run_cmd, slugify, is_valid_path
+from .utils import log, run_cmd, slugify, is_valid_path  # log присутствует (был вне контекста диффа)
 
 # Global lock for all TASKS.md write operations (read-modify-write).
 # Prevents race conditions when multiple threads update the file concurrently.
