@@ -446,7 +446,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 # Сразу отправляем на доработку — не ждём других агентов
                 all_comments = "\n\n".join(rework_comments)
                 if all_comments:
-                    log.info(f"[{task.id}/{result.agent_type}/доработка] отправлен на исправление")
+                    log.info(f"[{task.id}/{result.agent_type}/доработка] {C['yellow']}отправлен на исправление{R}")
                     send_to_rework(result, task, all_comments)
 
     # Все futures завершены — cleanup worktree безопасен
@@ -547,7 +547,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                         f.result()  # дождаться завершения
         else:
             comments = rv.get("comments", "")
-            log.info(f"[{task.id}/{best_result.agent_type}/доработка] отправлен на исправление")
+            log.info(f"[{task.id}/{best_result.agent_type}/доработка] {C['yellow']}отправлен на исправление{R}")
             send_to_rework(best_result, task, comments)
             passed = [best_result]
     else:
@@ -660,7 +660,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         if not comments.strip() or rv.get("verdict") == "error":
             log.warning(f"[{task.id}/{reviewer}/ревью] ⚠ без замечаний или ошибка — пропускаю")
             continue
-        log.info(f"[{task.id}/{agent_type}/доработка] отправлен на исправление")
+        log.info(f"[{task.id}/{agent_type}/доработка] {C['yellow']}отправлен на исправление{R}")
         send_to_rework(best_result, task, comments)
     else:
         log.info(f"[{task.id}/{reviewer}/ревью] финальный раунд")
