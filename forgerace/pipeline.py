@@ -632,6 +632,15 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
                            build_passed=True, changed_files=get_changed_files(best_result, task),
                            workdir=best_result.workdir)
         log.info(f"[{task.id}/{reviewer}/ревью] → {agent_type}: {rv['verdict']}")
+
+        if rv.get("verdict") == "REJECTED" and rv.get("is_terminal"):
+            log.error(f"[{task.id}/{reviewer}/ревью] ❌ ТЕРМИНАЛЬНЫЙ ОТКАЗ: {rv.get('summary', 'без резюме')}")
+            update_task_status(task.id, "blocked")
+            run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+            _log_total_cost(task.id, [result])
+            cleanup_worktrees([result])
+            return False
+
         summary = rv.get('summary', rv.get('comments', '')[:200])
         if summary:
             log.info(f"[{task.id}/{reviewer}/ревью] {summary}")
@@ -667,6 +676,15 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         rv = single_review(reviewer, agent_type, get_diff(best_result, task), task,
                            build_passed=True, changed_files=get_changed_files(best_result, task),
                            workdir=best_result.workdir)
+
+        if rv.get("verdict") == "REJECTED" and rv.get("is_terminal"):
+            log.error(f"[{task.id}/{reviewer}/ревью] ❌ ТЕРМИНАЛЬНЫЙ ОТКАЗ (финал): {rv.get('summary', 'без резюме')}")
+            update_task_status(task.id, "blocked")
+            run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+            _log_total_cost(task.id, [result])
+            cleanup_worktrees([result])
+            return False
+
         if rv["verdict"] != "APPROVED":
             log.error(f"[{task.id}/{agent_type}/ревью] ✗ не прошёл → BLOCKED")
             update_task_status(task.id, "blocked")
