@@ -1,15 +1,15 @@
 """Модель задачи, парсер TASKS.md, обновление статусов."""
 
-import json
+import json  # Присутствует (был вне контекста диффа)
 import os
 import re
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import cfg
-from .utils import log, run_cmd, slugify, is_valid_path
+from .utils import log, run_cmd, slugify, is_valid_path  # log присутствует (был вне контекста диффа)
 
 # Global lock for all TASKS.md write operations (read-modify-write).
 # Prevents race conditions when multiple threads update the file concurrently.
@@ -36,10 +36,23 @@ class Task:
     agent: str          # claude / gemini / —
     branch: str         # task/001-frame-allocator / —
     discussion: str     # 001-scheduler-design / —
-    raw_section: str    # исходный markdown-блок
+    rework_count: int = 0
+    last_attempts: list[dict] = field(default_factory=list)
+    raw_section: str = ""    # исходный markdown-блок
 
 
 # --- Парсер TASKS.md ---
+
+def _parse_json_attempts(val: str) -> list[dict]:
+    """Десериализует историю попыток из JSON-строки."""
+    if not val or val == "—":
+        return []
+    try:
+        return json.loads(val)
+    except Exception as e:
+        log.warning(f"Ошибка парсинга JSON в последних попытках: {e}")
+        return []
+
 
 def parse_tasks(path: Path | None = None) -> list[Task]:
     """Парсит TASKS.md, возвращает список задач."""
@@ -68,6 +81,8 @@ def parse_tasks(path: Path | None = None) -> list[Task]:
             agent=_field(raw, r"\*\*Агент\*\*:\s*(.+)"),
             branch=_field(raw, r"\*\*Ветка\*\*:\s*(.+)"),
             discussion=_field(raw, r"\*\*Дискуссия\*\*:\s*(.+)"),
+            rework_count=int(_field(raw, r"\*\*Переделки\*\*:\s*(\d+)") or 0),
+            last_attempts=_parse_json_attempts(_field(raw, r"\*\*Последние попытки\*\*:\s*(.+)")),
             raw_section=raw.strip(),
         ))
     return tasks
@@ -105,18 +120,24 @@ def _atomic_write(path: Path, content: str):
 
 # --- Обновление статусов ---
 
-def update_task_status(task_id: str, new_status: str, agent: str = "", branch: str = ""):
+def update_task_status(task_id: str, new_status: str, agent: str = "", branch: str = "", rework_count: int = -1, last_attempts: list = None):
     """Обновляет статус задачи в TASKS.md (в основном репозитории)."""
     with _tasks_file_lock:
         tasks_file = cfg.tasks_file
         lines = tasks_file.read_text(encoding="utf-8").splitlines()
         in_task = False
         result = []
+        
+        found_reworks = False
+        found_attempts = False
+        task_end_index = -1
 
         for line in lines:
             if line.startswith(f"### {task_id}:"):
                 in_task = True
-            elif line.startswith("### TASK-"):
+            elif line.startswith("### TASK-") or line.startswith("---"):
+                if in_task:
+                    task_end_index = len(result)
                 in_task = False
 
             if in_task:
@@ -126,8 +147,26 @@ def update_task_status(task_id: str, new_status: str, agent: str = "", branch: s
                     line = f"- **Агент**: {agent}"
                 elif branch and line.startswith("- **Ветка**:"):
                     line = f"- **Ветка**: {branch}"
+                elif rework_count != -1 and line.startswith("- **Переделки**:"):
+                    line = f"- **Переделки**: {rework_count}"
+                    found_reworks = True
+                elif last_attempts is not None and line.startswith("- **Последние попытки**:"):
+                    attempts_json = json.dumps(last_attempts, ensure_ascii=False)
+                    line = f"- **Последние попытки**: {attempts_json}"
+                    found_attempts = True
 
             result.append(line)
+
+        if in_task:
+            task_end_index = len(result)
+
+        if task_end_index != -1:
+            # Вставляем новые поля перед концом секции задачи (в обратном порядке для правильной очереди)
+            if last_attempts is not None and not found_attempts:
+                attempts_json = json.dumps(last_attempts, ensure_ascii=False)
+                result.insert(task_end_index, f"- **Последние попытки**: {attempts_json}")
+            if rework_count != -1 and not found_reworks:
+                result.insert(task_end_index, f"- **Переделки**: {rework_count}")
 
         _atomic_write(tasks_file, "\n".join(result) + "\n")
 
