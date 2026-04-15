@@ -116,16 +116,45 @@
 - **Описание**: Добавить параметр `max_reworks` (по умолчанию 3) в класс `Config` и обновить `load_config` для его загрузки из TOML. В dataclass `Task` добавить поля `rework_count: int = 0` и `last_attempts: list[dict] = field(default_factory=list)`. Обновить регулярные выражения в `parse_tasks` и логику в `update_task_status`, чтобы эти поля корректно читались из `TASKS.md` и записывались в него (поле `last_attempts` рекомендуется хранить в виде JSON-строки для упрощения парсинга).
 - **Критерий готовности**: Поля `rework_count` и `last_attempts` корректно парсятся из `TASKS.md` и сохраняются при вызове `update_task_status`.
 
-### TASK-055: Интеграция rework counter и статуса STUCK в пайплайн
-- **Статус**: blocked
+). I must first implement the missing foundations: updating `Config` and `Task`, fixing the `TASKS.md` parser/updater, and implementing `build_rework_prompt`. TASK-055 specifically requires handling `NEEDS_REWORK`, incrementing counters, managing `stuck` status, and saving attempts. I'll need to check `forgerace/review.py` for returned verdicts to correctly integrate this logic into `pipeline.py`.
+I'll check the verdict parsing in `review.py`.
+`review.py` defaults to `NEEDS_WORK` and doesn't explicitly check for `NEEDS_REWORK`, despite TASK-042's requirements. TASK-055 requires implementing `NEEDS_REWORK` handling, incrementing `rework_count`, checking `max_reworks`, transitioning to `stuck`, and updating `last_attempts`. Given that several "done" tasks (003, 042, 054, 056) are missing or incomplete, I'm rating this COMPLEXITY: 4. I'll break it down into three subtasks: 1) extending `Config` and `Task` (fixing TASK-054), 2) implementing the `stuck` and counter logic in `pipeline.py` (TASK-055 core), and 3) injecting attempt history into prompts (fixing TASK-056). I also need to verify if the `stuck` status exists anywhere in the current codebase.
+In `pipeline.py`, `stuck` isn't a terminal task status yet, just a local variable. TASK-055 requires implementing it as a terminal status, incrementing `rework_count`, and saving attempt history. Since several prerequisite tasks (003, 054, 056) are missing from the codebase, I'm rating this COMPLEXITY: 4 and breaking it down into three subtasks: 1) extending the `Config` and `Task` models (fixing TASK-054), 2) implementing the `stuck` logic and counter in `pipeline.py` (core TASK-055), and 3) generating attempt history and updating prompts (fixing TASK-056). I'll use `list[dict]` for `last_attempts` for flexibility.
+
+COMPLEXITY: 4
+
+### TASK-057: Расширение Config и модели Task
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: 1
-- **Зависимости**: TASK-054
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/config.py, forgerace/tasks.py
+- **Интеграция**: —
+- **Описание**: Добавить параметр `max_reworks` (default 3) в `Config`. В `Task` добавить `rework_count: int = 0` и `last_attempts: list[dict] = field(default_factory=list)`. Обновить парсер `parse_tasks` и `update_task_status` для поддержки этих полей в `TASKS.md` (поле `last_attempts` сериализовать в JSON).
+- **Критерий готовности**: Новые поля корректно читаются из `TASKS.md` и сохраняются при обновлении статуса.
+
+### TASK-058: Интеграция логики STUCK и rework counter в pipeline.py
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 2
+- **Зависимости**: TASK-057
 - **Файлы (новые)**: —
 - **Файлы (modify)**: forgerace/pipeline.py
 - **Интеграция**: —
-- **Описание**: В функциях `execute_task_competitive` и `execute_task_single` реализовать логику обработки `NEEDS_REWORK`. При получении такого вердикта: 1) Инкрементировать `rework_count` задачи. 2) Если `rework_count >= cfg.max_reworks`, изменить статус задачи на `stuck`, остановить работу агентов и завершить выполнение задачи. 3) Сохранять текущий summary diff и замечания ревьюера в список `last_attempts`.
-- **Критерий готовности**: При достижении лимита правок задача помечается как `stuck`, счетчик правок и история попыток корректно обновляются в процессе работы.
+- **Описание**: В функциях `execute_task_competitive` и `execute_task_single` реализовать обработку вердикта `NEEDS_REWORK` (или любого не-APPROVED). При каждой итерации: 1) Инкрементировать `task.rework_count`. 2) Если `rework_count >= cfg.max_reworks`, выставлять статус `stuck` и прерывать выполнение. 3) Перед вызовом `send_to_rework` сохранять `git diff --stat` и комментарии ревьюера в `task.last_attempts`.
+- **Критерий готовности**: При достижении лимита правок задача помечается как `stuck`, история попыток сохраняется в `TASKS.md`.
+
+### TASK-059: Реализация build_rework_prompt и инжекция в промпт
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 2
+- **Зависимости**: TASK-057
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/agents.py
+- **Интеграция**: —
+- **Описание**: Реализовать функцию `build_rework_prompt(attempts: list[dict]) -> str`, формирующую текстовый блок с историей предыдущих ошибок. Интегрировать её вызов в `build_prompt`, чтобы агент видел контекст прошлых неудачных попыток и замечания ревьюера.
+- **Критерий готовности**: В системном промпте агента появляется блок с описанием предыдущих итераций ревью.
 
 ### TASK-056: Реализация build_rework_prompt и инжекция истории в промпт
 - **Статус**: done
