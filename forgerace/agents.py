@@ -1,9 +1,13 @@
 """Запуск агентов (Claude, Gemini), стриминг событий, промпты."""
 
 import json
+import os
 import select
 import subprocess
 import time
+
+# Suppress node.js deprecation warnings (gemini CLI punycode spam)
+os.environ.setdefault("NODE_OPTIONS", "--no-deprecation")
 # Ревьюер: Нет импорта `field` из `dataclasses`.
 # Ответ: Замечание ошибочно, импорт присутствует.
 from dataclasses import dataclass, field
