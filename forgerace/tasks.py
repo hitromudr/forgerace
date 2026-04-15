@@ -1,6 +1,6 @@
 """Модель задачи, парсер TASKS.md, обновление статусов."""
 
-import json
+import json  # REVIEW: import json уже присутствует в файле
 import os
 import re
 import tempfile
@@ -77,7 +77,9 @@ def parse_tasks(path: Path | None = None) -> list[Task]:
         la_str = _field(raw, r"\*\*Attempts\*\*:\s*(.+)")
         if la_str and la_str != "—":
             try:
-                task.last_attempts = json.loads(la_str)
+                parsed = json.loads(la_str)
+                if isinstance(parsed, list):
+                    task.last_attempts = parsed
             except json.JSONDecodeError:
                 pass
         tasks.append(task)
@@ -122,6 +124,7 @@ def update_task_status(task_id: str, new_status: str, agent: str = "", branch: s
         tasks_file = cfg.tasks_file
         lines = tasks_file.read_text(encoding="utf-8").splitlines()
         in_task = False
+        in_metadata = False
         result = []
         seen_reworks = False
         seen_attempts = False
@@ -129,35 +132,49 @@ def update_task_status(task_id: str, new_status: str, agent: str = "", branch: s
         for line in lines:
             if line.startswith(f"### {task_id}:"):
                 in_task = True
+                in_metadata = True
                 seen_reworks = False
                 seen_attempts = False
+                result.append(line)
+                continue
             elif line.startswith("### TASK-"):
-                if in_task:
+                if in_task and in_metadata:
                     if rework_count is not None and not seen_reworks:
                         result.append(f"- **Reworks**: {rework_count}")
                     if last_attempts is not None and not seen_attempts:
                         result.append(f"- **Attempts**: {json.dumps(last_attempts, ensure_ascii=False)}")
                 in_task = False
+                in_metadata = False
 
             if in_task:
-                if line.startswith("- **Статус**:"):
-                    line = f"- **Статус**: {new_status}"
-                elif agent and line.startswith("- **Агент**:"):
-                    line = f"- **Агент**: {agent}"
-                elif branch and line.startswith("- **Ветка**:"):
-                    line = f"- **Ветка**: {branch}"
-                elif line.startswith("- **Reworks**:"):
-                    if rework_count is not None:
-                        line = f"- **Reworks**: {rework_count}"
-                    seen_reworks = True
-                elif line.startswith("- **Attempts**:"):
-                    if last_attempts is not None:
-                        line = f"- **Attempts**: {json.dumps(last_attempts, ensure_ascii=False)}"
-                    seen_attempts = True
+                if in_metadata:
+                    if line.startswith("- **"):
+                        if line.startswith("- **Статус**:"):
+                            line = f"- **Статус**: {new_status}"
+                        elif agent and line.startswith("- **Агент**:"):
+                            line = f"- **Агент**: {agent}"
+                        elif branch and line.startswith("- **Ветка**:"):
+                            line = f"- **Ветка**: {branch}"
+                        elif line.startswith("- **Reworks**:"):
+                            if rework_count is not None:
+                                line = f"- **Reworks**: {rework_count}"
+                            seen_reworks = True
+                        elif line.startswith("- **Attempts**:"):
+                            if last_attempts is not None:
+                                line = f"- **Attempts**: {json.dumps(last_attempts, ensure_ascii=False)}"
+                            seen_attempts = True
+                    else:
+                        if rework_count is not None and not seen_reworks:
+                            result.append(f"- **Reworks**: {rework_count}")
+                            seen_reworks = True
+                        if last_attempts is not None and not seen_attempts:
+                            result.append(f"- **Attempts**: {json.dumps(last_attempts, ensure_ascii=False)}")
+                            seen_attempts = True
+                        in_metadata = False
 
             result.append(line)
 
-        if in_task:
+        if in_task and in_metadata:
             if rework_count is not None and not seen_reworks:
                 result.append(f"- **Reworks**: {rework_count}")
             if last_attempts is not None and not seen_attempts:
