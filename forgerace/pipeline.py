@@ -25,6 +25,12 @@ from .utils import log, run_cmd, is_valid_path, C, R, agent_color
 from .worktree import cleanup_worktrees, create_worktree, remove_worktree
 
 
+tasks_md_lock = threading.Lock()
+
+def safe_update_task_status(*args, **kwargs):
+    with tasks_md_lock:
+        update_task_status(*args, **kwargs)
+
 # --- Heartbeat ---
 
 _active_agents: dict[str, tuple[str, Path, float]] = {}
@@ -351,17 +357,17 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
     # Pre-check: критерий готовности уже выполнен в develop?
     if check_already_done(task):
         log.info(f"[{task.id}] ✅ Критерий готовности уже выполнен в develop — пропускаю")
-        update_task_status(task.id, "done", agent="pre-check")
+        safe_update_task_status(task.id, "done", agent="pre-check")
         run_hook(cfg.hook_on_complete, task.id, "done", "pre-check")
         return True
 
-    update_task_status(task.id, "in_progress:both")
+    safe_update_task_status(task.id, "in_progress:both")
 
     from .agents import is_agent_disabled
     agent_names = [n for n in cfg.agent_names if not is_agent_disabled(n)]
     if not agent_names:
         log.error(f"[{task.id}] ✗ Нет доступных агентов (все отключены)")
-        update_task_status(task.id, "blocked")
+        safe_update_task_status(task.id, "blocked")
         return False
     all_results = []
     passed = []
@@ -434,11 +440,11 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 cancel_event.set()  # сигнал остальным агентам на завершение
                 # Мержим СРАЗУ, не ждём остальных
                 if merge_to_develop(result.branch, task.id):
-                    update_task_status(task.id, "done", agent=result.agent_type, branch=result.branch)
+                    safe_update_task_status(task.id, "done", agent=result.agent_type, branch=result.branch)
                     run_hook(cfg.hook_on_complete, task.id, "done", result.agent_type)
                     log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
                 else:
-                    update_task_status(task.id, f"review:{result.agent_type}",
+                    safe_update_task_status(task.id, f"review:{result.agent_type}",
                                       agent=result.agent_type, branch=result.branch)
                     run_hook(cfg.hook_on_complete, task.id, f"review:{result.agent_type}", result.agent_type)
                     log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
@@ -465,7 +471,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             log.error(f"[{task.id}]   → Проверьте: описание задачи, конфликт с существующим кодом, тесты среды")
         else:
             log.error(f"[{task.id}] ✗ ни один агент не написал рабочий код → BLOCKED")
-        update_task_status(task.id, "blocked")
+        safe_update_task_status(task.id, "blocked")
         run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
         _log_total_cost(task.id, all_results)
         cleanup_worktrees(all_results)
@@ -484,7 +490,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
 
         if rv["verdict"] == "error":
             log.error(f"[{task.id}] ✗ Ревью не удалось: {rv.get('reason', '?')}")
-            update_task_status(task.id, "blocked")
+            safe_update_task_status(task.id, "blocked")
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, all_results)
             cleanup_worktrees(all_results)
@@ -500,7 +506,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
         best_result = next((r for r in passed if r.agent_type.lower() == best_name), None)
         if not best_result:
             log.error(f"[{task.id}] ✗ Ревьюер выбрал '{best_name}', но такого агента нет")
-            update_task_status(task.id, "blocked")
+            safe_update_task_status(task.id, "blocked")
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, all_results)
             cleanup_worktrees(all_results)
@@ -517,7 +523,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             if repeat_count >= 1:
                 log.warning(f"[{task.id}] ⚠ Ревьюер зациклился (одно замечание {repeat_count + 1} раунда подряд) → эскалация")
                 _escalate_review_stall(task, passed, rv)
-                update_task_status(task.id, "blocked")
+                safe_update_task_status(task.id, "blocked")
                 run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
                 _log_total_cost(task.id, all_results)
                 cleanup_worktrees(all_results)
@@ -564,7 +570,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             log.info(f"[{task.id}/{best_result.agent_type}/ревью] ✅ одобрено (финал)")
         else:
             log.error(f"[{task.id}] ✗ не прошёл ревью за {cfg.max_review_rounds}+1 раундов → BLOCKED")
-            update_task_status(task.id, "blocked")
+            safe_update_task_status(task.id, "blocked")
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, all_results)
             cleanup_worktrees(all_results)
@@ -573,11 +579,11 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
     # Мерж
     log.info(f"[{task.id}/{best_result.agent_type}/мерж] 🏆 победитель")
     if merge_to_develop(best_result.branch, task.id):
-        update_task_status(task.id, "done", agent=best_result.agent_type, branch=best_result.branch)
+        safe_update_task_status(task.id, "done", agent=best_result.agent_type, branch=best_result.branch)
         run_hook(cfg.hook_on_complete, task.id, "done", best_result.agent_type)
         log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
     else:
-        update_task_status(task.id, f"review:{best_result.agent_type}",
+        safe_update_task_status(task.id, f"review:{best_result.agent_type}",
                           agent=best_result.agent_type, branch=best_result.branch)
         run_hook(cfg.hook_on_complete, task.id, f"review:{best_result.agent_type}", best_result.agent_type)
         log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
@@ -596,16 +602,16 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     # Pre-check: критерий готовности уже выполнен в develop?
     if check_already_done(task):
         log.info(f"[{task.id}] ✅ Критерий готовности уже выполнен в develop — пропускаю")
-        update_task_status(task.id, "done", agent="pre-check")
+        safe_update_task_status(task.id, "done", agent="pre-check")
         run_hook(cfg.hook_on_complete, task.id, "done", "pre-check")
         return True
 
-    update_task_status(task.id, f"in_progress:{agent_type}")
+    safe_update_task_status(task.id, f"in_progress:{agent_type}")
 
     result = run_single_agent(task, task_idx, agent_type)
     if not result.success:
         log.error(f"[{task.id}/{agent_type}] ✗ не написал код → BLOCKED")
-        update_task_status(task.id, "blocked")
+        safe_update_task_status(task.id, "blocked")
         run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
         _log_total_cost(task.id, [result])
         cleanup_worktrees([result])
@@ -618,7 +624,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     diff = get_diff(result, task)
     if not diff:
         log.error(f"[{task.id}] ✗ пустой diff → BLOCKED")
-        update_task_status(task.id, "blocked")
+        safe_update_task_status(task.id, "blocked")
         run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
         _log_total_cost(task.id, [result])
         cleanup_worktrees([result])
@@ -648,7 +654,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
             if repeat_count >= 1:
                 log.warning(f"[{task.id}/{reviewer}/ревью] ⚠ зациклился ({repeat_count + 1} раунда одно замечание)")
                 _escalate_review_stall(task, [best_result], rv)
-                update_task_status(task.id, "blocked")
+                safe_update_task_status(task.id, "blocked")
                 run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
                 _log_total_cost(task.id, [result])
                 cleanup_worktrees([result])
@@ -670,7 +676,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
                            workdir=best_result.workdir)
         if rv["verdict"] != "APPROVED":
             log.error(f"[{task.id}/{agent_type}/ревью] ✗ не прошёл → BLOCKED")
-            update_task_status(task.id, "blocked")
+            safe_update_task_status(task.id, "blocked")
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, [result])
             cleanup_worktrees([result])
@@ -680,11 +686,11 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     # Мерж
     log.info(f"[{task.id}/{agent_type}/мерж] 🏆 победитель")
     if merge_to_develop(best_result.branch, task.id):
-        update_task_status(task.id, "done", agent=agent_type, branch=best_result.branch)
+        safe_update_task_status(task.id, "done", agent=agent_type, branch=best_result.branch)
         run_hook(cfg.hook_on_complete, task.id, "done", agent_type)
         log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
     else:
-        update_task_status(task.id, f"review:{agent_type}", agent=agent_type, branch=best_result.branch)
+        safe_update_task_status(task.id, f"review:{agent_type}", agent=agent_type, branch=best_result.branch)
         run_hook(cfg.hook_on_complete, task.id, f"review:{agent_type}", agent_type)
         log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
 
@@ -981,7 +987,7 @@ def run_pipeline(
                                        cwd=cfg.root_dir, timeout=cfg.build_timeout, check=False)
                 if check_result.returncode == 0:
                     log.info(f"[{t.id}] ✅ check_command проходит — чекпоинт автозакрыт")
-                    update_task_status(t.id, "done", agent="auto-check")
+                    safe_update_task_status(t.id, "done", agent="auto-check")
                     run_hook(cfg.hook_on_complete, t.id, "done", "auto-check")
                 break  # проверяем один раз
 
@@ -997,7 +1003,7 @@ def run_pipeline(
             return
         for t in ready:
             _cleanup_task_branches(t)
-            update_task_status(t.id, "open")
+            safe_update_task_status(t.id, "open")
             t.status = "open"
     elif retry:
         retryable = find_retryable_tasks(tasks)
@@ -1005,7 +1011,7 @@ def run_pipeline(
             log.info(f"Retry: сбрасываю {[t.id for t in retryable]} в open")
             for t in retryable:
                 _cleanup_task_branches(t)
-                update_task_status(t.id, "open")
+                safe_update_task_status(t.id, "open")
                 t.status = "open"
         tasks = parse_tasks()
         ready = find_ready_tasks(tasks)
@@ -1030,7 +1036,7 @@ def run_pipeline(
                 log.info(f"Авто-retry застрявших: {[t.id for t in retryable_stuck]}")
                 for t in retryable_stuck:
                     _cleanup_task_branches(t)
-                    update_task_status(t.id, "open")
+                    safe_update_task_status(t.id, "open")
                     t.status = "open"
             tasks = parse_tasks()
 
@@ -1043,7 +1049,7 @@ def run_pipeline(
             if retryable:
                 log.info(f"Авто-retry незавершённых: {[t.id for t in retryable]}")
                 for t in retryable:
-                    update_task_status(t.id, "open")
+                    safe_update_task_status(t.id, "open")
                     t.status = "open"
                 tasks = parse_tasks()
                 ready = find_ready_tasks(tasks)
@@ -1135,7 +1141,7 @@ def run_pipeline(
     for t in ready:
         if check_already_done(t):
             log.info(f"[{t.id}] ✅ Критерий готовности уже выполнен в develop — пропускаю")
-            update_task_status(t.id, "done", agent="pre-check")
+            safe_update_task_status(t.id, "done", agent="pre-check")
             run_hook(cfg.hook_on_complete, t.id, "done", "pre-check")
         else:
             actually_ready.append(t)
@@ -1184,7 +1190,7 @@ def run_pipeline(
                 log.info(f"■ {task.id} → {status}")
             except Exception as e:
                 log.error(f"■ {task.id} → ОШИБКА: {e}")
-                update_task_status(task.id, "blocked")
+                safe_update_task_status(task.id, "blocked")
                 run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
 
     if cfg.review_run_log:
