@@ -2,10 +2,14 @@
 
 import logging
 import os
+import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+from .config_errors import ConfigValidationError
 
 log = logging.getLogger(__name__)
 
@@ -67,12 +71,12 @@ class Config:
     # --- Лимиты ---
     max_retries: int = 3
     max_parallel_tasks: int = 10
-    agent_timeout: int = 900
+    agent_timeout: float = 900.0
     build_timeout: int = 120
     max_review_rounds: int = 3
     review_frame: str = "adversarial"  # cognitive frame for self-review when only one agent
     max_task_complexity: int = 3
-    progress_timeout: int = 600  # kill агента если diff не меняется N секунд (10 мин)
+    progress_timeout: float = 600.0  # kill агента если diff не меняется N секунд (10 мин)
     max_concurrent: int = 3  # макс. параллельных задач в ConcurrencyLimiter
     budget_per_task_usd: Optional[float] = None
 
@@ -259,6 +263,99 @@ def _load_last_config() -> Optional[Path]:
     return None
 
 
+def validate_numeric_fields(cfg: Config) -> None:
+    """Валидирует числовые поля конфигурации."""
+    # 1) agent_timeout: isinstance(val, (int, float)) и > 0, привести к float
+    val = cfg.agent_timeout
+    if not isinstance(val, (int, float)) or isinstance(val, bool) or val <= 0:
+        raise ConfigValidationError(
+            f"agent_timeout must be a positive number, got {type(val).__name__}: {val}"
+        )
+    cfg.agent_timeout = float(val)
+
+    # 2) progress_timeout: isinstance(val, (int, float)) и > 0, привести к float
+    val = cfg.progress_timeout
+    if not isinstance(val, (int, float)) or isinstance(val, bool) or val <= 0:
+        raise ConfigValidationError(
+            f"progress_timeout must be a positive number, got {type(val).__name__}: {val}"
+        )
+    cfg.progress_timeout = float(val)
+
+    # 3) max_parallel_tasks: строго isinstance(val, int) и > 0
+    val = cfg.max_parallel_tasks
+    if not isinstance(val, int) or isinstance(val, bool) or val <= 0:
+        raise ConfigValidationError(
+            f"max_parallel_tasks must be a positive integer, got {type(val).__name__}: {val}"
+        )
+
+    # 4) max_retries: isinstance(val, int) и >= 0 (ноль допустим)
+    val = cfg.max_retries
+    if not isinstance(val, int) or isinstance(val, bool) or val < 0:
+        raise ConfigValidationError(
+            f"max_retries must be a non-negative integer, got {type(val).__name__}: {val}"
+        )
+
+    # 5) max_concurrent: isinstance(val, int) и > 0
+    val = cfg.max_concurrent
+    if not isinstance(val, int) or isinstance(val, bool) or val <= 0:
+        raise ConfigValidationError(
+            f"max_concurrent must be a positive integer, got {type(val).__name__}: {val}"
+        )
+
+    # 6) соотношение таймаутов: если progress_timeout >= agent_timeout — log.warning
+    if cfg.progress_timeout >= cfg.agent_timeout:
+        log.warning(
+            "progress_timeout (%.1f) >= agent_timeout (%.1f). "
+            "Агент может быть убит по отсутствию прогресса раньше, чем по общему таймауту.",
+            cfg.progress_timeout, cfg.agent_timeout
+        )
+
+
+def validate_agent_commands(cfg: Config) -> None:
+    """Проверяет наличие бинарников для всех включённых агентов."""
+    for name, acfg in cfg.agents.items():
+        if not acfg.enabled:
+            continue
+
+        if not isinstance(acfg.command, str):
+            raise ConfigValidationError(f"Агент '{name}': команда должна быть строкой")
+
+        cmd = acfg.command.strip()
+        if not cmd:
+            raise ConfigValidationError(f"Агент '{name}': команда не может быть пустой")
+
+        # Парсим только бинарник, игнорируя аргументы
+        try:
+            parts = shlex.split(cmd)
+        except ValueError as e:
+            raise ConfigValidationError(f"Агент '{name}': ошибка разбора команды: {e}")
+
+        if not parts:
+            raise ConfigValidationError(f"Агент '{name}': команда не может быть пустой")
+        binary = parts[0]
+
+        if not shutil.which(binary):
+            log.warning("Агент '%s': команда '%s' не найдена в PATH", name, cmd)
+
+
+def validate_paths(cfg: Config) -> None:
+    """Проверяет существование критических путей в конфигурации.
+
+    Fail-fast только для root_dir. Для остальных — warning.
+    """
+    # 1. root_dir — обязана существовать
+    if not cfg.root_dir.is_dir():
+        raise ConfigValidationError(f"root_dir '{cfg.root_dir}' не существует")
+
+    # 2. discuss_dir
+    if not cfg.discuss_dir.is_dir():
+        log.warning("Директория дискуссий '%s' не найдена. Она будет создана при необходимости.", cfg.discuss_dir)
+
+    # 3. agents_dir
+    if not cfg.agents_dir.is_dir():
+        log.warning("Директория агентов '%s' не найдена. Она будет создана при необходимости.", cfg.agents_dir)
+
+
 def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = None) -> Config:
     """Загружает конфиг из TOML-файла. Если файла нет — возвращает дефолты.
 
@@ -282,6 +379,10 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
         config_path = _load_last_config()
 
     if config_path is None or not config_path.exists() or tomllib is None:
+        # При дефолтах тоже валидируем (например, root_dir)
+        validate_numeric_fields(cfg)
+        validate_agent_commands(cfg)
+        validate_paths(cfg)
         return cfg
 
     _save_last_config(config_path)
@@ -402,6 +503,10 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     hooks = data.get("hooks", {})
     if "on_complete" in hooks:
         cfg.hook_on_complete = hooks["on_complete"]
+
+    validate_numeric_fields(cfg)
+    validate_agent_commands(cfg)
+    validate_paths(cfg)
 
     return cfg
 
