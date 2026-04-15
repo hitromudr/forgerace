@@ -790,8 +790,12 @@ def main():
     log.info("=" * 60)
     log.info("ForgeRace запущен")
     log.info(f"Корень: {cfg.root_dir}")
-    colored_names = [f"{agent_color(n)}{n}{R}" for n in cfg.agent_names]
-    log.info(f"Агенты: [{', '.join(colored_names)}]")
+    cli_names = [f"{agent_color(n)}{n}{R}" for n in cfg.cli_agent_names]
+    api_names = [f"{agent_color(n)}{n}{R}" for n in cfg.agent_names if n not in cfg.cli_agent_names]
+    parts = [f"код: [{', '.join(cli_names)}]"]
+    if api_names:
+        parts.append(f"ревью: [{', '.join(api_names)}]")
+    log.info(f"Агенты: {', '.join(parts)}")
     log.info(f"Макс. задач: {max_tasks}")
     log.info("=" * 60)
 
