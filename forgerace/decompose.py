@@ -190,13 +190,8 @@ COMPLEXITY: N
             desc_short = (t.description or "")[:100].rstrip()
             log.info(f"    {t.id}: {t.name} [{status}]\n      → {desc_short}")
 
-    # Коммитим
-    from .utils import run_cmd
-    run_cmd(["git", "add", "TASKS.md"], cwd=cfg.root_dir, check=False)
-    run_cmd(
-        ["git", "commit", "-m", f"decompose: {task.id} → {', '.join(new_task_ids)}"],
-        cwd=cfg.root_dir, check=False,
-    )
+    # TASKS.md обновлён на диске, но НЕ коммитим автоматически —
+    # при --team это засирает develop, пользователь коммитит сам
 
     return True
 
@@ -258,9 +253,5 @@ def create_checkpoint_task(error_log: str):
 - **Ветка**: —"""
 
     insert_tasks_into_tasksmd(task_block, "")
-    from .utils import run_cmd
-    run_cmd(["git", "add", "TASKS.md"], cwd=cfg.root_dir, check=False)
-    run_cmd(["git", "commit", "-m", f"auto: {next_id} — чекпоинт make check"],
-            cwd=cfg.root_dir, check=False)
     print(f"  ✅ Создана {next_id}: Чекпоинт — починить make check")
     print(f"\n    → {run_hint()}")

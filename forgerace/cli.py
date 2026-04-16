@@ -459,6 +459,51 @@ def _cmd_agents_list():
     print(f"\n  Активные: {C['bold']}{cfg.all_agent_names}{R}")
 
 
+def _cmd_monitor(interval: int = 10):
+    """Live dashboard: progress with auto-refresh."""
+    import time as _time
+    try:
+        while True:
+            print("\033[2J\033[H", end="")
+            tasks = parse_tasks()
+            teams = {}
+            for t in tasks:
+                d = t.discussion or ""
+                if d and d != "—":
+                    teams.setdefault(d, []).append(t)
+
+            now = _time.strftime("%H:%M:%S")
+            print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}  (Ctrl+C to exit){R}\n")
+            print(f"  {C['bold']}{'Team':<35} {'Progress':>10} {'Bar':>12} {'Status'}{R}")
+            print(f"  {'─' * 75}")
+
+            for team_name, tt in sorted(teams.items()):
+                done = sum(1 for t in tt if t.status == "done")
+                ip = sum(1 for t in tt if "progress" in t.status)
+                blocked = sum(1 for t in tt if "blocked" in t.status.lower())
+                total = len(tt)
+                bar_len = 10
+                filled = int(bar_len * done / total) if total else 0
+                bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (bar_len - filled)}{R}"
+                if done == total and total > 0:
+                    status = f"{C['green']}{C['bold']}DONE{R}"
+                elif ip > 0:
+                    status = f"{C['yellow']}coding ({ip}){R}"
+                elif blocked > 0:
+                    status = f"{C['red']}blocked ({blocked}){R}"
+                else:
+                    waiting = total - done - ip - blocked
+                    status = f"{C['dim']}waiting ({waiting}){R}" if waiting else ""
+                pct = f"{done}/{total}"
+                short = team_name.replace("championship-v2-", "")
+                print(f"  {short:<35} {pct:>10} {bar} {status}")
+
+            print(f"\n  {C['dim']}Refresh: {interval}s{R}")
+            _time.sleep(interval)
+    except KeyboardInterrupt:
+        print(f"\n  {C['dim']}Monitor stopped.{R}")
+
+
 def _cmd_feature(subcmd: str | None, args):
     """Feature branch management."""
     if subcmd == "list" or subcmd is None:
@@ -872,6 +917,10 @@ def main():
     feat_merge = feat_sub.add_parser("merge", help="Мерж feature branch в develop")
     feat_merge.add_argument("branch", help="Имя feature branch")
 
+    # monitor
+    mon_p = sub.add_parser("monitor", help="Live dashboard прогресса")
+    mon_p.add_argument("--interval", type=int, default=10, help="Интервал обновления (сек)")
+
     # discuss
     disc_p = sub.add_parser("discuss", help="Дискуссии",
         epilog="Примеры:\n"
@@ -1008,6 +1057,10 @@ def main():
     # feature
     if args.command == "feature":
         _cmd_feature(getattr(args, "feat_cmd", None), args)
+        return
+
+    if args.command == "monitor":
+        _cmd_monitor(getattr(args, "interval", 10))
         return
 
     # models

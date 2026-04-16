@@ -1310,12 +1310,12 @@ def run_pipeline(
     if cfg.review_run_log:
         review_run_log()
 
-    # Коммитим статусы
-    status_diff = run_cmd(["git", "diff", "--stat", "TASKS.md"], cwd=cfg.root_dir, check=False)
-    if status_diff.stdout.strip():
-        run_cmd(["git", "add", "TASKS.md"], cwd=cfg.root_dir, check=False)
-        run_cmd(["git", "commit", "-m", "update: статусы задач после прогона"], cwd=cfg.root_dir, check=False)
-        # git push убран — пуш делает пользователь, не оркестратор
+    # Коммитим статусы (только если НЕ на feature branch — иначе засирает develop)
+    if not team:
+        status_diff = run_cmd(["git", "diff", "--stat", "TASKS.md"], cwd=cfg.root_dir, check=False)
+        if status_diff.stdout.strip():
+            run_cmd(["git", "add", "TASKS.md"], cwd=cfg.root_dir, check=False)
+            run_cmd(["git", "commit", "-m", "update: статусы задач после прогона"], cwd=cfg.root_dir, check=False)
 
     # Restore original dev_branch if we were on a feature branch
     if team:
