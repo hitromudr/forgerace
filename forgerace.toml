@@ -95,6 +95,31 @@ prompt_stdin = true
 inactivity_timeout = 300
 enabled = true
 
+# Goose-based coding agents (nvidia free API)
+[agents.goose-llama]
+command = "goose"
+args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
+        "--model", "meta/llama-3.3-70b-instruct", "--provider", "openai"]
+protocol = "cli"
+prompt_stdin = true
+inactivity_timeout = 300
+enabled = true
+[agents.goose-llama.env]
+OPENAI_HOST = "https://integrate.api.nvidia.com"
+OPENAI_API_KEY = "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"
+
+[agents.goose-devstral]
+command = "goose"
+args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
+        "--model", "mistralai/devstral-2-123b-instruct-2512", "--provider", "openai"]
+protocol = "cli"
+prompt_stdin = true
+inactivity_timeout = 300
+enabled = true
+[agents.goose-devstral.env]
+OPENAI_HOST = "https://integrate.api.nvidia.com"
+OPENAI_API_KEY = "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"
+
 # Когнитивные фреймы из frames/
 [frames.reviewer]
 description = "Strict code reviewer: task match, correctness, data safety"

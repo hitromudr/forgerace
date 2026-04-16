@@ -1134,15 +1134,31 @@ def _chat_agent_reply(filepath: Path, agent_spec: str):
             cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
         elif agent_type == "qwen":
             cmd = [acfg.command, "-p", "--output-format", "text", "--approval-mode", "yolo"]
+        elif acfg.command == "goose":
+            # Extract --model and --provider from agent args, override output to text
+            goose_model = "meta/llama-3.3-70b-instruct"
+            goose_provider = "openai"
+            for j, a in enumerate(acfg.args):
+                if a == "--model" and j + 1 < len(acfg.args):
+                    goose_model = acfg.args[j + 1]
+                elif a == "--provider" and j + 1 < len(acfg.args):
+                    goose_provider = acfg.args[j + 1]
+            cmd = [acfg.command, "run", "-i", "/dev/stdin", "--output-format", "text",
+                   "--provider", goose_provider, "--model", goose_model]
         else:
             cmd = [acfg.command, "-p", "", "--output-format", "text"]
+
+        # Build subprocess env (for goose: OPENAI_HOST, OPENAI_API_KEY)
+        proc_env = None
+        if acfg.env:
+            proc_env = {**os.environ, **acfg.env}
 
         reply_lines = []
         start_time = time.time()
         try:
             proc = subprocess.Popen(
                 cmd, cwd=_chat_cwd or cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                stdin=subprocess.PIPE, text=True, bufsize=1,
+                stdin=subprocess.PIPE, text=True, bufsize=1, env=proc_env,
             )
             try:
                 proc.stdin.write(prompt)

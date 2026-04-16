@@ -33,6 +33,7 @@ def agent_color(name: str) -> str:
         "llama": "yellow", "qwen-api": "magenta", "devstral": "green",
         "gpt-oss": "cyan", "deepseek": "yellow", "techlead": "green",
         "aider-llama": "yellow", "aider-devstral": "green",
+        "goose-llama": "red", "goose-devstral": "white",
     }
     return C.get(colors.get(name, "white"), C["white"])
 
@@ -70,6 +71,10 @@ class _ColorFormatter(logging.Formatter):
          lambda m: f"{C['yellow']}{m.group(1)}{R}"),
         (re.compile(r"\b(aider-devstral)\b", re.IGNORECASE),
          lambda m: f"{C['green']}{m.group(1)}{R}"),
+        (re.compile(r"\b(goose-llama)\b", re.IGNORECASE),
+         lambda m: f"{C['red']}{m.group(1)}{R}"),
+        (re.compile(r"\b(goose-devstral)\b", re.IGNORECASE),
+         lambda m: f"{C['white']}{m.group(1)}{R}"),
         (re.compile(r"\b(claude)\b", re.IGNORECASE),
          lambda m: f"{C['cyan']}{m.group(1)}{R}"),
         (re.compile(r"\b(gemini)\b", re.IGNORECASE),

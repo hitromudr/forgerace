@@ -181,6 +181,72 @@ def _log_codex_event(tag: str, event: dict, usage_acc: TokenUsage | None = None)
         log.info(f"[{tag}] 📊 turn done, {in_tok // 1000}k in/{out_tok // 1000}k out")
 
 
+def _log_goose_event(tag: str, event: dict, usage_acc: TokenUsage | None = None):
+    """Логирует событие из stream-json вывода Goose CLI.
+
+    Goose format:
+      {"type":"message","message":{"content":[{"type":"text","text":"..."}]}}
+      {"type":"complete","total_tokens":N}
+    """
+    etype = event.get("type", "")
+
+    if etype == "message":
+        msg = event.get("message", {})
+        for block in msg.get("content", []):
+            btype = block.get("type", "")
+            if btype == "tool_use":
+                tool = block.get("name", "?")
+                inp = block.get("input", {})
+                if "read" in tool.lower():
+                    path = inp.get("path", inp.get("file_path", "?")).rsplit("/", 1)[-1]
+                    log.info(f"[{tag}] 📖 Read {path}")
+                elif any(w in tool.lower() for w in ("write", "edit", "replace")):
+                    path = inp.get("path", inp.get("file_path", "?")).rsplit("/", 1)[-1]
+                    log.info(f"[{tag}] ✏️  {tool} {path}")
+                elif any(w in tool.lower() for w in ("bash", "shell", "command", "run")):
+                    cmd_str = str(inp.get("command", "?"))[:120]
+                    log.info(f"[{tag}] 💻 Bash: {cmd_str}")
+                else:
+                    log.info(f"[{tag}] 🔧 {tool}")
+            elif btype == "text":
+                text = block.get("text", "")
+                if text and len(text) < 200:
+                    log.info(f"[{tag}] 💬 {text[:120]}")
+
+    elif etype == "complete":
+        total = event.get("total_tokens", 0)
+        if usage_acc and total:
+            # Goose reports only total_tokens; estimate split 70/30
+            usage_acc.accumulate(TokenUsage(
+                input_tokens=int(total * 0.7),
+                output_tokens=int(total * 0.3),
+            ))
+        log.info(f"[{tag}] 📊 done, {total} total tokens")
+
+
+def _goose_activity_check(event: dict) -> bool:
+    """Goose activity: message events count as activity."""
+    return event.get("type") in ("message", "complete")
+
+
+def _goose_extract_result(stdout_lines: list[str]) -> str:
+    """Extract final text from goose stream-json output."""
+    for raw in reversed(stdout_lines):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            ev = json.loads(raw)
+            if ev.get("type") == "message":
+                msg = ev.get("message", {})
+                for block in msg.get("content", []):
+                    if block.get("type") == "text" and block.get("text", ""):
+                        return block["text"]
+        except json.JSONDecodeError:
+            continue
+    return ""
+
+
 def _codex_activity_check(event: dict) -> bool:
     etype = event.get("type", "")
     if etype in ("item.started", "item.completed"):
@@ -277,6 +343,8 @@ def _run_agent_streaming(
     activity_check_fn,
     extract_result_fn,
     cancel_event: "threading.Event | None" = None,
+    env: dict[str, str] | None = None,
+    prompt_stdin: str = "",
 ) -> AgentProcessResult:
     """Общий цикл запуска агента со стримингом."""
     import threading
@@ -294,11 +362,19 @@ def _run_agent_streaming(
     # Ревьюер: В `_run_agent_streaming` нет создания `usage_acc = TokenUsage()`.
     # Ответ: Замечание ошибочно, переменная создаётся:
     usage_acc = TokenUsage()
+    proc_env = {**os.environ, **(env or {})} if env else None
     try:
         proc = subprocess.Popen(
             cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL, text=True, bufsize=1,
+            stdin=subprocess.PIPE if prompt_stdin else subprocess.DEVNULL,
+            text=True, bufsize=1, env=proc_env,
         )
+        if prompt_stdin:
+            try:
+                proc.stdin.write(prompt_stdin)
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass
         while True:
             remaining = deadline - time.time()
             if remaining <= 0:
@@ -426,6 +502,26 @@ def _gemini_extract_result(stdout_lines: list[str]) -> str:
     return ""
 
 
+_AIDER_STDERR_NOISE = (
+    "warning: it's best to only add files",
+    "https://aider.chat/docs/troubleshooting/edit-errors.html",
+    "aider/docs/troubleshooting",
+    "warning: no model settings found",
+)
+
+
+def _filter_aider_stderr(stderr: str) -> str:
+    """Remove known aider noise lines from stderr."""
+    if not stderr:
+        return stderr
+    lines = stderr.splitlines()
+    filtered = [
+        line for line in lines
+        if not any(noise in line.lower() for noise in _AIDER_STDERR_NOISE)
+    ]
+    return "\n".join(filtered).strip()
+
+
 def _run_agent_text(
     cmd: list[str],
     workdir: Path,
@@ -503,6 +599,7 @@ def _run_agent_text(
 
         proc.wait(timeout=10)
         stderr = proc.stderr.read() if proc.stderr else ""
+        stderr = _filter_aider_stderr(stderr)
         return AgentProcessResult(
             returncode=proc.returncode or 0,
             stdout="".join(stdout_lines),
@@ -516,6 +613,20 @@ def _run_agent_text(
         except Exception:
             pass
         return AgentProcessResult(returncode=1, stdout="", stderr=str(e), usage=usage_acc)
+
+
+def _extract_task_files(task: Task) -> list[str]:
+    """Extract file paths from task.files_new and task.files_modify fields."""
+    files = []
+    for raw in (task.files_new, task.files_modify):
+        if not raw or raw.strip() in ("", "—", "-"):
+            continue
+        # Fields may contain comma- or space-separated paths, e.g. "src/a.rs, src/b.rs"
+        for part in raw.replace(",", " ").split():
+            part = part.strip().strip("`")
+            if part and part not in ("—", "-"):
+                files.append(part)
+    return files
 
 
 def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
@@ -541,6 +652,11 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
 
     # Text-mode agents (aider, etc.) — no stream-json
     if acfg.protocol == "text":
+        # Aider: pass --file args so it only sees task-relevant files
+        if acfg.command == "aider":
+            task_files = _extract_task_files(task)
+            for fpath in task_files:
+                final_cmd.extend(["--file", fpath])
         return _run_agent_text(
             final_cmd, workdir, tag, acfg.inactivity_timeout,
             cancel_event=cancel_event,
@@ -565,6 +681,14 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
             final_cmd, workdir, tag, acfg.inactivity_timeout,
             _log_codex_event, _codex_activity_check, _codex_extract_result,
             cancel_event=cancel_event,
+        )
+    elif acfg.command == "goose":
+        return _run_agent_streaming(
+            final_cmd, workdir, tag, acfg.inactivity_timeout,
+            _log_goose_event, _goose_activity_check, _goose_extract_result,
+            cancel_event=cancel_event,
+            env=acfg.env if acfg.env else None,
+            prompt_stdin=prompt if acfg.prompt_stdin else "",
         )
     else:
         # Qwen и другие CLI с Claude-совместимым stream-json
