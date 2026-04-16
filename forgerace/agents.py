@@ -307,6 +307,13 @@ def _event_has_productive_action(event: dict) -> bool:
         tool = event.get("tool", event.get("tool_name", "")).lower()
         if any(w in tool for w in ("write", "edit", "replace", "bash", "run", "command", "shell")):
             return True
+    # Goose: toolRequest inside message content
+    if etype == "message":
+        for block in event.get("message", {}).get("content", []):
+            if block.get("type") == "toolRequest":
+                tool_name = (block.get("toolCall", {}).get("value", {}).get("name", "")).lower()
+                if any(w in tool_name for w in ("write", "edit", "text_editor", "shell", "bash", "command")):
+                    return True
     return False
 
 
@@ -812,15 +819,29 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
         cmd = [acfg.command, "-p", "", "--output-format", "text"]
     elif reviewer_type == "codex":
         cmd = [acfg.command, "exec", "--full-auto"]
+    elif acfg.command == "goose":
+        # Goose review: text output, stdin prompt
+        goose_model = "llama-70b"
+        goose_provider = "openai"
+        for j, a in enumerate(acfg.args):
+            if a == "--model" and j + 1 < len(acfg.args):
+                goose_model = acfg.args[j + 1]
+            elif a == "--provider" and j + 1 < len(acfg.args):
+                goose_provider = acfg.args[j + 1]
+        cmd = [acfg.command, "run", "-i", "/dev/stdin", "--output-format", "text",
+               "--provider", goose_provider, "--model", goose_model]
     else:
         cmd = [acfg.command]
         for arg in acfg.review_args:
             if arg != "{prompt}":
                 cmd.append(arg)
+    # Build env (for goose, aider with proxy)
+    proc_env = {**os.environ, **(acfg.env if acfg.env else {})}
     timeout = acfg.inactivity_timeout or 300
     result = subprocess.run(
         cmd, cwd=cfg.root_dir, input=prompt,
         capture_output=True, text=True, timeout=timeout,
+        env=proc_env,
     )
     if result.returncode != 0:
         log.warning("run_reviewer(%s) exit code %d: %s",

@@ -66,8 +66,7 @@ enabled = true
 
 # Aider-based coding agents (nvidia free API)
 # Aider agents — через LiteLLM proxy (localhost:4000)
-# aider-llama: llama-70b зацикливается при кодинге, но работает как ревьюер
-# Disabled as coding agent. Используй llama API agent для ревью.
+# aider-llama disabled: llama-70b зацикливается при кодинге
 [agents.aider-llama]
 command = "aider"
 args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
@@ -83,6 +82,25 @@ prompt_stdin = true
 inactivity_timeout = 300
 enabled = false
 [agents.aider-llama.env]
+no_proxy = "127.0.0.1,localhost"
+NO_PROXY = "127.0.0.1,localhost"
+
+# aider-qwen: qwen3.5-122b через LiteLLM — замена нерабочему llama
+[agents.aider-qwen]
+command = "aider"
+args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
+        "--openai-api-key", "fr-local-dev",
+        "--model", "openai/qwen-122b",
+        "--edit-format", "diff",
+        "--message-file", "/dev/stdin",
+        "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
+        "--no-show-model-warnings", "--no-gitignore",
+        "--no-browser", "--no-analytics", "--no-check-update"]
+protocol = "text"
+prompt_stdin = true
+inactivity_timeout = 300
+enabled = true
+[agents.aider-qwen.env]
 no_proxy = "127.0.0.1,localhost"
 NO_PROXY = "127.0.0.1,localhost"
 
@@ -115,7 +133,7 @@ args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
 protocol = "cli"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = false
+enabled = true
 [agents.goose-llama.env]
 OPENAI_HOST = "http://127.0.0.1:4000"
 OPENAI_API_KEY = "fr-local-dev"
@@ -129,7 +147,7 @@ args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
 protocol = "cli"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = false
+enabled = true
 [agents.goose-devstral.env]
 OPENAI_HOST = "http://127.0.0.1:4000"
 OPENAI_API_KEY = "fr-local-dev"
