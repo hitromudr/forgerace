@@ -765,3 +765,19 @@ COMPLEXITY: 4
 - **Дискуссия**: —
 - **Агент**: —
 - **Ветка**: —
+
+### TASK-100: Реализация функции приветствия greet
+- **Статус**: done
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/utils.py
+- **Интеграция**: —
+- **Описание**: Добавить функцию `greet(name: str) -> str` в `forgerace/utils.py`, которая возвращает `f"Hello, {name}!"`.
+- **Запрещено**: —
+- **Проверка**: python3 -c "from forgerace.utils import greet; assert greet('World') == 'Hello, World!'"
+- **Критерий готовности**: Функция `greet` успешно импортируется из `forgerace.utils` и возвращает корректную строку приветствия.
+- **Дискуссия**: test-5agents
+- **Агент**: gemini
+- **Ветка**: task/task-100-realizatsiya-funktsii-privetstviya-greet-gemini
