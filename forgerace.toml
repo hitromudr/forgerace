@@ -82,6 +82,7 @@ prompt_stdin = true
 inactivity_timeout = 300
 enabled = false
 [agents.aider-llama.env]
+BROWSER = "true"
 no_proxy = "127.0.0.1,localhost"
 NO_PROXY = "127.0.0.1,localhost"
 
@@ -101,6 +102,7 @@ prompt_stdin = true
 inactivity_timeout = 300
 enabled = true
 [agents.aider-qwen.env]
+BROWSER = "true"
 no_proxy = "127.0.0.1,localhost"
 NO_PROXY = "127.0.0.1,localhost"
 
@@ -119,6 +121,7 @@ prompt_stdin = true
 inactivity_timeout = 300
 enabled = true
 [agents.aider-devstral.env]
+BROWSER = "true"
 no_proxy = "127.0.0.1,localhost"
 NO_PROXY = "127.0.0.1,localhost"
 
