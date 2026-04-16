@@ -459,6 +459,81 @@ def _cmd_agents_list():
     print(f"\n  Активные: {C['bold']}{cfg.all_agent_names}{R}")
 
 
+def _cmd_feature(subcmd: str | None, args):
+    """Feature branch management."""
+    if subcmd == "list" or subcmd is None:
+        result = run_cmd(["git", "branch", "--list", "feature/*"], cwd=cfg.root_dir, check=False)
+        branches = [b.strip().lstrip("* ") for b in result.stdout.strip().split("\n") if b.strip()]
+        if not branches:
+            print(f"  {C['dim']}Нет feature branches. Создаются автоматически при ./fr run --team <name>{R}")
+            return
+        tasks = parse_tasks()
+        print(f"\n  {C['bold']}Feature Branches{R}\n")
+        for b in branches:
+            # Count tasks linked to this feature
+            team_name = b.replace("feature/", "")
+            team_tasks = [t for t in tasks if team_name in (t.discussion or "")]
+            done = sum(1 for t in team_tasks if t.status == "done")
+            total = len(team_tasks)
+            bar = f"{C['green']}{done}{R}/{total}" if total else f"{C['dim']}0{R}"
+            print(f"  {C['bold']}{b}{R}  задачи: {bar}")
+        print()
+    elif subcmd == "score":
+        _cmd_feature_score()
+    elif subcmd == "merge":
+        branch = getattr(args, "branch", "")
+        if not branch.startswith("feature/"):
+            branch = f"feature/{branch}"
+        print(f"  Мерж {C['bold']}{branch}{R} → {C['bold']}{cfg.dev_branch}{R}")
+        result = run_cmd(["git", "merge", branch, "--no-ff", "-m",
+                          f"Merge {branch} → {cfg.dev_branch}"],
+                         cwd=cfg.root_dir, check=False)
+        if result.returncode == 0:
+            print(f"  {C['green']}Успешно{R}")
+        else:
+            print(f"  {C['red']}Ошибка: {result.stderr[:200]}{R}")
+
+
+def _cmd_feature_score():
+    """Scoreboard: per-team metrics from logs."""
+    tasks = parse_tasks()
+    # Find all championship discussions
+    teams = {}
+    for t in tasks:
+        d = t.discussion or ""
+        if d and d != "—":
+            teams.setdefault(d, []).append(t)
+
+    if not teams:
+        print(f"  {C['dim']}Нет задач с привязкой к дискуссиям{R}")
+        return
+
+    print(f"\n  {C['bold']}{'Команда':<40} {'Done':>5} {'Total':>6} {'Cost':>8}{R}")
+    print(f"  {'─' * 62}")
+    for team_name, tt in sorted(teams.items()):
+        done = sum(1 for t in tt if t.status == "done")
+        total = len(tt)
+        # Parse cost from logs
+        cost = 0.0
+        for t in tt:
+            for logf in cfg.log_dir.glob(f"{t.id.lower()}-*.log"):
+                try:
+                    text = logf.read_text(errors="replace")
+                    for line in text.split("\n"):
+                        if "Стоимость:" in line or "cost:" in line.lower():
+                            import re as _re
+                            m = _re.search(r"\$(\d+\.?\d*)", line)
+                            if m:
+                                cost += float(m.group(1))
+                except OSError:
+                    pass
+        pct = f"{done*100//total}%" if total else "—"
+        cost_str = f"${cost:.2f}" if cost > 0 else "—"
+        color = C['green'] if done == total and total > 0 else ""
+        print(f"  {color}{team_name:<40} {done:>5} {total:>6} {cost_str:>8}{R}")
+    print()
+
+
 def _cmd_mode(mode_name: str):
     """Переключает режим competitive/distributed в forgerace.toml."""
     if mode_name not in ("competitive", "distributed"):
@@ -577,6 +652,11 @@ def _print_full_help():
   ./fr run --retry                       Перезапуск упавших (blocked → open)
   ./fr run --auto --max-tasks 4          Авто-цикл: разблокированные → запуск
   ./fr run --dry-run                     Показать что запустится (без запуска)
+
+{Y}FEATURE BRANCHES:{R}
+  ./fr feature list                      Все feature branches и прогресс
+  ./fr feature score                     Скорборд по командам (задачи, стоимость)
+  ./fr feature merge <branch>            Мерж feature branch в develop
 
 {Y}ДИСКУССИИ:{R}
   ./fr discuss new <тема> '<вопрос>'     Создать дискуссию
@@ -779,6 +859,19 @@ def main():
     run_p.add_argument("--max-tasks", type=int, default=None,
                         help="Макс. задач параллельно (дефолт из TOML)")
 
+    # feature
+    feat_p = sub.add_parser("feature", help="Feature branches (команды)",
+        epilog="Примеры:\n"
+               "  ./fr feature list                     все feature branches\n"
+               "  ./fr feature score                    скорборд по командам\n"
+               "  ./fr feature merge <branch>           мерж feature в develop\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    feat_sub = feat_p.add_subparsers(dest="feat_cmd")
+    feat_sub.add_parser("list", help="Список feature branches")
+    feat_sub.add_parser("score", help="Скорборд по командам")
+    feat_merge = feat_sub.add_parser("merge", help="Мерж feature branch в develop")
+    feat_merge.add_argument("branch", help="Имя feature branch")
+
     # discuss
     disc_p = sub.add_parser("discuss", help="Дискуссии",
         epilog="Примеры:\n"
@@ -910,6 +1003,11 @@ def main():
         else:
             mode_color = C['cyan'] if cfg.mode == "competitive" else C['magenta']
             print(f"  Режим: {mode_color}{C['bold']}{cfg.mode}{R}")
+        return
+
+    # feature
+    if args.command == "feature":
+        _cmd_feature(getattr(args, "feat_cmd", None), args)
         return
 
     # models

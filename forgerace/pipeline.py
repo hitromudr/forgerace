@@ -984,6 +984,19 @@ def run_pipeline(
     tasks = _parse()
     if team:
         log.info(f"Фильтр --team={team}: {len(tasks)} задач")
+        # Feature branch: each team works on its own branch, not develop
+        feature_branch = f"feature/{team}"
+        original_dev_branch = cfg.dev_branch
+        # Create feature branch from develop if it doesn't exist
+        check = run_cmd(["git", "rev-parse", "--verify", feature_branch],
+                        cwd=cfg.root_dir, check=False)
+        if check.returncode != 0:
+            run_cmd(["git", "branch", feature_branch, cfg.dev_branch], cwd=cfg.root_dir)
+            log.info(f"Создана feature branch: {feature_branch} от {cfg.dev_branch}")
+        else:
+            log.info(f"Feature branch: {feature_branch}")
+        # Redirect all worktree/merge operations to feature branch
+        cfg.dev_branch = feature_branch
 
     # Автозакрытие чекпоинт-задач если check_command проходит
     if cfg.check_command:
@@ -1209,6 +1222,12 @@ def run_pipeline(
         run_cmd(["git", "add", "TASKS.md"], cwd=cfg.root_dir, check=False)
         run_cmd(["git", "commit", "-m", "update: статусы задач после прогона"], cwd=cfg.root_dir, check=False)
         # git push убран — пуш делает пользователь, не оркестратор
+
+    # Restore original dev_branch if we were on a feature branch
+    if team:
+        cfg.dev_branch = original_dev_branch
+        log.info(f"Feature branch {feature_branch} готова. Мерж в {original_dev_branch}:")
+        log.info(f"  git merge {feature_branch}")
 
     tasks = _parse()
     _print_next_steps(tasks, max_tasks, auto)
