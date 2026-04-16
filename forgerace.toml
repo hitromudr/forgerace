@@ -65,6 +65,7 @@ inactivity_timeout = 180
 enabled = true
 
 # Aider-based coding agents (nvidia free API)
+# aider-llama disabled: llama-70b через aider стабильно зацикливается (PROGRESS_TIMEOUT)
 [agents.aider-llama]
 command = "aider"
 args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
@@ -78,7 +79,7 @@ args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = true
+enabled = false
 
 [agents.aider-devstral]
 command = "aider"
@@ -96,6 +97,9 @@ inactivity_timeout = 300
 enabled = true
 
 # Goose-based coding agents (nvidia free API)
+# Goose agents — disabled: nvidia free API не поддерживает tool_use,
+# goose отправляет tool calls (text_editor) → 400 "Unexpected role 'tool'"
+# Для работы нужен API с поддержкой function calling.
 [agents.goose-llama]
 command = "goose"
 args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
@@ -103,7 +107,7 @@ args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
 protocol = "cli"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = true
+enabled = false
 [agents.goose-llama.env]
 OPENAI_HOST = "https://integrate.api.nvidia.com"
 OPENAI_API_KEY = "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"
@@ -115,7 +119,7 @@ args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
 protocol = "cli"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = true
+enabled = false
 [agents.goose-devstral.env]
 OPENAI_HOST = "https://integrate.api.nvidia.com"
 OPENAI_API_KEY = "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"
