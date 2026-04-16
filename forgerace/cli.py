@@ -456,7 +456,7 @@ def _cmd_agents_list():
     for name, acfg in cfg.agents.items():
         status = f"{C['green']}ON{R}" if acfg.enabled else f"{C['red']}OFF{R}"
         print(f"  {C['bold']}{name}{R}: {status}  ({acfg.command})")
-    print(f"\n  Активные: {C['bold']}{cfg.agent_names}{R}")
+    print(f"\n  Активные: {C['bold']}{cfg.all_agent_names}{R}")
 
 
 def _cmd_mode(mode_name: str):
@@ -554,7 +554,7 @@ def _cmd_agent_toggle(agent_name: str, enable: bool):
     action = "включён" if enable else "выключен"
     color = C['green'] if enable else C['red']
     print(f"  {color}{agent_name} {action}{R}")
-    print(f"  Активные: {C['bold']}{cfg.agent_names}{R}")
+    print(f"  Активные: {C['bold']}{cfg.all_agent_names}{R}")
 
 
 def _print_full_help():
@@ -933,7 +933,7 @@ def main():
     log.info("ForgeRace запущен")
     log.info(f"Корень: {cfg.root_dir}")
     cli_names = [f"{agent_color(n)}{n}{R}" for n in cfg.cli_agent_names]
-    api_names = [f"{agent_color(n)}{n}{R}" for n in cfg.agent_names if n not in cfg.cli_agent_names]
+    api_names = [f"{agent_color(n)}{n}{R}" for n in cfg.all_agent_names if n not in cfg.cli_agent_names]
     parts = [f"код: [{', '.join(cli_names)}]"]
     if api_names:
         parts.append(f"ревью: [{', '.join(api_names)}]")

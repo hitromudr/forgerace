@@ -700,7 +700,7 @@ def _cleanup_task_branches(task: Task):
     for d in cfg.agents_dir.glob("agent-*"):
         if d.is_dir():
             run_cmd(["git", "worktree", "remove", str(d), "--force"], cwd=cfg.root_dir, check=False)
-    for agent_type in cfg.agent_names:
+    for agent_type in cfg.all_agent_names:
         branch = f"task/{task.id.lower()}-{slug}-{agent_type}"
         run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
 

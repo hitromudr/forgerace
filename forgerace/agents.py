@@ -524,7 +524,7 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
     import threading
     acfg = cfg.agents.get(agent_name)
     if acfg is None:
-        raise ValueError(f"Неизвестный агент: {agent_name}. Доступны: {cfg.agent_names}")
+        raise ValueError(f"Неизвестный агент: {agent_name}. Доступны: {cfg.all_agent_names}")
 
     final_cmd = [acfg.command]
     for arg in acfg.args:
@@ -619,7 +619,7 @@ def check_agent_quota(name: str) -> bool:
 def preflight_check_agents() -> list[str]:
     """Check all enabled agents for quota before task execution. Returns available agent names."""
     available = []
-    for name in cfg.agent_names:
+    for name in cfg.all_agent_names:
         log.info(f"  🔍 Проверка квоты: {name}...")
         if check_agent_quota(name):
             available.append(name)
