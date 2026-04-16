@@ -173,9 +173,10 @@ CONFIDENCE: XX%
 
     @property
     def agent_names(self) -> list[str]:
-        """Agents that can discuss (CLI + API, excluding text-protocol like aider)."""
+        """Agents that can discuss/review (excluding aider and goose — coding-only CLIs)."""
         return [name for name, acfg in self.agents.items()
-                if acfg.enabled and acfg.protocol != "text"]
+                if acfg.enabled and acfg.protocol != "text"
+                and acfg.command not in ("aider", "goose")]
 
     @property
     def all_agent_names(self) -> list[str]:
