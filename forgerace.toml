@@ -65,13 +65,14 @@ inactivity_timeout = 180
 enabled = true
 
 # Aider-based coding agents (nvidia free API)
-# aider-llama disabled: llama-70b через aider стабильно зацикливается (PROGRESS_TIMEOUT)
+# Aider agents — через LiteLLM proxy (localhost:4000)
+# LiteLLM транслирует tool_use и нормализует формат для nvidia API
 [agents.aider-llama]
 command = "aider"
-args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
-        "--openai-api-key", "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",
-        "--model", "openai/meta/llama-3.3-70b-instruct",
-        "--edit-format", "diff",
+args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
+        "--openai-api-key", "fr-local-dev",
+        "--model", "openai/llama-70b",
+        "--edit-format", "whole",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
         "--no-show-model-warnings", "--no-gitignore",
@@ -79,13 +80,16 @@ args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = false
+enabled = true
+[agents.aider-llama.env]
+no_proxy = "127.0.0.1,localhost"
+NO_PROXY = "127.0.0.1,localhost"
 
 [agents.aider-devstral]
 command = "aider"
-args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
-        "--openai-api-key", "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",
-        "--model", "openai/mistralai/devstral-2-123b-instruct-2512",
+args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
+        "--openai-api-key", "fr-local-dev",
+        "--model", "openai/devstral-123b",
         "--edit-format", "diff",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
@@ -95,34 +99,39 @@ protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
 enabled = true
+[agents.aider-devstral.env]
+no_proxy = "127.0.0.1,localhost"
+NO_PROXY = "127.0.0.1,localhost"
 
-# Goose-based coding agents (nvidia free API)
-# Goose agents — disabled: nvidia free API не поддерживает tool_use,
-# goose отправляет tool calls (text_editor) → 400 "Unexpected role 'tool'"
-# Для работы нужен API с поддержкой function calling.
+# Goose agents — через LiteLLM proxy (localhost:4000)
+# LiteLLM транслирует tool_use для nvidia API
 [agents.goose-llama]
 command = "goose"
 args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
-        "--model", "meta/llama-3.3-70b-instruct", "--provider", "openai"]
+        "--model", "llama-70b", "--provider", "openai"]
 protocol = "cli"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = false
+enabled = true
 [agents.goose-llama.env]
-OPENAI_HOST = "https://integrate.api.nvidia.com"
-OPENAI_API_KEY = "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"
+OPENAI_HOST = "http://127.0.0.1:4000"
+OPENAI_API_KEY = "fr-local-dev"
+no_proxy = "127.0.0.1,localhost"
+NO_PROXY = "127.0.0.1,localhost"
 
 [agents.goose-devstral]
 command = "goose"
 args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
-        "--model", "mistralai/devstral-2-123b-instruct-2512", "--provider", "openai"]
+        "--model", "devstral-123b", "--provider", "openai"]
 protocol = "cli"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = false
+enabled = true
 [agents.goose-devstral.env]
-OPENAI_HOST = "https://integrate.api.nvidia.com"
-OPENAI_API_KEY = "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"
+OPENAI_HOST = "http://127.0.0.1:4000"
+OPENAI_API_KEY = "fr-local-dev"
+no_proxy = "127.0.0.1,localhost"
+NO_PROXY = "127.0.0.1,localhost"
 
 # Когнитивные фреймы из frames/
 [frames.reviewer]

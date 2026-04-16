@@ -11,3 +11,4 @@ build/
 fr
 .aider*
 .aider*
+litellm_config.yaml
