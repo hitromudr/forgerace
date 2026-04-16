@@ -56,7 +56,7 @@ class _ColorFormatter(logging.Formatter):
     _HIGHLIGHTS = [
         # --- Идентификаторы ---
         # [TASK-002/claude] → task yellow bold, agent colored
-        (re.compile(r"\[(TASK-\d+)/(\w+)\]"),
+        (re.compile(r"\[(TASK-\d+)/([\w-]+)\]"),
          lambda m: f"[{C['yellow']}{C['bold']}{m.group(1)}{R}/{_agent_c(m.group(2))}{m.group(2)}{R}]"),
         # [TASK-002] → task yellow bold
         (re.compile(r"\[(TASK-\d+)\]"),
@@ -66,12 +66,22 @@ class _ColorFormatter(logging.Formatter):
          lambda m: f"{C['yellow']}{C['bold']}{m.group(1)}{R}"),
 
         # --- Агенты (в любом контексте) ---
+        (re.compile(r"\b(aider-llama)\b", re.IGNORECASE),
+         lambda m: f"{C['yellow']}{m.group(1)}{R}"),
+        (re.compile(r"\b(aider-devstral)\b", re.IGNORECASE),
+         lambda m: f"{C['green']}{m.group(1)}{R}"),
         (re.compile(r"\b(claude)\b", re.IGNORECASE),
          lambda m: f"{C['cyan']}{m.group(1)}{R}"),
         (re.compile(r"\b(gemini)\b", re.IGNORECASE),
          lambda m: f"{C['blue']}{m.group(1)}{R}"),
-        (re.compile(r"\b(qwen)\b", re.IGNORECASE),
+        (re.compile(r"\b(qwen[-\w]*)\b", re.IGNORECASE),
          lambda m: f"{C['purple']}{m.group(1)}{R}"),
+        (re.compile(r"\b(devstral)\b", re.IGNORECASE),
+         lambda m: f"{C['green']}{m.group(1)}{R}"),
+        (re.compile(r"\b(gpt-oss)\b", re.IGNORECASE),
+         lambda m: f"{C['cyan']}{m.group(1)}{R}"),
+        (re.compile(r"\b(llama)\b", re.IGNORECASE),
+         lambda m: f"{C['yellow']}{m.group(1)}{R}"),
 
         # --- Обрамление ---
         # ═══ заголовки ═══ → yellow bold
