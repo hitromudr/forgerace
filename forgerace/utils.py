@@ -32,6 +32,7 @@ def agent_color(name: str) -> str:
         "claude": "cyan", "gemini": "blue", "qwen": "purple",
         "llama": "yellow", "qwen-api": "magenta", "devstral": "green",
         "gpt-oss": "cyan", "deepseek": "yellow", "techlead": "green",
+        "aider-llama": "yellow", "aider-devstral": "green",
     }
     return C.get(colors.get(name, "white"), C["white"])
 

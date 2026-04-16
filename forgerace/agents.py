@@ -426,6 +426,98 @@ def _gemini_extract_result(stdout_lines: list[str]) -> str:
     return ""
 
 
+def _run_agent_text(
+    cmd: list[str],
+    workdir: Path,
+    tag: str,
+    inactivity_timeout: int,
+    cancel_event: "threading.Event | None" = None,
+    env: dict[str, str] | None = None,
+    prompt_stdin: str = "",
+) -> AgentProcessResult:
+    """Text-mode runner for agents without stream-json (aider, etc.).
+    Tracks progress via git diff snapshots, logs raw output lines."""
+    usage_acc = TokenUsage()
+    proc_env = {**os.environ, **(env or {})}
+    deadline = time.time() + cfg.agent_timeout
+    last_diff_snapshot = _get_diff_snapshot(workdir)
+    last_diff_change = time.time()
+    next_progress_check = time.time() + 30
+    stdout_lines = []
+
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE if prompt_stdin else subprocess.DEVNULL,
+            text=True, bufsize=1, env=proc_env,
+        )
+        if prompt_stdin:
+            try:
+                proc.stdin.write(prompt_stdin)
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass
+
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                _terminate_agent_process(proc)
+                log.error(f"[{tag}] ⏰ Таймаут ({cfg.agent_timeout}с)")
+                return AgentProcessResult(returncode=1, stdout="", stderr="TIMEOUT", usage=usage_acc)
+
+            if cancel_event and cancel_event.is_set():
+                _terminate_agent_process(proc)
+                log.info(f"[{tag}] 🛑 Отменён (другой агент победил)")
+                return AgentProcessResult(returncode=1, stdout="", stderr="CANCELLED", usage=usage_acc)
+
+            # Progress check via diff
+            now = time.time()
+            if now >= next_progress_check:
+                next_progress_check = now + 30
+                current_diff = _get_diff_snapshot(workdir)
+                if current_diff != last_diff_snapshot:
+                    last_diff_snapshot = current_diff
+                    last_diff_change = now
+                    deadline = now + cfg.agent_timeout  # extend on progress
+                    log.info(f"[{tag}] 📝 Прогресс: файлы изменены")
+                elif now - last_diff_change > cfg.progress_timeout:
+                    _terminate_agent_process(proc)
+                    log.error(f"[{tag}] ⏰ Diff не меняется — зацикливание")
+                    return AgentProcessResult(returncode=1, stdout="", stderr="PROGRESS_TIMEOUT", usage=usage_acc)
+
+            ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 5.0))
+            if ready:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                stdout_lines.append(line)
+                stripped = line.strip()
+                if stripped:
+                    # Log meaningful lines (skip empty/whitespace)
+                    if any(kw in stripped.lower() for kw in ("applied edit", "wrote", "created", "error", "warning")):
+                        log.info(f"[{tag}] {stripped[:120]}")
+            elif proc.poll() is not None:
+                for line in proc.stdout:
+                    stdout_lines.append(line)
+                break
+
+        proc.wait(timeout=10)
+        stderr = proc.stderr.read() if proc.stderr else ""
+        return AgentProcessResult(
+            returncode=proc.returncode or 0,
+            stdout="".join(stdout_lines),
+            stderr=stderr,
+            usage=usage_acc,
+        )
+    except Exception as e:
+        log.error(f"[{tag}] Ошибка: {e}")
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return AgentProcessResult(returncode=1, stdout="", stderr=str(e), usage=usage_acc)
+
+
 def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
                       cancel_event: "threading.Event | None" = None) -> AgentProcessResult:
     """Запускает агента нужного типа. cancel_event — для отмены при race-win."""
@@ -446,6 +538,15 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
             final_cmd.append(arg)
 
     tag = f"{task.id}/{agent_name}"
+
+    # Text-mode agents (aider, etc.) — no stream-json
+    if acfg.protocol == "text":
+        return _run_agent_text(
+            final_cmd, workdir, tag, acfg.inactivity_timeout,
+            cancel_event=cancel_event,
+            env=acfg.env if acfg.env else None,
+            prompt_stdin=prompt if acfg.prompt_stdin else "",
+        )
 
     if agent_name == "claude":
         return _run_agent_streaming(

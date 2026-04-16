@@ -36,6 +36,8 @@ class AgentConfig:
     protocol: str = "cli"  # "cli", "openai"
     cognitive_frame: str = ""  # legacy: inline фрейм (используется если нет frames)
     default_frame: str = ""  # frame applied when agent called without explicit +frame
+    env: dict[str, str] = field(default_factory=dict)  # extra env vars for subprocess
+    prompt_stdin: bool = False  # send prompt via stdin (not CLI args)
     # OpenAI-compatible API settings (protocol = "openai")
     base_url: str = ""
     api_key: str = ""
@@ -174,7 +176,7 @@ CONFIDENCE: XX%
     def cli_agent_names(self) -> list[str]:
         """CLI-only agents — for task execution (writing code in worktree)."""
         return [name for name, acfg in self.agents.items()
-                if acfg.enabled and acfg.protocol == "cli"]
+                if acfg.enabled and acfg.protocol in ("cli", "text")]
 
 
 # Путь к конфигу, переданный через CLI (заполняется в init_config)
@@ -338,6 +340,8 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 protocol=acfg.get("protocol", "cli"),
                 cognitive_frame=acfg.get("cognitive_frame", ""),
                 default_frame=acfg.get("default_frame", ""),
+                env=dict(acfg.get("env", {})),
+                prompt_stdin=acfg.get("prompt_stdin", False),
                 base_url=acfg.get("base_url", ""),
                 api_key=acfg.get("api_key", ""),
                 model=acfg.get("model", ""),

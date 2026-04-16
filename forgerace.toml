@@ -64,6 +64,35 @@ default_frame = "evidence"
 inactivity_timeout = 180
 enabled = true
 
+# Aider-based coding agents (nvidia free API)
+[agents.aider-llama]
+command = "aider"
+args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
+        "--openai-api-key", "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",
+        "--model", "openai/meta/llama-3.3-70b-instruct",
+        "--edit-format", "diff",
+        "--message-file", "/dev/stdin",
+        "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
+        "--no-show-model-warnings", "--no-gitignore"]
+protocol = "text"
+prompt_stdin = true
+inactivity_timeout = 300
+enabled = true
+
+[agents.aider-devstral]
+command = "aider"
+args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
+        "--openai-api-key", "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",
+        "--model", "openai/mistralai/devstral-2-123b-instruct-2512",
+        "--edit-format", "diff",
+        "--message-file", "/dev/stdin",
+        "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
+        "--no-show-model-warnings", "--no-gitignore"]
+protocol = "text"
+prompt_stdin = true
+inactivity_timeout = 300
+enabled = true
+
 # Когнитивные фреймы из frames/
 [frames.reviewer]
 description = "Strict code reviewer: task match, correctness, data safety"
