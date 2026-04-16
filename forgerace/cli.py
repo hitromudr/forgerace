@@ -573,6 +573,7 @@ def _print_full_help():
 {Y}ЗАПУСК ЗАДАЧ:{R}
   ./fr run                               Все готовые задачи (конкурентно)
   ./fr run --task TASK-032               Конкретная задача
+  ./fr run --team championship-ensemble  Задачи команды (фильтр по дискуссии)
   ./fr run --retry                       Перезапуск упавших (blocked → open)
   ./fr run --auto --max-tasks 4          Авто-цикл: разблокированные → запуск
   ./fr run --dry-run                     Показать что запустится (без запуска)
@@ -764,12 +765,14 @@ def main():
     # run
     run_p = sub.add_parser("run", help="Запустить задачи",
         epilog="Примеры:\n"
-               "  ./fr run                    все готовые задачи\n"
-               "  ./fr run --task TASK-032     конкретная задача\n"
-               "  ./fr run --retry            перезапуск упавших\n"
-               "  ./fr run --auto             авто-цикл разблокированных\n",
+               "  ./fr run                                все готовые задачи\n"
+               "  ./fr run --task TASK-032                конкретная задача\n"
+               "  ./fr run --team championship-ensemble   задачи команды (по дискуссии)\n"
+               "  ./fr run --retry                        перезапуск упавших\n"
+               "  ./fr run --auto                         авто-цикл разблокированных\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     run_p.add_argument("--task", help="Конкретная задача (TASK-032)")
+    run_p.add_argument("--team", help="Задачи команды по дискуссии (championship-ensemble-review)")
     run_p.add_argument("--retry", action="store_true", help="Перезапустить упавшие (blocked → open)")
     run_p.add_argument("--dry-run", action="store_true", help="Показать что запустится, без запуска")
     run_p.add_argument("--auto", action="store_true", help="Авто-цикл: разблокированные → запуск")
@@ -941,12 +944,17 @@ def main():
     log.info(f"Макс. задач: {max_tasks}")
     log.info("=" * 60)
 
+    team = getattr(args, "team", None)
+    if team:
+        log.info(f"Команда: {C['bold']}{team}{R}")
+
     run_pipeline(
         specific_task=getattr(args, "task", None),
         dry_run=getattr(args, "dry_run", False),
         max_tasks=max_tasks,
         retry=getattr(args, "retry", False),
         auto=getattr(args, "auto", False),
+        team=team,
     )
 
     # os._exit(0) вызывается внутри run_pipeline

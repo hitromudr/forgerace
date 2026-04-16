@@ -764,3 +764,68 @@ COMPLEXITY: 4
 - **Дискуссия**: —
 - **Агент**: gemini
 - **Ветка**: task/task-024-verify-build-fiksirovat-base-sha-do-gemini
+
+### TASK-098: Реализация ConsensusEngine и логики вето
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-080
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/review.py
+- **Интеграция**: —
+- **Описание**: Создать функцию calculate_consensus(verdicts) в review.py. Логика строгого вето: APPROVED только при единогласии всех валидных ревьюеров. Любой NEEDS_WORK — автоматическое вето. Невалидные ответы (битый JSON, пустой) помечаются FAILED и исключаются из голосования. Если valid < min_reviewers → NEEDS_WORK с комментарием "Insufficient review coverage".
+- **Критерий готовности**: calculate_consensus корректно обрабатывает все сценарии: единогласие, вето, частичные отказы.
+- **Дискуссия**: championship-ensemble-review
+- **Команда**: Team Gemini
+
+### TASK-099: Параллельная оркестрация ревью в Pipeline
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-098
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/pipeline.py, forgerace/review.py
+- **Интеграция**: —
+- **Описание**: В code_review() при review_consensus=true запускать min_reviewers ревьюеров параллельно через ThreadPoolExecutor. Каждый ревьюер — изолированный вызов single_review(). Результаты собираются после завершения всех (или таймаута). Передаются в calculate_consensus().
+- **Критерий готовности**: Параллельный запуск 2+ ревьюеров, результаты агрегируются через consensus.
+- **Дискуссия**: championship-ensemble-review
+- **Команда**: Team Gemini
+
+### TASK-100: Механизмы Fallback и обработка отказов
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-098
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/review.py, forgerace/pipeline.py
+- **Интеграция**: —
+- **Описание**: Fallback на single review если consensus review падает (все API ошибки). Если review_consensus=false — текущий single-review mode без изменений. Валидация: min_reviewers не больше доступных моделей. Retry невалидных ответов (макс 1 раз).
+- **Критерий готовности**: Pipeline работает и с consensus=true, и с consensus=false. Fallback при ошибках API.
+- **Дискуссия**: championship-ensemble-review
+- **Команда**: Team Gemini
+
+### TASK-101: Логирование вердиктов и Observability
+- **Статус**: open
+- **Приоритет**: P2
+- **Этап**: 1
+- **Зависимости**: TASK-099
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/review.py, forgerace/utils.py
+- **Интеграция**: —
+- **Описание**: Логировать вердикт каждого ревьюера: модель, verdict, ключевые замечания. Итоговый consensus: APPROVED/NEEDS_WORK + количество голосов. Цветная таблица в консоли. Добавить ANSI-паттерны для consensus в utils.py.
+- **Критерий готовности**: В логах видны вердикты всех ревьюеров и итоговый consensus.
+- **Дискуссия**: championship-ensemble-review
+- **Команда**: Team Gemini
+
+### TASK-102: Unit и Chaos тесты для consensus
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-098
+- **Файлы (новые)**: tests/test_consensus.py
+- **Файлы (modify)**: —
+- **Интеграция**: —
+- **Описание**: Тесты для calculate_consensus: единогласный APPROVED, вето одним NEEDS_WORK, split vote, все FAILED (insufficient coverage), битый JSON от модели, таймаут одной модели. Chaos-тест: 1 модель → 404, 2-я → битый JSON, 3-я → APPROVED → итог NEEDS_WORK.
+- **Критерий готовности**: 8+ тестов проходят, покрывают все граничные сценарии.
+- **Дискуссия**: championship-ensemble-review
+- **Команда**: Team Gemini

@@ -515,7 +515,7 @@ def _post_resolve(filepath: Path):
 - **Зависимости**: TASK-YYY или —
 - **Файлы (новые)**: src/path/file.rs
 - **Файлы (modify)**: — или путь
-- **Интеграция**: что добавить в lib.rs/main.rs при мерже
+- **Интеграция**: что добавить при мерже (импорты, вызовы) или —
 - **Описание**: что именно реализовать
 - **Запрещено**: конкретные антипаттерны для этой задачи (из дискуссии). Пример: "не хардкодить ID", "не использовать networkidle". Если нет явных запретов — поставь "—"
 - **Проверка**: команда верификации ДЛЯ ЭТОЙ ЗАДАЧИ. Пример: "ruff check src/new_file.py && pytest tests/test_new.py -v". Должна быть конкретной и запускаемой. Если неизвестна — "make check"
@@ -556,6 +556,18 @@ def _post_resolve(filepath: Path):
     clean_block = re.sub(r"^.*?(?=### TASK-)", "", tasks_block, flags=re.DOTALL)
     if not clean_block.strip():
         clean_block = tasks_block  # fallback если regex не нашёл
+
+    # Fix single-line tasks: "### TASK-X: Name - **Статус**: open - ..." → multi-line
+    def _fix_oneline_task(line: str) -> str:
+        if line.startswith("### TASK-") and " - **" in line:
+            parts = re.split(r" - (?=\*\*)", line, maxsplit=1)
+            if len(parts) == 2:
+                fields = re.split(r" - (?=\*\*)", parts[1])
+                return parts[0] + "\n" + "\n".join(f"- {f}" for f in fields)
+        return line
+
+    fixed_lines = [_fix_oneline_task(l) for l in clean_block.split("\n")]
+    clean_block = "\n".join(fixed_lines)
 
     # Вставляем в целевой TASKS.md
     if target_dir != cfg.root_dir:

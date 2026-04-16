@@ -953,12 +953,18 @@ def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
 
 # --- Главный пайплайн ---
 
+def _filter_by_team(tasks: list, team: str) -> list:
+    """Filter tasks by discussion name (substring match)."""
+    return [t for t in tasks if team in (t.discussion or "")]
+
+
 def run_pipeline(
     specific_task: Optional[str] = None,
     dry_run: bool = False,
     max_tasks: int | None = None,
     retry: bool = False,
     auto: bool = False,
+    team: Optional[str] = None,
 ):
     """Основной цикл оркестратора."""
     if max_tasks is None:
@@ -970,7 +976,14 @@ def run_pipeline(
     if not dry_run:
         _start_heartbeat()
 
-    tasks = parse_tasks()
+    def _parse():
+        """Parse tasks with optional team filter."""
+        t = parse_tasks()
+        return _filter_by_team(t, team) if team else t
+
+    tasks = _parse()
+    if team:
+        log.info(f"Фильтр --team={team}: {len(tasks)} задач")
 
     # Автозакрытие чекпоинт-задач если check_command проходит
     if cfg.check_command:
@@ -984,7 +997,7 @@ def run_pipeline(
                     run_hook(cfg.hook_on_complete, t.id, "done", "auto-check")
                 break  # проверяем один раз
 
-    tasks = parse_tasks()
+    tasks = _parse()
     done_count = sum(1 for t in tasks if t.status in ("done", "skip"))
     open_count = len(tasks) - done_count
     log.info(f"Задачи: {open_count} активных, {done_count} завершённых")
@@ -1006,7 +1019,7 @@ def run_pipeline(
                 _cleanup_task_branches(t)
                 update_task_status(t.id, "open")
                 t.status = "open"
-        tasks = parse_tasks()
+        tasks = _parse()
         ready = find_ready_tasks(tasks)
     else:
         done_ids = {t.id for t in tasks if t.status == "done"}
@@ -1031,7 +1044,7 @@ def run_pipeline(
                     _cleanup_task_branches(t)
                     update_task_status(t.id, "open")
                     t.status = "open"
-            tasks = parse_tasks()
+            tasks = _parse()
 
         ready = find_ready_tasks(tasks)
         if not ready:
@@ -1044,7 +1057,7 @@ def run_pipeline(
                 for t in retryable:
                     update_task_status(t.id, "open")
                     t.status = "open"
-                tasks = parse_tasks()
+                tasks = _parse()
                 ready = find_ready_tasks(tasks)
 
     if not ready:
@@ -1081,7 +1094,7 @@ def run_pipeline(
 
         # После дискуссий — выходим. Пользователь запустит run отдельно.
         log.info("Дискуссии завершены. Запусти ./fr run для выполнения задач.")
-        tasks = parse_tasks()
+        tasks = _parse()
         _print_next_steps(tasks, max_tasks, auto)
         log.info("ForgeRace завершён")
         os._exit(0)
@@ -1116,7 +1129,7 @@ def run_pipeline(
                 final_ready.append(t)
 
     if decomposed:
-        tasks = parse_tasks()
+        tasks = _parse()
         new_ready = find_ready_tasks(tasks)
         new_approved = [t for t in new_ready if is_task_approved(t)]
         existing_ids = {t.id for t in final_ready}
@@ -1142,7 +1155,7 @@ def run_pipeline(
 
     if not ready:
         log.info("Все задачи уже выполнены (pre-check)")
-        tasks = parse_tasks()
+        tasks = _parse()
         _print_next_steps(tasks, max_tasks, auto)
         return
 
@@ -1197,7 +1210,7 @@ def run_pipeline(
         run_cmd(["git", "commit", "-m", "update: статусы задач после прогона"], cwd=cfg.root_dir, check=False)
         # git push убран — пуш делает пользователь, не оркестратор
 
-    tasks = parse_tasks()
+    tasks = _parse()
     _print_next_steps(tasks, max_tasks, auto)
 
     log.info("ForgeRace завершён")
