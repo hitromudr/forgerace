@@ -2,7 +2,7 @@
  TASKS — forgerace
 
 ### TASK-080: Подключить validate_review + config consensus
-- **Статус**: in_progress:both
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: —
@@ -41,7 +41,7 @@
 - **Команда**: Team Gemini
 
 ### TASK-098: Расширение модели Task и поддержка в TASKS.md
-- **Статус**: open
+- **Статус**: in_progress:both
 - **Приоритет**: P1
 - **Этап**: 1
 - **Зависимости**: —
