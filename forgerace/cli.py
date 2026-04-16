@@ -616,6 +616,138 @@ def _print_full_help():
 """)
 
 
+def _cmd_models(test: bool = False, top: int = 30):
+    """List and optionally test available API models."""
+    import json
+    import urllib.request
+    import urllib.error
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Collect unique API endpoints from config
+    endpoints = {}
+    for name, acfg in cfg.agents.items():
+        if acfg.protocol == "openai" and acfg.enabled and acfg.base_url and acfg.api_key:
+            key = (acfg.base_url, acfg.api_key)
+            if key not in endpoints:
+                endpoints[key] = name
+
+    if not endpoints:
+        print(f"  {C['red']}Нет enabled API-агентов с protocol=openai{R}")
+        return
+
+    for (base_url, api_key), ref_agent in endpoints.items():
+        print(f"\n  {C['bold']}Endpoint:{R} {base_url}")
+        print(f"  {C['dim']}(агент-референс: {ref_agent}){R}")
+
+        # Fetch model list
+        url = base_url.rstrip("/") + "/models"
+        headers = {"Authorization": f"Bearer {api_key}"}
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            print(f"  {C['red']}Ошибка загрузки моделей: {e}{R}")
+            continue
+
+        models = sorted([m["id"] for m in data.get("data", [])])
+        print(f"  Моделей в каталоге: {C['bold']}{len(models)}{R}")
+
+        # Show currently configured models
+        configured = {}
+        for aname, acfg in cfg.agents.items():
+            if acfg.protocol == "openai" and acfg.base_url == base_url:
+                configured[acfg.model] = aname
+        if configured:
+            print(f"\n  {C['bold']}Подключены:{R}")
+            for model_id, aname in configured.items():
+                color = agent_color(aname)
+                print(f"    {color}{aname}{R} → {model_id}")
+
+        if not test:
+            # Just list interesting models
+            code_keywords = ("code", "instruct", "coder", "devstral", "gpt-oss",
+                             "llama-3", "llama-4", "qwen", "mistral", "deepseek",
+                             "nemotron", "kimi", "glm", "gemma-4", "seed", "minimax",
+                             "step-")
+            skip_keywords = ("embed", "guard", "safety", "reward", "parse",
+                             "translate", "clip", "deplot", "vila", "neva",
+                             "gliner", "calibration")
+            interesting = [m for m in models
+                           if any(k in m.lower() for k in code_keywords)
+                           and not any(s in m.lower() for s in skip_keywords)]
+            if interesting:
+                print(f"\n  {C['bold']}Потенциально интересные ({len(interesting)}):{R}")
+                for m in interesting:
+                    marker = f" {C['green']}← подключена{R}" if m in configured else ""
+                    print(f"    {m}{marker}")
+            print(f"\n  {C['dim']}Используйте --test для проверки доступности{R}")
+            return
+
+        # Test models
+        test_prompt = "Review this Python function for bugs. Reply with VERDICT: APPROVED or NEEDS_WORK, then COMMENTS and SUMMARY.\n```python\ndef merge(a, b):\n    result = a\n    for k, v in b.items():\n        result[k] = v\n    return result\n```"
+
+        # Filter to code-relevant models
+        code_keywords = ("instruct", "coder", "devstral", "gpt-oss",
+                         "llama-3", "llama-4", "qwen3", "qwen2.5-coder",
+                         "mistral-large", "mistral-medium", "mistral-small",
+                         "mistral-nemotron", "nemotron-3-super", "nemotron-ultra",
+                         "kimi-k2", "glm5", "gemma-4", "seed-oss", "minimax-m2",
+                         "step-3", "maverick")
+        candidates = [m for m in models
+                      if any(k in m.lower() for k in code_keywords)
+                      and "embed" not in m.lower()
+                      and "guard" not in m.lower()
+                      and "safety" not in m.lower()
+                      and "reward" not in m.lower()]
+        candidates = candidates[:top]
+
+        print(f"\n  {C['bold']}Тестирую {len(candidates)} моделей...{R}\n")
+
+        def _test_one(model_id):
+            body = json.dumps({
+                "model": model_id,
+                "messages": [{"role": "user", "content": test_prompt}],
+                "max_tokens": 300,
+                "temperature": 0.3,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                base_url.rstrip("/") + "/chat/completions",
+                data=body,
+                headers={"Authorization": f"Bearer {api_key}",
+                         "Content-Type": "application/json"},
+                method="POST",
+            )
+            start = time.time()
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    rdata = json.loads(resp.read().decode("utf-8"))
+                    content = rdata["choices"][0]["message"]["content"].strip()
+                    elapsed = time.time() - start
+                    return model_id, True, elapsed, content[:120]
+            except Exception as e:
+                elapsed = time.time() - start
+                err = str(e)[:80]
+                return model_id, False, elapsed, err
+
+        results = []
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            futures = {pool.submit(_test_one, m): m for m in candidates}
+            for f in as_completed(futures):
+                mid, ok, elapsed, detail = f.result()
+                results.append((mid, ok, elapsed, detail))
+                status = f"{C['green']}OK{R}" if ok else f"{C['red']}FAIL{R}"
+                time_str = f"{elapsed:.1f}s"
+                marker = f" {C['cyan']}← {configured[mid]}{R}" if mid in configured else ""
+                print(f"  {status} {C['dim']}{time_str:>5}{R}  {mid}{marker}")
+                if ok:
+                    print(f"         {C['dim']}{detail}{R}")
+
+        ok_count = sum(1 for _, ok, *_ in results if ok)
+        print(f"\n  {C['bold']}Итого:{R} {C['green']}{ok_count}{R}/{len(results)} моделей доступны")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="ForgeRace — мультиагентный оркестратор",
@@ -707,6 +839,11 @@ def main():
     # status
     sub.add_parser("status", help="Статус задач + граф зависимостей")
 
+    # models
+    models_p = sub.add_parser("models", help="Проверить доступные API-модели")
+    models_p.add_argument("--test", action="store_true", help="Протестировать каждую модель запросом")
+    models_p.add_argument("--top", type=int, default=30, help="Макс. моделей для теста (default: 30)")
+
     # help
     sub.add_parser("help", help="Полная справка с примерами")
 
@@ -770,6 +907,11 @@ def main():
         else:
             mode_color = C['cyan'] if cfg.mode == "competitive" else C['magenta']
             print(f"  Режим: {mode_color}{C['bold']}{cfg.mode}{R}")
+        return
+
+    # models
+    if args.command == "models":
+        _cmd_models(test=args.test, top=args.top)
         return
 
     # merge-pending

@@ -28,7 +28,11 @@ R = C["reset"]  # shortcut
 
 def agent_color(name: str) -> str:
     """Возвращает ANSI-цвет для агента."""
-    colors = {"claude": "cyan", "gemini": "blue", "qwen": "purple", "llama": "yellow", "deepseek": "yellow", "techlead": "green"}
+    colors = {
+        "claude": "cyan", "gemini": "blue", "qwen": "purple",
+        "llama": "yellow", "qwen-api": "magenta", "devstral": "green",
+        "gpt-oss": "cyan", "deepseek": "yellow", "techlead": "green",
+    }
     return C.get(colors.get(name, "white"), C["white"])
 
 

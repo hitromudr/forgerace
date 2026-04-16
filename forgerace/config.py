@@ -35,6 +35,7 @@ class AgentConfig:
     enabled: bool = True
     protocol: str = "cli"  # "cli", "openai"
     cognitive_frame: str = ""  # legacy: inline фрейм (используется если нет frames)
+    default_frame: str = ""  # frame applied when agent called without explicit +frame
     # OpenAI-compatible API settings (protocol = "openai")
     base_url: str = ""
     api_key: str = ""
@@ -336,6 +337,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 enabled=acfg.get("enabled", True),
                 protocol=acfg.get("protocol", "cli"),
                 cognitive_frame=acfg.get("cognitive_frame", ""),
+                default_frame=acfg.get("default_frame", ""),
                 base_url=acfg.get("base_url", ""),
                 api_key=acfg.get("api_key", ""),
                 model=acfg.get("model", ""),
@@ -482,6 +484,10 @@ def resolve_agent_frame(agent_spec: str) -> tuple[str, str]:
         log.warning("Frame '%s' not found or empty, using agent default", frame_name)
         acfg = cfg.agents.get(model_name)
         return model_name, (acfg.cognitive_frame if acfg else "")
-    # Без +frame — используем cognitive_frame агента (legacy)
+    # Без +frame — используем default_frame → cognitive_frame (legacy) → ''
     acfg = cfg.agents.get(agent_spec)
+    if acfg and acfg.default_frame:
+        frame_cfg = cfg.frames.get(acfg.default_frame)
+        if frame_cfg and frame_cfg.content:
+            return agent_spec, frame_cfg.content
     return agent_spec, (acfg.cognitive_frame if acfg else "")

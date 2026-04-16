@@ -33,6 +33,34 @@ protocol = "openai"
 base_url = "https://integrate.api.nvidia.com/v1"
 api_key = "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"
 model = "meta/llama-3.3-70b-instruct"
+default_frame = "reviewer"
+inactivity_timeout = 180
+enabled = true
+
+[agents.qwen-api]
+protocol = "openai"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key = "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"
+model = "qwen/qwen3.5-122b-a10b"
+default_frame = "theory"
+inactivity_timeout = 180
+enabled = true
+
+[agents.devstral]
+protocol = "openai"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key = "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"
+model = "mistralai/devstral-2-123b-instruct-2512"
+default_frame = "architect"
+inactivity_timeout = 180
+enabled = true
+
+[agents.gpt-oss]
+protocol = "openai"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key = "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"
+model = "openai/gpt-oss-120b"
+default_frame = "evidence"
 inactivity_timeout = 180
 enabled = true
 

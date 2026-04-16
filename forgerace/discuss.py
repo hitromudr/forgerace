@@ -55,7 +55,12 @@ def discuss_reply(topic: str, agent_spec: str):
     if frame_content:
         frame_section = f"\n## Твой когнитивный фрейм\n{frame_content}\n"
 
-    display_name = agent_spec  # 'qwen+octagon' в заголовке дискуссии
+    # Display name: show default_frame if no explicit +frame
+    if "+" not in agent_spec:
+        acfg = cfg.agents.get(agent_spec)
+        display_name = f"{agent_spec}+{acfg.default_frame}" if acfg and acfg.default_frame else agent_spec
+    else:
+        display_name = agent_spec
     prompt = f"""Ты участник дискуссии{' ' + cfg.discuss_context if cfg.discuss_context else ''}.
 Твоя роль: @{display_name}.
 {frame_section}
@@ -1054,7 +1059,15 @@ def _chat_agent_reply(filepath: Path, agent_spec: str):
     frame_section = ""
     if frame_content:
         frame_section = f"\n## Твой когнитивный фрейм\n{frame_content}\n"
-    display_name = agent_spec
+    # Display name: show default_frame if no explicit +frame
+    if "+" not in agent_spec:
+        acfg = cfg.agents.get(agent_spec)
+        if acfg and acfg.default_frame:
+            display_name = f"{agent_spec}+{acfg.default_frame}"
+        else:
+            display_name = agent_spec
+    else:
+        display_name = agent_spec
     prompt = f"""Ты участник дискуссии{' ' + cfg.discuss_context if cfg.discuss_context else ''}.
 Твоя роль: @{display_name}.
 Рабочая директория: {cwd}
@@ -1081,89 +1094,105 @@ def _chat_agent_reply(filepath: Path, agent_spec: str):
         print(f"\n[ОШИБКА: агент '{agent_type}' не найден в конфиге]")
         return
 
-    # text mode — промпт через stdin для всех агентов (избегаем лимита аргументов ОС)
-    if agent_type == "claude":
-        cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
-    elif agent_type == "qwen":
-        cmd = [acfg.command, "-p", "--output-format", "text", "--approval-mode", "yolo"]
-    else:
-        # gemini и другие — промпт через stdin + пустой -p для headless-режима
-        cmd = [acfg.command, "-p", "", "--output-format", "text"]
-
-    use_stdin = True
-
-    reply_lines = []
-    spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-    start_time = time.time()
     R = _C["reset"]
     color = _agent_color(agent_type)
     label = f"{color}{_C['bold']}{agent_type.capitalize()}{R}"
-    try:
-        proc = subprocess.Popen(
-            cmd, cwd=_chat_cwd or cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE, text=True, bufsize=1,
-        )
+
+    # OpenAI-compatible API — call directly, no subprocess
+    if acfg.protocol == "openai":
+        from .agents import _call_openai_api
+        start_time = time.time()
+        print(f"{label}> {_C['dim']}думает...{R}", end="", flush=True)
         try:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
-        except BrokenPipeError:
+            reply = _call_openai_api(acfg, prompt, acfg.inactivity_timeout or 300)
+        except KeyboardInterrupt:
+            print("\n[Прервано]")
+            return
+        elapsed = int(time.time() - start_time)
+        print(f"\r{label}> {_C['dim']}думает... {elapsed}s{R}   ")
+        if reply:
+            for line in reply.split("\n"):
+                print(_colorize_line(line), flush=True)
+        else:
+            reply = "(пустой ответ)"
+        print()
+    else:
+        # CLI agents — subprocess with streaming
+        if agent_type == "claude":
+            cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
+        elif agent_type == "qwen":
+            cmd = [acfg.command, "-p", "--output-format", "text", "--approval-mode", "yolo"]
+        else:
+            cmd = [acfg.command, "-p", "", "--output-format", "text"]
+
+        reply_lines = []
+        start_time = time.time()
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=_chat_cwd or cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE, text=True, bufsize=1,
+            )
+            try:
+                proc.stdin.write(prompt)
+                proc.stdin.close()
+            except BrokenPipeError:
+                proc.wait()
+                stderr = proc.stderr.read() if proc.stderr else ""
+                print(f"\n{_C['red']}[{agent_type}: процесс упал при получении промпта]{_C['reset']}")
+                if stderr:
+                    print(f"{_C['red']}[stderr: {stderr[:300]}]{_C['reset']}")
+                return
+
+            got_output = False
+            print(f"{label}> {_C['dim']}думает...{R}", end="", flush=True)
+
+            while True:
+                ready, _, _ = select.select([proc.stdout], [], [], 3.0)
+                if ready:
+                    line = proc.stdout.readline()
+                    if not line:
+                        break
+                    if not got_output:
+                        print(flush=True)
+                        got_output = True
+                    print(_colorize_line(line.rstrip()), flush=True)
+                    reply_lines.append(line)
+                else:
+                    if proc.poll() is not None:
+                        for line in proc.stdout:
+                            if not got_output:
+                                print(flush=True)
+                                got_output = True
+                            print(_colorize_line(line.rstrip()), flush=True)
+                            reply_lines.append(line)
+                        break
+                    if not got_output:
+                        elapsed = int(time.time() - start_time)
+                        print(f"\r{label}> {_C['dim']}думает... {elapsed}s{R}   ", end="", flush=True)
+
+            proc.wait(timeout=cfg.agent_timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            print("\n[ТАЙМАУТ]")
+        except KeyboardInterrupt:
+            proc.kill()
             proc.wait()
-            stderr = proc.stderr.read() if proc.stderr else ""
-            print(f"\n{_C['red']}[{agent_type}: процесс упал при получении промпта]{_C['reset']}")
-            if stderr:
-                print(f"{_C['red']}[stderr: {stderr[:300]}]{_C['reset']}")
+            print("\n[Прервано]")
+            return
+        except FileNotFoundError:
+            print(f"\n[ОШИБКА: команда '{cmd[0]}' не найдена]")
             return
 
-        got_output = False
-        print(f"{label}> {_C['dim']}думает...{R}", end="", flush=True)
-
-        while True:
-            ready, _, _ = select.select([proc.stdout], [], [], 3.0)
-            if ready:
-                line = proc.stdout.readline()
-                if not line:
-                    break
-                if not got_output:
-                    print(flush=True)  # новая строка после "думает...Xs"
-                    got_output = True
-                print(_colorize_line(line.rstrip()), flush=True)
-                reply_lines.append(line)
-            else:
-                if proc.poll() is not None:
-                    for line in proc.stdout:
-                        if not got_output:
-                            print(flush=True)
-                            got_output = True
-                        print(_colorize_line(line.rstrip()), flush=True)
-                        reply_lines.append(line)
-                    break
-                if not got_output:
-                    elapsed = int(time.time() - start_time)
-                    print(f"\r{label}> {_C['dim']}думает... {elapsed}s{R}   ", end="", flush=True)
-
-        proc.wait(timeout=cfg.agent_timeout)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        print("\n[ТАЙМАУТ]")
-    except KeyboardInterrupt:
-        proc.kill()
-        proc.wait()
-        print("\n[Прервано]")
-        return
-    except FileNotFoundError:
-        print(f"\n[ОШИБКА: команда '{cmd[0]}' не найдена]")
-        return
-
-    reply = "".join(reply_lines).strip()
-    if not reply:
-        stderr = proc.stderr.read() if proc.stderr else ""
-        rc = proc.returncode
-        if stderr:
-            print(f"\n{_C['red']}[{agent_type} stderr: {stderr[:300]}]{R}")
-        if rc and rc != 0:
-            print(f"{_C['red']}[{agent_type} exit code: {rc}]{R}")
-        reply = "(пустой ответ)"
-    print()
+        reply = "".join(reply_lines).strip()
+        if not reply:
+            stderr = proc.stderr.read() if proc.stderr else ""
+            rc = proc.returncode
+            if stderr:
+                print(f"\n{_C['red']}[{agent_type} stderr: {stderr[:300]}]{R}")
+            if rc and rc != 0:
+                print(f"{_C['red']}[{agent_type} exit code: {rc}]{R}")
+            reply = "(пустой ответ)"
+        print()
 
     _print_confidence(reply, display_name)
     reply = re.sub(r"\n?CONFIDENCE:\s*\d+\s*%\s*$", "", reply).rstrip()
@@ -1186,6 +1215,20 @@ def _chat_solo_parallel(filepath: Path, agent_names: list[str], prompt: str, tag
         if acfg is None:
             errors[name] = "не найден в конфиге"
             return
+
+        # OpenAI-compatible API — direct HTTP call
+        if acfg.protocol == "openai":
+            from .agents import _call_openai_api
+            try:
+                text = _call_openai_api(acfg, prompt, acfg.inactivity_timeout or 300)
+                results[name] = text or ""
+                if not text:
+                    errors[name] = "пустой ответ от API"
+            except Exception as e:
+                errors[name] = str(e)[:300]
+            return
+
+        # CLI agents — subprocess
         if name == "claude":
             cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
         elif name == "qwen":
@@ -1672,9 +1715,10 @@ def _print_chat_help():
         (f"{Y}/agent+frame{R}", len("/agent+frame"),
          f"вызвать модель с фреймом{frame_hint}"),
     ]
+    M = _C["magenta"]
     for fname in frame_names:
         fdesc = cfg.frames[fname].description or fname
-        cmds.append((f"{DIM}+{fname}{R}", len(f"+{fname}"), fdesc))
+        cmds.append((f"{M}+{fname}{R}", len(f"+{fname}"), f"{DIM}{fdesc}{R}"))
     # Сценарии — динамические, на основе enabled агентов
     if frame_names and cfg.agent_names:
         a = cfg.agent_names[0]  # первый доступный агент
@@ -1692,7 +1736,7 @@ def _print_chat_help():
             labels = ["проверь → сломай → оцени", "глубокий разбор", "дебаты"]
             for i, sc in enumerate(scenarios):
                 label = labels[i] if i < len(labels) else ""
-                cmds.append((f"{DIM}{label}{R}", len(label), sc))
+                cmds.append((f"{Y}{label}{R}", len(label), f"{DIM}{sc}{R}"))
     cmds += [
         SEP,
         # --- Спецрежимы ---
