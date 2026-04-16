@@ -5,7 +5,7 @@ import os
 import re
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import cfg
@@ -36,6 +36,8 @@ class Task:
     agent: str          # claude / gemini / —
     branch: str         # task/001-frame-allocator / —
     discussion: str     # 001-scheduler-design / —
+    rework_count: int = 0
+    last_attempts: list[dict] = field(default_factory=list)
     raw_section: str    # исходный markdown-блок
 
 
@@ -68,9 +70,25 @@ def parse_tasks(path: Path | None = None) -> list[Task]:
             agent=_field(raw, r"\*\*Агент\*\*:\s*(.+)"),
             branch=_field(raw, r"\*\*Ветка\*\*:\s*(.+)"),
             discussion=_field(raw, r"\*\*Дискуссия\*\*:\s*(.+)"),
+            rework_count=int(_field(raw, r"\*\*Доработок\*\*:\s*(\d+)") or 0),
+            last_attempts=_parse_json(_field(raw, r"\*\*Попытки\*\*:\s*(.+)")),
             raw_section=raw.strip(),
         ))
     return tasks
+
+
+def _parse_json(data: str) -> list[dict]:
+    if not data or data == "—":
+        return []
+    try:
+        # Extract JSON from code block if present
+        if "```json" in data:
+            data = re.search(r"```json\n(.*?)\n```", data, re.DOTALL).group(1)
+        elif "```" in data:
+            data = re.search(r"```\n(.*?)\n```", data, re.DOTALL).group(1)
+        return json.loads(data)
+    except Exception:
+        return []
 
 
 def _field(text: str, pattern: str) -> str:
@@ -105,18 +123,29 @@ def _atomic_write(path: Path, content: str):
 
 # --- Обновление статусов ---
 
-def update_task_status(task_id: str, new_status: str, agent: str = "", branch: str = ""):
+def update_task_status(task_id: str, new_status: str, agent: str = "", branch: str = "",
+                       rework_count: int = -1, last_attempts: list[dict] = None):
     """Обновляет статус задачи в TASKS.md (в основном репозитории)."""
     with _tasks_file_lock:
         tasks_file = cfg.tasks_file
         lines = tasks_file.read_text(encoding="utf-8").splitlines()
         in_task = False
         result = []
+        
+        updated_rework = False
+        updated_attempts = False
 
-        for line in lines:
+        for i, line in enumerate(lines):
+            is_header = line.startswith("### TASK-")
             if line.startswith(f"### {task_id}:"):
                 in_task = True
-            elif line.startswith("### TASK-"):
+            elif is_header or line.startswith("---"):
+                if in_task:
+                    # Add missing fields before leaving task block
+                    if rework_count >= 0 and not updated_rework:
+                        result.append(f"- **Доработок**: {rework_count}")
+                    if last_attempts is not None and not updated_attempts:
+                        result.append(f"- **Попытки**: {json.dumps(last_attempts, ensure_ascii=False)}")
                 in_task = False
 
             if in_task:
@@ -126,8 +155,20 @@ def update_task_status(task_id: str, new_status: str, agent: str = "", branch: s
                     line = f"- **Агент**: {agent}"
                 elif branch and line.startswith("- **Ветка**:"):
                     line = f"- **Ветка**: {branch}"
+                elif rework_count >= 0 and line.startswith("- **Доработок**:"):
+                    line = f"- **Доработок**: {rework_count}"
+                    updated_rework = True
+                elif last_attempts is not None and line.startswith("- **Попытки**:"):
+                    line = f"- **Попытки**: {json.dumps(last_attempts, ensure_ascii=False)}"
+                    updated_attempts = True
 
             result.append(line)
+        
+        if in_task:
+            if rework_count >= 0 and not updated_rework:
+                result.append(f"- **Доработок**: {rework_count}")
+            if last_attempts is not None and not updated_attempts:
+                result.append(f"- **Попытки**: {json.dumps(last_attempts, ensure_ascii=False)}")
 
         _atomic_write(tasks_file, "\n".join(result) + "\n")
 
