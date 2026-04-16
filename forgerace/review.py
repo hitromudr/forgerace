@@ -194,7 +194,7 @@ NEEDS_WORK = нужны правки.
             return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
                     "full_text": review_text, "comments": "", "summary": "Ответ не содержит VERDICT"}
 
-        verdict = verdict_match.group(1).upper() if verdict_match else "NEEDS_WORK"
+        verdict = verdict_match.group(1).upper() if verdict_match else "FAILED"
         comments = comments_match.group(1).strip() if comments_match else ""
 
         # APPROVED без обоснования — невалидное ревью
