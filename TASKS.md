@@ -1079,7 +1079,7 @@ COMPLEXITY: 4
 - **Дискуссия**: championship-v2-benchmark
 
 ### TASK-120: Команда benchmark в CLI
-- **Статус**: open
+- **Статус**: in_progress:both
 - **Приоритет**: P1
 - **Этап**: 2
 - **Зависимости**: TASK-118
@@ -1095,7 +1095,7 @@ COMPLEXITY: 4
 - **Ветка**: —
 
 ### TASK-121: Модульные тесты для Benchmark-системы
-- **Статус**: open
+- **Статус**: in_progress:both
 - **Приоритет**: P2
 - **Этап**: 2
 - **Зависимости**: TASK-118
