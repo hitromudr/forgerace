@@ -773,6 +773,31 @@ def run_text_agent(prompt: str, timeout: int = 300, tag: str = "",
 # --- Промпты ---
 
 
+def build_rework_prompt(attempts: list[dict]) -> str:
+    """Формирует блок истории предыдущих попыток для промпта."""
+    if not attempts:
+        return ""
+
+    lines = ["\n## ИСТОРИЯ ПРЕДЫДУЩИХ ПОПЫТОК",
+             "Предыдущие реализации не прошли ревью. Изучи ошибки, чтобы не повторять их.\n"]
+    for i, att in enumerate(attempts, 1):
+        lines.append(f"### Попытка №{i}")
+        
+        comments = att.get("comments") or att.get("feedback", "Нет комментариев")
+        lines.append(f"**Замечания ревьюера**:\n{comments}\n")
+        
+        diff = att.get("diff") or att.get("diff_stat")
+        if diff:
+            lines.append(f"**Что было сделано (diff --stat)**:\n```\n{diff}\n```\n")
+        
+        files = att.get("files") or att.get("changed_files")
+        if files:
+            files_str = ", ".join(files) if isinstance(files, list) else str(files)
+            lines.append(f"**Измененные файлы**: {files_str}\n")
+            
+    return "\n".join(lines)
+
+
 def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
     """Формирует промпт для агента."""
     # Claude CLI сам читает CLAUDE.md — не дублируем. Остальным агентам инжектим.
@@ -799,6 +824,12 @@ def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
 ## Критерий готовности
 {task.acceptance}
 """
+
+    # Добавляем историю предыдущих попыток (реворков), если она есть
+    attempts = getattr(task, "last_attempts", [])
+    rework_section = build_rework_prompt(attempts)
+    if rework_section:
+        prompt += rework_section
 
     if task.forbidden and task.forbidden.strip() not in ("", "—"):
         prompt += f"""
