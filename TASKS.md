@@ -752,3 +752,18 @@ COMPLEXITY: 4
 - **Агент**: gemini
 - **Ветка**: task/task-024-verify-build-fiksirovat-base-sha-do-gemini
 
+### TASK-098: Добавление функции hello_world в utils.py
+- **Статус**: done
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/utils.py
+- **Интеграция**: —
+- **Описание**: Добавить функцию hello_world() в forgerace/utils.py, которая не принимает аргументов и возвращает строку "hello".
+- **Запрещено**: —
+- **Проверка**: python3 -c "from forgerace.utils import hello_world; assert hello_world() == 'hello'"
+- **Критерий готовности**: Функция hello_world() реализована в utils.py и возвращает "hello".
+- **Дискуссия**: test-pipeline
+- **Агент**: gemini
+- **Ветка**: task/task-098-dobavlenie-funktsii-hello-world-v-utilsp-gemini
