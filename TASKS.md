@@ -1,6 +1,123 @@
 
  TASKS — forgerace
 
+### TASK-080: Подключить validate_review + config consensus
+- **Статус**: ready
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/review.py, forgerace/config.py
+- **Интеграция**: —
+- **Описание**: Вызывать validate_review() в single_review() для валидации структуры ответа ревьюера. Добавить в Config: review_consensus (bool, default false), min_reviewers (int, default 2). Парсить из [limits] в forgerace.toml.
+- **Критерий готовности**: validate_review() вызывается при каждом ревью. Новые поля конфига читаются и доступны.
+- **Дискуссия**: championship-ensemble-review
+- **Команда**: Team Gemini
+
+### TASK-081: Consensus scoring + параллельный ревью
+- **Статус**: ready
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-080
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/review.py
+- **Интеграция**: —
+- **Описание**: Реализовать calculate_consensus(verdicts: list[dict]) -> dict — принимает список вердиктов от ревьюеров, возвращает итоговый consensus (APPROVED/NEEDS_WORK + merged comments). Правила: все APPROVED → APPROVED; большинство NEEDS_WORK → NEEDS_WORK; split → NEEDS_WORK. В code_review() при review_consensus=true запускать min_reviewers ревьюеров параллельно через ThreadPoolExecutor.
+- **Критерий готовности**: Параллельный ревью от 2+ моделей, consensus score в логах.
+- **Дискуссия**: championship-ensemble-review
+- **Команда**: Team Gemini
+
+### TASK-082: Интеграция consensus в pipeline + fallback
+- **Статус**: ready
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-081
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/pipeline.py
+- **Интеграция**: —
+- **Описание**: В pipeline.py использовать consensus review когда review_consensus=true. Логировать вердикт каждого ревьюера и итоговый consensus. Fallback: если consensus review падает (API ошибки), откатиться на single review. Не ломать текущий single-review mode.
+- **Критерий готовности**: Pipeline работает с consensus review, в логах видны вердикты всех ревьюеров.
+- **Дискуссия**: championship-ensemble-review
+- **Команда**: Team Gemini
+
+### TASK-083: Подключить build_rework_prompt + заполнить rework_count
+- **Статус**: ready
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: —
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/agents.py, forgerace/pipeline.py, forgerace/tasks.py
+- **Интеграция**: —
+- **Описание**: В build_prompt() вызывать build_rework_prompt() при attempt > 1, инжектить историю предыдущих попыток в промпт агента. При каждом rework в pipeline.py: инкрементировать rework_count, сохранять в last_attempts reviewer comments + agent name + timestamp. Обновлять через update_task_status().
+- **Критерий готовности**: Агент при rework видит: "Attempt 2/3, предыдущие замечания: ...". rework_count корректно считается.
+- **Дискуссия**: championship-smart-rework
+- **Команда**: Team Devstral
+
+### TASK-084: Stuck detection + post-mortem
+- **Статус**: ready
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-083
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/pipeline.py, forgerace/tasks.py
+- **Интеграция**: —
+- **Описание**: Если 3+ rework с похожими замечаниями (>50% overlap ключевых слов) — пометить задачу как stuck. При stuck вызвать API-модель для post-mortem: передать все попытки + замечания, получить диагноз (паттерн ошибок, вероятная причина, рекомендация). Логировать post-mortem report.
+- **Критерий готовности**: Задача помечается stuck при повторяющихся ошибках. Post-mortem report в логах.
+- **Дискуссия**: championship-smart-rework
+- **Команда**: Team Devstral
+
+### TASK-085: Тесты smart rework
+- **Статус**: ready
+- **Приоритет**: P2
+- **Этап**: 1
+- **Зависимости**: TASK-084
+- **Файлы (новые)**: tests/test_rework.py
+- **Файлы (modify)**: —
+- **Интеграция**: —
+- **Описание**: Unit-тесты для stuck detection (similarity check, threshold), build_rework_prompt (форматирование истории), rework_count increment. Мокать API-модель для post-mortem.
+- **Критерий готовности**: 5+ тестов проходят, покрывают основные сценарии.
+- **Дискуссия**: championship-smart-rework
+- **Команда**: Team Devstral
+
+### TASK-086: Pre-flight module — run_preflight()
+- **Статус**: ready
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: —
+- **Файлы (новые)**: forgerace/preflight.py
+- **Файлы (modify)**: forgerace/config.py
+- **Интеграция**: —
+- **Описание**: Создать forgerace/preflight.py с функцией run_preflight(task, workdir) → PreflightResult(files, plan, warnings). Вызывает API-модель (configurable preflight_agent), передаёт описание задачи + tree проекта + содержимое файлов из задачи. Парсит структурированный ответ. Добавить в Config: preflight (bool, default false), preflight_agent (str).
+- **Критерий готовности**: run_preflight() возвращает список файлов, план и предупреждения.
+- **Дискуссия**: championship-preflight
+- **Команда**: Team Llama
+
+### TASK-087: Интеграция pre-flight в pipeline + build_prompt
+- **Статус**: ready
+- **Приоритет**: P1
+- **Этап**: 1
+- **Зависимости**: TASK-086
+- **Файлы (новые)**: —
+- **Файлы (modify)**: forgerace/pipeline.py, forgerace/agents.py
+- **Интеграция**: —
+- **Описание**: В pipeline.py перед запуском coding agent вызвать run_preflight() если preflight=true. Результат передать в build_prompt() — инжектировать секцию "Pre-flight Analysis" с файлами, планом, предупреждениями. Логировать: "Pre-flight: N файлов, M шагов, K предупреждений".
+- **Критерий готовности**: Coding agent получает pre-flight контекст в промпте. В логах видна секция pre-flight.
+- **Дискуссия**: championship-preflight
+- **Команда**: Team Llama
+
+### TASK-088: Тесты pre-flight + бенчмарк
+- **Статус**: ready
+- **Приоритет**: P2
+- **Этап**: 1
+- **Зависимости**: TASK-087
+- **Файлы (новые)**: tests/test_preflight.py
+- **Файлы (modify)**: —
+- **Интеграция**: —
+- **Описание**: Unit-тесты для парсинга pre-flight ответа, обработки ошибок API, fallback при timeout. Бенчмарк: запустить одну задачу с и без pre-flight, сравнить время coding agent.
+- **Критерий готовности**: 5+ тестов проходят. Бенчмарк показывает разницу во времени.
+- **Дискуссия**: championship-preflight
+- **Команда**: Team Llama
+
 ### TASK-070: Добавить функцию format_duration в utils.py
 - **Статус**: done
 - **Приоритет**: P2
