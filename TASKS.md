@@ -2,7 +2,7 @@
  TASKS — forgerace
 
 ### TASK-070: Добавить функцию format_duration в utils.py
-- **Статус**: ready
+- **Статус**: done
 - **Приоритет**: P2
 - **Этап**: 1
 - **Зависимости**: —
