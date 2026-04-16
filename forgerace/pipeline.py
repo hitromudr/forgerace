@@ -351,7 +351,25 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
     update_task_status(task.id, "in_progress:both")
 
     from .agents import is_agent_disabled
-    agent_names = [n for n in cfg.cli_agent_names if not is_agent_disabled(n)]
+    # If task has assigned agent(s), use only them (leader's choice)
+    if task.agent and task.agent not in ("—", ""):
+        # Parse: "@gemini", "gemini", "@qwen-api+theory" → "qwen-api"
+        raw = [a.strip().lstrip("@").split("+")[0]
+               for a in task.agent.replace(",", " ").split()
+               if a.strip() not in ("—", "")]
+        # Only use CLI agents (can write code); skip API-only agents
+        assigned = [a for a in raw
+                    if a in cfg.cli_agent_names and not is_agent_disabled(a)]
+        if assigned:
+            agent_names = assigned
+            log.info(f"[{task.id}] Назначенные агенты: {agent_names}")
+        else:
+            # Fallback: assigned agent can't code → competitive with all CLI agents
+            agent_names = [n for n in cfg.cli_agent_names if not is_agent_disabled(n)]
+            if raw:
+                log.warning(f"[{task.id}] Назначенные {raw} не могут кодить → competitive")
+    else:
+        agent_names = [n for n in cfg.cli_agent_names if not is_agent_disabled(n)]
     if not agent_names:
         log.error(f"[{task.id}] ✗ Нет доступных CLI-агентов")
         update_task_status(task.id, "blocked")
