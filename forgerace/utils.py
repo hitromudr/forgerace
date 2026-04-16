@@ -278,3 +278,29 @@ def is_valid_path(p: str) -> bool:
     if re.search(r"[а-яА-ЯёЁ]", p):
         return False
     return True
+
+def format_duration(seconds: float) -> str:
+    """Форматирует длительность в человекочитаемый вид.
+
+    Args:
+        seconds: Длительность в секундах.
+
+    Returns:
+        Строка в формате:
+        - менее 60с → "42s"
+        - 60-3600с → "2m 15s"
+        - более 3600с → "1h 5m"
+    """
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    minutes = int(seconds // 60)
+    remaining_seconds = int(seconds % 60)
+    if minutes < 60:
+        if remaining_seconds == 0:
+            return f"{minutes}m"
+        return f"{minutes}m {remaining_seconds}s"
+    hours = minutes // 60
+    remaining_minutes = minutes % 60
+    if remaining_minutes == 0:
+        return f"{hours}h"
+    return f"{hours}h {remaining_minutes}m"
