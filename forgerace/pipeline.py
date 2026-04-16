@@ -752,6 +752,79 @@ def _escalate_review_stall(task: Task, results: list, last_rv: dict):
     print(f"{C['red']}{C['bold']}{'═' * 60}{R}\n")
 
 
+def _ensure_litellm_proxy():
+    """Auto-start LiteLLM proxy if agents need it and it's not running."""
+    import urllib.request
+    # Check if any enabled agent uses localhost proxy
+    proxy_url = ""
+    for name, acfg in cfg.agents.items():
+        if not acfg.enabled:
+            continue
+        for arg in acfg.args:
+            if "127.0.0.1:4000" in arg or "localhost:4000" in arg:
+                proxy_url = "http://127.0.0.1:4000"
+                break
+        if not proxy_url and acfg.env:
+            for v in acfg.env.values():
+                if "127.0.0.1:4000" in str(v) or "localhost:4000" in str(v):
+                    proxy_url = "http://127.0.0.1:4000"
+                    break
+        if proxy_url:
+            break
+
+    if not proxy_url:
+        return  # no agents need proxy
+
+    # Check if proxy is already running (bypass system proxy)
+    try:
+        no_proxy_handler = urllib.request.ProxyHandler({})
+        opener = urllib.request.build_opener(no_proxy_handler)
+        req = urllib.request.Request(f"{proxy_url}/health")
+        req.add_header("Authorization", "Bearer fr-local-dev")
+        with opener.open(req, timeout=3) as resp:
+            if resp.status == 200:
+                return  # proxy is running
+    except Exception:
+        pass
+
+    # Try to start proxy
+    litellm_bin = Path.home() / ".local/share/pipx/venvs/litellm/bin/litellm"
+    config_file = cfg.root_dir / "litellm_config.yaml"
+    if not litellm_bin.exists():
+        log.warning("LiteLLM не установлен — агенты через proxy не будут работать")
+        log.warning("  Установи: pipx install 'litellm[proxy]'")
+        return
+    if not config_file.exists():
+        log.warning(f"litellm_config.yaml не найден в {cfg.root_dir}")
+        return
+
+    log.info("Запускаю LiteLLM proxy (localhost:4000)...")
+    import subprocess as _sp
+    env = {**os.environ, "no_proxy": "127.0.0.1,localhost", "NO_PROXY": "127.0.0.1,localhost"}
+    _sp.Popen(
+        [str(litellm_bin), "--config", str(config_file), "--port", "4000", "--host", "127.0.0.1"],
+        stdout=open(cfg.log_dir / "litellm.log", "w"),
+        stderr=_sp.STDOUT,
+        env=env,
+    )
+    # Wait for startup
+    import time as _time
+    for _ in range(15):
+        _time.sleep(1)
+        try:
+            no_proxy_handler = urllib.request.ProxyHandler({})
+            opener = urllib.request.build_opener(no_proxy_handler)
+            req = urllib.request.Request(f"{proxy_url}/health")
+            req.add_header("Authorization", "Bearer fr-local-dev")
+            with opener.open(req, timeout=2) as resp:
+                if resp.status == 200:
+                    log.info("LiteLLM proxy запущен")
+                    return
+        except Exception:
+            pass
+    log.warning("LiteLLM proxy не стартовал за 15с — агенты через proxy могут не работать")
+
+
 def preflight_check() -> bool:
     """Проверяет текущую ветку на проблемы, пробует собрать через cfg.build_commands."""
     # Проверяем merge conflict маркеры (ищем в src/ если есть, иначе в корне)
@@ -771,6 +844,9 @@ def preflight_check() -> bool:
         log.error(f"⚠ Merge conflict маркеры в: {conflicted}")
         log.error("  Разреши конфликты вручную перед запуском")
         return False
+
+    # LiteLLM proxy check: if any agent uses localhost proxy, ensure it's running
+    _ensure_litellm_proxy()
 
     if not cfg.build_commands:
         return True
