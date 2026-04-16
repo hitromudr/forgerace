@@ -1144,7 +1144,8 @@ def _chat_agent_reply(filepath: Path, agent_spec: str):
                 elif a == "--provider" and j + 1 < len(acfg.args):
                     goose_provider = acfg.args[j + 1]
             cmd = [acfg.command, "run", "-i", "/dev/stdin", "--output-format", "text",
-                   "--provider", goose_provider, "--model", goose_model]
+                   "--provider", goose_provider, "--model", goose_model,
+                   "--no-profile"]  # no extensions for discuss/review
         else:
             cmd = [acfg.command, "-p", "", "--output-format", "text"]
 

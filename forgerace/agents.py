@@ -820,7 +820,7 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     elif reviewer_type == "codex":
         cmd = [acfg.command, "exec", "--full-auto"]
     elif acfg.command == "goose":
-        # Goose review: text output, stdin prompt
+        # Goose review: text output, no extensions (--no-profile), stdin prompt
         goose_model = "llama-70b"
         goose_provider = "openai"
         for j, a in enumerate(acfg.args):
@@ -829,7 +829,8 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
             elif a == "--provider" and j + 1 < len(acfg.args):
                 goose_provider = acfg.args[j + 1]
         cmd = [acfg.command, "run", "-i", "/dev/stdin", "--output-format", "text",
-               "--provider", goose_provider, "--model", goose_model]
+               "--provider", goose_provider, "--model", goose_model,
+               "--no-profile"]
     else:
         cmd = [acfg.command]
         for arg in acfg.review_args:
