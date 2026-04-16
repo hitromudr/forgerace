@@ -78,6 +78,8 @@ class Config:
     build_timeout: int = 120
     max_review_rounds: int = 3
     review_frame: str = "adversarial"  # cognitive frame for self-review when only one agent
+    review_consensus: bool = False  # использовать консенсус ревью (несколько ревьюеров)
+    min_reviewers: int = 2  # минимальное количество ревьюеров для консенсуса
     max_task_complexity: int = 3
     progress_timeout: int = 600  # kill агента если diff не меняется N секунд (10 мин)
     max_concurrent: int = 3  # макс. параллельных задач в ConcurrencyLimiter
@@ -397,6 +399,10 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
         cfg.review_run_log = limits["review_run_log"]
     if "review_frame" in limits:
         cfg.review_frame = limits["review_frame"]
+    if "review_consensus" in limits:
+        cfg.review_consensus = limits["review_consensus"]
+    if "min_reviewers" in limits:
+        cfg.min_reviewers = limits["min_reviewers"]
 
     # [pricing]
     pricing_data = data.get("pricing", {})

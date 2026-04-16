@@ -3,6 +3,7 @@
 import random
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 from .agents import AgentResult, build_prompt, run_agent_process, run_reviewer, is_agent_disabled
 from .config import cfg, resolve_agent_frame
@@ -80,9 +81,8 @@ def pick_reviewer(passed: list[AgentResult]) -> str:
 def single_review(reviewer: str, author: str, diff: str, task: Task,
                    build_passed: bool = True, build_log: str = "",
                    changed_files: list[str] | None = None,
-                   workdir: "Path | None" = None) -> dict:
+                   workdir: Path | None = None) -> dict:
     """Один ревьюер проверяет одного автора. Запускается как полноценный агент в worktree автора."""
-    from pathlib import Path
 
     # Предупреждение о раздутом diff
     diff_lines = diff.count("\n")
@@ -182,12 +182,17 @@ NEEDS_WORK = нужны правки.
                 break  # quota, no point retrying
             log.warning(f"[{reviewer}] пустой ответ, retry {_retry + 1}/3...")
         if not review_text:
-            return {"verdict": "error", "reviewer": reviewer, "author": author,
-                    "full_text": "", "comments": "", "summary": "Пустой ответ"}
+            return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
+                    "full_text": "", "comments": "", "summary": "Пустой ответ от ревьюера"}
 
         verdict_match = re.search(r"\**VERDICT\**:\s*\**(\w+)\**", review_text, re.IGNORECASE)
         comments_match = re.search(r"\**COMMENTS\**:\s*(.+?)(?=\n\**SUMMARY\**:|\Z)", review_text, re.IGNORECASE | re.DOTALL)
         summary_match = re.search(r"\**SUMMARY\**:\s*(.+)", review_text, re.IGNORECASE)
+
+        # Если ответ не содержит VERDICT или содержит битый JSON — технический сбой
+        if not verdict_match:
+            return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
+                    "full_text": review_text, "comments": "", "summary": "Ответ не содержит VERDICT"}
 
         verdict = verdict_match.group(1).upper() if verdict_match else "NEEDS_WORK"
         comments = comments_match.group(1).strip() if comments_match else ""
@@ -220,8 +225,8 @@ NEEDS_WORK = нужны правки.
             "summary": summary_match.group(1).strip() if summary_match else "",
         }
     except Exception as e:
-        return {"verdict": "error", "reviewer": reviewer, "author": author,
-                "full_text": "", "comments": "", "summary": f"Ошибка: {e}"}
+        return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
+                "full_text": "", "comments": "", "summary": f"Техническая ошибка: {e}"}
 
 
 def code_review(passed: list[AgentResult], task: Task) -> dict:
