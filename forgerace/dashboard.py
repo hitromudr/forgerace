@@ -21,5 +21,9 @@ class Dashboard:
         table.add_column("Files", style="yellow")
         table.add_column("Costs", style="red")
         for row in self.table:
-            table.add_row(*row)
-        Live.refresh(table)
+            if len(row) == 5:
+    table.add_row(*row)
+else:
+    print(f"Row {row} has incorrect number of elements. Expected 5, got {len(row)}.")
+        with Live(table) as live:
+    live.refresh()
