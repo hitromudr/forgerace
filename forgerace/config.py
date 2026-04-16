@@ -79,7 +79,6 @@ class Config:
     max_review_rounds: int = 3
     review_frame: str = "adversarial"  # cognitive frame for self-review when only one agent
     max_task_complexity: int = 3
-    max_reworks: int = 3
     progress_timeout: int = 600  # kill агента если diff не меняется N секунд (10 мин)
     max_concurrent: int = 3  # макс. параллельных задач в ConcurrencyLimiter
     budget_per_task_usd: Optional[float] = None
@@ -384,7 +383,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     # [limits]
     limits = data.get("limits", {})
     for key in ("max_parallel_tasks", "agent_timeout", "max_review_rounds",
-                "max_task_complexity", "max_reworks", "progress_timeout", "max_concurrent",
+                "max_task_complexity", "progress_timeout", "max_concurrent",
                 "budget_per_task_usd"):
         if key in limits:
             setattr(cfg, key, limits[key])
