@@ -837,6 +837,7 @@ def preflight_check() -> bool:
                        "--exclude-dir=vendor", "--exclude-dir=.venv",
                        "--exclude-dir=venv", "--exclude-dir=dist",
                        "--exclude-dir=build",
+                       "--exclude=.aider*",
                        marker, search_dir],
                       cwd=cfg.root_dir, check=False)
     if result.stdout.strip():
