@@ -476,35 +476,34 @@ def _cmd_monitor(interval: int = 10):
             now = _time.strftime("%H:%M:%S")
             print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}  (Ctrl+C to exit){R}\n")
 
-            # Header with fixed widths
-            hdr = f"  {'Team':<30}  {'Done':>6}  {'Bar':<{BAR_LEN}}  Status"
-            print(f"  {C['bold']}{hdr.strip()}{R}")
-            print(f"  {'─' * 70}")
+            print(f"  {C['bold']}{'Team':<25} {'Done':>6}  {'Progress':<{BAR_LEN}}  Status{R}")
+            print(f"  {'─' * 65}")
 
             for team_name, tt in sorted(teams.items()):
                 done = sum(1 for t in tt if t.status == "done")
+                total = len(tt)
+                # Skip fully completed old teams
+                if done == total and total > 0:
+                    continue
                 ip = sum(1 for t in tt if "progress" in t.status)
                 blocked = sum(1 for t in tt if "blocked" in t.status.lower())
-                total = len(tt)
 
                 filled = int(BAR_LEN * done / total) if total else 0
-                bar_vis = "█" * filled + "░" * (BAR_LEN - filled)
                 bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (BAR_LEN - filled)}{R}"
 
-                if done == total and total > 0:
-                    status = f"{C['green']}{C['bold']}DONE{R}"
-                elif ip > 0:
+                if ip > 0:
                     status = f"{C['yellow']}⚡ coding ({ip}){R}"
                 elif blocked > 0:
                     status = f"{C['red']}✗ blocked ({blocked}){R}"
+                elif done > 0:
+                    status = f"{C['green']}{done} done{R}"
                 else:
                     waiting = total - done - ip - blocked
-                    status = f"{C['dim']}… waiting ({waiting}){R}" if waiting else ""
+                    status = f"{C['dim']}… waiting ({waiting}){R}"
 
                 pct = f"{done}/{total}"
-                short = team_name.replace("championship-v2-", "")
-                # Print with padding BEFORE colored bar to keep alignment
-                print(f"  {short:<30}  {pct:>6}  {bar}  {status}")
+                short = team_name.replace("championship-v2-", "")[:25]
+                print(f"  {short:<25} {pct:>6}  {bar}  {status}")
 
             print(f"\n  {C['dim']}Refresh: {interval}s{R}")
             _time.sleep(interval)
