@@ -66,7 +66,8 @@ enabled = true
 
 # Aider-based coding agents (nvidia free API)
 # Aider agents — через LiteLLM proxy (localhost:4000)
-# LiteLLM транслирует tool_use и нормализует формат для nvidia API
+# aider-llama: llama-70b зацикливается при кодинге, но работает как ревьюер
+# Disabled as coding agent. Используй llama API agent для ревью.
 [agents.aider-llama]
 command = "aider"
 args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
@@ -80,7 +81,7 @@ args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = true
+enabled = false
 [agents.aider-llama.env]
 no_proxy = "127.0.0.1,localhost"
 NO_PROXY = "127.0.0.1,localhost"
@@ -104,7 +105,9 @@ no_proxy = "127.0.0.1,localhost"
 NO_PROXY = "127.0.0.1,localhost"
 
 # Goose agents — через LiteLLM proxy (localhost:4000)
-# LiteLLM транслирует tool_use для nvidia API
+# Кодинг: goose-llama NO_EDIT_ABORT (25 reads без write), goose-devstral не тестирован как кодер
+# Ревью: "Error: not connected" — goose CLI не предназначен для одноразовых review вызовов
+# TODO: разобраться с goose session management для forgerace
 [agents.goose-llama]
 command = "goose"
 args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
@@ -112,7 +115,7 @@ args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
 protocol = "cli"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = true
+enabled = false
 [agents.goose-llama.env]
 OPENAI_HOST = "http://127.0.0.1:4000"
 OPENAI_API_KEY = "fr-local-dev"
@@ -126,7 +129,7 @@ args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
 protocol = "cli"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = true
+enabled = false
 [agents.goose-devstral.env]
 OPENAI_HOST = "http://127.0.0.1:4000"
 OPENAI_API_KEY = "fr-local-dev"
