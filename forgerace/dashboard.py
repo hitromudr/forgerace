@@ -12,7 +12,7 @@ class Dashboard:
         for agent in self.agents_data:
             self.table.append([agent.name, '', str(agent.time), str(agent.files), str(agent.costs)])
         # Print the table using rich.live
-        from rich.live import Live
+        
         from rich.table import Table
         table = Table(title="Dashboard")
         table.add_column("Name", style="cyan")
@@ -21,9 +21,9 @@ class Dashboard:
         table.add_column("Files", style="yellow")
         table.add_column("Costs", style="red")
         for row in self.table:
-            if len(row) == 5:
+                if len(row) == 5:
     table.add_row(*row)
 else:
     print(f"Row {row} has incorrect number of elements. Expected 5, got {len(row)}.")
-        with Live(table) as live:
+        live = Live(table)
     live.refresh()
