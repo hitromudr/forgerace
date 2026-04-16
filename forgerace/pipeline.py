@@ -1,6 +1,5 @@
 """Основной пайплайн: запуск агентов, верификация, конкурентный/одиночный режим."""
 
-import json
 import os
 import re
 import subprocess
@@ -167,82 +166,6 @@ def verify_design_task(workdir: Path, task: Task) -> tuple[bool, str]:
         if f and is_valid_path(f) and not (workdir / f).exists():
             return False, f"Файл не создан: {f}"
     return True, ""
-
-
-def _save_rework_to_tasks_md(task: Task):
-    """Сохраняет rework_count и last_attempts в TASKS.md."""
-    from .tasks import _tasks_file_lock, _atomic_write
-    with _tasks_file_lock:
-        tasks_file = cfg.tasks_file
-        lines = tasks_file.read_text(encoding="utf-8").splitlines()
-        in_task = False
-        result = []
-
-        rework_count = getattr(task, 'rework_count', 0)
-        last_attempts = getattr(task, 'last_attempts', [])
-
-        rework_line = f"- **Переделки**: {rework_count}"
-        attempts_line = f"- **Последние попытки**: {json.dumps(last_attempts, ensure_ascii=False)}"
-
-        has_rework = False
-        has_attempts = False
-
-        for line in lines:
-            if line.startswith(f"### {task.id}:"):
-                in_task = True
-            elif line.startswith("### TASK-"):
-                in_task = False
-
-            if in_task:
-                if line.startswith("- **Статус**:"):
-                    # keep it
-                    pass
-                elif line.startswith("- **Переделки**:"):
-                    line = rework_line
-                    has_rework = True
-                elif line.startswith("- **Последние попытки**:"):
-                    line = attempts_line
-                    has_attempts = True
-
-            # Вставляем поля перед Описанием, если их не было
-            if in_task and line.startswith("- **Описание**:"):
-                if not has_rework:
-                    result.append(rework_line)
-                    has_rework = True
-                if not has_attempts:
-                    result.append(attempts_line)
-                    has_attempts = True
-
-            result.append(line)
-
-        _atomic_write(tasks_file, "\n".join(result) + "\n")
-
-
-def _check_and_record_rework(task: Task, agent_result: AgentResult, comments: str) -> bool:
-    """
-    Инкрементирует rework_count, сохраняет историю попыток.
-    Возвращает True если лимит правок превышен.
-    """
-    if not hasattr(task, 'rework_count'):
-        task.rework_count = 0
-    if not hasattr(task, 'last_attempts'):
-        task.last_attempts = []
-
-    task.rework_count += 1
-
-    diff_stat = run_cmd(["git", "diff", "--stat", cfg.dev_branch], cwd=agent_result.workdir, check=False).stdout or ""
-    task.last_attempts.append({
-        "diff_stat": diff_stat.strip(),
-        "comments": comments,
-        "agent": agent_result.agent_type
-    })
-
-    _save_rework_to_tasks_md(task)
-
-    max_reworks = getattr(cfg, 'max_reworks', 3)
-    if task.rework_count >= max_reworks:
-        return True
-    return False
 
 
 def collect_metrics(workdir: Path, task: Task) -> dict:
@@ -523,13 +446,6 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 # Сразу отправляем на доработку — не ждём других агентов
                 all_comments = "\n\n".join(rework_comments)
                 if all_comments:
-                    if _check_and_record_rework(task, result, all_comments):
-                        log.error(f"[{task.id}] ✗ Превышен лимит правок ({task.rework_count}) → STUCK")
-                        update_task_status(task.id, "stuck")
-                        run_hook(cfg.hook_on_complete, task.id, "stuck", "none")
-                        _log_total_cost(task.id, all_results)
-                        cleanup_worktrees(all_results)
-                        return False
                     log.info(f"[{task.id}/{result.agent_type}/доработка] {C['yellow']}отправлен на исправление{R}")
                     send_to_rework(result, task, all_comments)
 
@@ -621,19 +537,6 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 if agent_comments.strip():
                     rework_items.append((agent_result, agent_comments))
             if rework_items:
-                stuck = False
-                for agent_result, agent_comments in rework_items:
-                    if _check_and_record_rework(task, agent_result, agent_comments):
-                        stuck = True
-                        break
-                if stuck:
-                    log.error(f"[{task.id}] ✗ Превышен лимит правок ({task.rework_count}) → STUCK")
-                    update_task_status(task.id, "stuck")
-                    run_hook(cfg.hook_on_complete, task.id, "stuck", "none")
-                    _log_total_cost(task.id, all_results)
-                    cleanup_worktrees(all_results)
-                    return False
-
                 with ThreadPoolExecutor(max_workers=len(rework_items)) as rework_pool:
                     rework_futures = {}
                     for agent_result, agent_comments in rework_items:
@@ -644,14 +547,6 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                         f.result()  # дождаться завершения
         else:
             comments = rv.get("comments", "")
-            if _check_and_record_rework(task, best_result, comments):
-                log.error(f"[{task.id}] ✗ Превышен лимит правок ({task.rework_count}) → STUCK")
-                update_task_status(task.id, "stuck")
-                run_hook(cfg.hook_on_complete, task.id, "stuck", "none")
-                _log_total_cost(task.id, all_results)
-                cleanup_worktrees(all_results)
-                return False
-
             log.info(f"[{task.id}/{best_result.agent_type}/доработка] {C['yellow']}отправлен на исправление{R}")
             send_to_rework(best_result, task, comments)
             passed = [best_result]
@@ -765,15 +660,6 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         if not comments.strip() or rv.get("verdict") == "error":
             log.warning(f"[{task.id}/{reviewer}/ревью] ⚠ без замечаний или ошибка — пропускаю")
             continue
-
-        if _check_and_record_rework(task, best_result, comments):
-            log.error(f"[{task.id}] ✗ Превышен лимит правок ({task.rework_count}) → STUCK")
-            update_task_status(task.id, "stuck")
-            run_hook(cfg.hook_on_complete, task.id, "stuck", "none")
-            _log_total_cost(task.id, [result])
-            cleanup_worktrees([result])
-            return False
-
         log.info(f"[{task.id}/{agent_type}/доработка] {C['yellow']}отправлен на исправление{R}")
         send_to_rework(best_result, task, comments)
     else:

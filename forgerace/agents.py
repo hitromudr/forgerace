@@ -773,39 +773,7 @@ def run_text_agent(prompt: str, timeout: int = 300, tag: str = "",
 # --- Промпты ---
 
 
-def build_rework_prompt(attempts: list[dict]) -> str:
-    """Формирует текстовый блок с историей предыдущих ошибок и попыток."""
-    if not attempts:
-        return ""
-
-    res = ["\n## ИСТОРИЯ ПРЕДЫДУЩИХ ПОПЫТОК"]
-    res.append(f"Текущая попытка: {len(attempts) + 1}. Пожалуйста, проанализируй предыдущие ошибки, чтобы не повторять их.\n")
-
-    for i, att in enumerate(attempts, 1):
-        num = att.get("number") or att.get("attempt") or i
-        agent = att.get("agent", "unknown")
-        res.append(f"### Попытка {num} (агент: {agent})")
-
-        if att.get("diff"):
-            diff_text = att["diff"]
-            if len(diff_text) > 1500:
-                diff_text = diff_text[:1500] + "\n... (обрезано)"
-            res.append(f"**Твой предыдущий diff**:\n```diff\n{diff_text}\n```")
-
-        if att.get("comments"):
-            res.append(f"**Замечания ревьюера**:\n{att['comments']}")
-
-        if att.get("error"):
-            err = att["error"]
-            if len(err) > 2000:
-                err = "..." + err[-2000:]
-            res.append(f"**Ошибка сборки/тестов**:\n```\n{err}\n```")
-        res.append("")
-
-    return "\n".join(res)
-
-
-def build_prompt(task: Task, error_log: str = "", agent_type: str = "", attempts: list[dict] | None = None) -> str:
+def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
     """Формирует промпт для агента."""
     # Claude CLI сам читает CLAUDE.md — не дублируем. Остальным агентам инжектим.
     project_section = ""
@@ -859,9 +827,7 @@ def build_prompt(task: Task, error_log: str = "", agent_type: str = "", attempts
 {cfg.test_instruction}
 """
 
-    if attempts:
-        prompt += build_rework_prompt(attempts)
-    elif error_log:
+    if error_log:
         log_head = error_log[-4000:]
         prompt += f"""
 ## ПРЕДЫДУЩАЯ ПОПЫТКА ПРОВАЛИЛАСЬ
