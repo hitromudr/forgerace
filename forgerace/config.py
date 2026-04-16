@@ -84,6 +84,8 @@ class Config:
     progress_timeout: int = 600  # kill агента если diff не меняется N секунд (10 мин)
     max_concurrent: int = 3  # макс. параллельных задач в ConcurrencyLimiter
     budget_per_task_usd: Optional[float] = None
+    preflight: bool = False  # enable pre-flight analysis
+    preflight_agent: str = "qwen-api"  # agent for pre-flight analysis
 
     # --- Pricing ---
     pricing: PricingConfig = field(default_factory=PricingConfig)
