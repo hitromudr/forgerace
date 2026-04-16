@@ -8,9 +8,9 @@ class Dashboard:
         # Update the table with the latest data
         self.table = []
         for task in self.task_queue.tasks:
-            self.table.append([task.name, task.status])
+            self.table.append([task.name, task.status, '', '', ''])
         for agent in self.agents_data:
-            self.table.append([agent.name, agent.time, agent.files, agent.costs])
+            self.table.append([agent.name, '', str(agent.time), str(agent.files), str(agent.costs)])
         # Print the table using rich.live
         from rich.live import Live
         from rich.table import Table
