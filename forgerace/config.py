@@ -392,7 +392,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     limits = data.get("limits", {})
     for key in ("max_parallel_tasks", "agent_timeout", "max_review_rounds",
                 "max_task_complexity", "progress_timeout", "max_concurrent",
-                "budget_per_task_usd"):
+                "budget_per_task_usd", "preflight", "preflight_agent"):
         if key in limits:
             setattr(cfg, key, limits[key])
     if "review_run_log" in limits:
@@ -480,6 +480,12 @@ def init_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
         cfg.dev_branch = current
     # Создаём директории
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
+    # Валидация preflight_agent
+    if cfg.preflight and cfg.preflight_agent:
+        allowed_agents = ["qwen-api", "gemini", "gpt-oss", "llama", "qwen", "claude", "devstral"]
+        if cfg.preflight_agent not in allowed_agents:
+            log.warning(f"preflight_agent '{cfg.preflight_agent}' не в списке разрешённых. Используется 'qwen-api'")
+            cfg.preflight_agent = "qwen-api"
 
 
 def resolve_agent_frame(agent_spec: str) -> tuple[str, str]:

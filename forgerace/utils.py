@@ -288,3 +288,7 @@ def is_valid_path(p: str) -> bool:
     if re.search(r"[а-яА-ЯёЁ]", p):
         return False
     return True
+
+def log_preflight(summary: str):
+    """Логирует результаты pre-flight анализа."""
+    log.info(f"📋 Pre-flight analysis: {summary}")
