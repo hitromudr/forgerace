@@ -661,6 +661,11 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
             log.warning(f"[{task.id}/{reviewer}/ревью] ⚠ без замечаний или ошибка — пропускаю")
             continue
         log.info(f"[{task.id}/{agent_type}/доработка] {C['yellow']}отправлен на исправление{R}")
+        # Save git diff --stat before rework
+        diff_stat = run_cmd(["git", "diff", "--stat", cfg.dev_branch], cwd=best_result.workdir, check=False)
+        diff_stat_text = (diff_stat.stdout or "").strip()
+        if diff_stat_text:
+            log.info(f"[{task.id}/{agent_type}/доработка] git diff --stat:\n{diff_stat_text}")
         send_to_rework(best_result, task, comments)
     else:
         log.info(f"[{task.id}/{reviewer}/ревью] финальный раунд")
