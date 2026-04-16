@@ -73,7 +73,8 @@ args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
         "--edit-format", "diff",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
-        "--no-show-model-warnings", "--no-gitignore"]
+        "--no-show-model-warnings", "--no-gitignore",
+        "--no-browser", "--no-analytics", "--no-check-update"]
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
@@ -87,7 +88,8 @@ args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
         "--edit-format", "diff",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
-        "--no-show-model-warnings", "--no-gitignore"]
+        "--no-show-model-warnings", "--no-gitignore",
+        "--no-browser", "--no-analytics", "--no-check-update"]
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
