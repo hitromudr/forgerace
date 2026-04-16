@@ -462,6 +462,7 @@ def _cmd_agents_list():
 def _cmd_monitor(interval: int = 10):
     """Live dashboard: progress with auto-refresh."""
     import time as _time
+    BAR_LEN = 15
     try:
         while True:
             print("\033[2J\033[H", end="")
@@ -474,29 +475,36 @@ def _cmd_monitor(interval: int = 10):
 
             now = _time.strftime("%H:%M:%S")
             print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}  (Ctrl+C to exit){R}\n")
-            print(f"  {C['bold']}{'Team':<35} {'Progress':>10} {'Bar':>12} {'Status'}{R}")
-            print(f"  {'─' * 75}")
+
+            # Header with fixed widths
+            hdr = f"  {'Team':<30}  {'Done':>6}  {'Bar':<{BAR_LEN}}  Status"
+            print(f"  {C['bold']}{hdr.strip()}{R}")
+            print(f"  {'─' * 70}")
 
             for team_name, tt in sorted(teams.items()):
                 done = sum(1 for t in tt if t.status == "done")
                 ip = sum(1 for t in tt if "progress" in t.status)
                 blocked = sum(1 for t in tt if "blocked" in t.status.lower())
                 total = len(tt)
-                bar_len = 10
-                filled = int(bar_len * done / total) if total else 0
-                bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (bar_len - filled)}{R}"
+
+                filled = int(BAR_LEN * done / total) if total else 0
+                bar_vis = "█" * filled + "░" * (BAR_LEN - filled)
+                bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (BAR_LEN - filled)}{R}"
+
                 if done == total and total > 0:
                     status = f"{C['green']}{C['bold']}DONE{R}"
                 elif ip > 0:
-                    status = f"{C['yellow']}coding ({ip}){R}"
+                    status = f"{C['yellow']}⚡ coding ({ip}){R}"
                 elif blocked > 0:
-                    status = f"{C['red']}blocked ({blocked}){R}"
+                    status = f"{C['red']}✗ blocked ({blocked}){R}"
                 else:
                     waiting = total - done - ip - blocked
-                    status = f"{C['dim']}waiting ({waiting}){R}" if waiting else ""
+                    status = f"{C['dim']}… waiting ({waiting}){R}" if waiting else ""
+
                 pct = f"{done}/{total}"
                 short = team_name.replace("championship-v2-", "")
-                print(f"  {short:<35} {pct:>10} {bar} {status}")
+                # Print with padding BEFORE colored bar to keep alignment
+                print(f"  {short:<30}  {pct:>6}  {bar}  {status}")
 
             print(f"\n  {C['dim']}Refresh: {interval}s{R}")
             _time.sleep(interval)
