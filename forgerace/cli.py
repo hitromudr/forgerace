@@ -724,6 +724,60 @@ def _cmd_feature_score():
         print(f"  {color}{team_name:<40} {done:>5} {total:>6} {cost_str:>8}{R}")
     print()
 
+def _cmd_stats():
+    """Выводит статистику задач."""
+    tasks = parse_tasks()
+    if not tasks:
+        print(f"\n  {C['dim']}Нет задач в TASKS.md{R}")
+        return
+
+    # Статистика по статусам
+    status_counts = {}
+    for t in tasks:
+        status_base = t.status.split(":")[0]
+        status_counts[status_base] = status_counts.get(status_base, 0) + 1
+
+    print(f"\n  {C['bold']}Статистика задач{R}")
+    print(f"  {'─' * 60}")
+    print(f"  {C['bold']}Всего задач:{R} {len(tasks)}")
+    print(f"  {C['bold']}По статусам:{R}")
+    for status, count in sorted(status_counts.items()):
+        color = C['green'] if status == 'done' else C['yellow'] if status == 'in_progress' else C['red'] if status == 'blocked' else C['white']
+        print(f"    {color}{status:<15}{R}: {count}")
+
+    # Статистика по приоритетам
+    priority_counts = {}
+    for t in tasks:
+        priority_counts[t.priority] = priority_counts.get(t.priority, 0) + 1
+
+    print(f"\n  {C['bold']}По приоритетам:{R}")
+    for priority in sorted(priority_counts.keys()):
+        count = priority_counts[priority]
+        print(f"    {priority}: {count}")
+
+    # Статистика по этапам
+    stage_counts = {}
+    for t in tasks:
+        stage_counts[t.stage] = stage_counts.get(t.stage, 0) + 1
+
+    print(f"\n  {C['bold']}По этапам:{R}")
+    for stage in sorted(stage_counts.keys()):
+        count = stage_counts[stage]
+        print(f"    Этап {stage}: {count}")
+
+    # Статистика по агентам
+    agent_counts = {}
+    for t in tasks:
+        if t.agent and t.agent != "—":
+            agent_counts[t.agent] = agent_counts.get(t.agent, 0) + 1
+
+    if agent_counts:
+        print(f"\n  {C['bold']}По агентам:{R}")
+        for agent, count in sorted(agent_counts.items()):
+            print(f"    {agent}: {count}")
+
+    print()
+
 def _cmd_benchmark(agent: Optional[str] = None, format_: str = "table"):
     """Показать таблицу метрик производительности агентов."""
     store = BenchmarkStore()
@@ -1160,6 +1214,9 @@ def main():
     # help
     sub.add_parser("help", help="Полная справка с примерами")
 
+    # stats
+    sub.add_parser("stats", help="Вывести статистику задач")
+
     args = parser.parse_args()
 
     if args.command == "help" or args.command is None:
@@ -1249,6 +1306,11 @@ def main():
     # status
     if args.command == "status":
         show_status()
+        return
+
+    # stats
+    if args.command == "stats":
+        _cmd_stats()
         return
 
     # run
