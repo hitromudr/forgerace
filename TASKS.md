@@ -49,7 +49,7 @@
 - **Ветка**: task/task-004-realizatsiya-litellm-watchdog-aider-gptoss
 
 ### TASK-005: Реализация Stale Task Cleaner
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -96,7 +96,7 @@
 - **Ветка**: task/task-008-realizovat-webserver-s-sse-aider-devstral
 
 ### TASK-009: Реализовать DashboardRenderer
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/dashboard_renderer.py
