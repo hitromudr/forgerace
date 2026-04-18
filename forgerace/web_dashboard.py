@@ -264,9 +264,11 @@ function render(d){
   renderTeams(d.teams);
 }
 
-const es=new EventSource("/events");
-es.onmessage=function(e){try{render(JSON.parse(e.data))}catch(err){console.error(err)}};
-es.onerror=function(){document.getElementById("ts").textContent="Connection lost, retrying..."};
+window.addEventListener('load',function(){
+  const es=new EventSource("/events");
+  es.onmessage=function(e){try{render(JSON.parse(e.data))}catch(err){console.error(err)}};
+  es.onerror=function(){document.getElementById("ts").textContent="Connection lost, retrying..."};
+});
 </script></body></html>"""
 
 
