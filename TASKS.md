@@ -81,7 +81,7 @@
 - **Ветка**: task/task-006-realizatsiya-flat-dependencies-aider-devstral
 
 ### TASK-008: Реализовать WebServer с SSE
-- **Статус**: blocked
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/web_server.py
@@ -170,7 +170,7 @@
 - **Агент**: aider-qwen
 - **Ветка**: task/task-014-realizatsiya-parallelnogo-vypolneniya-za-aider-qwen
 ### TASK-015: Реализация отчётности и визуализации
-- **Статус**: blocked
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/reporting/reporter.py
@@ -184,7 +184,7 @@
 - **Агент**: pre-check
 - **Ветка**: task/task-015-realizatsiya-otchyotnosti-i-vizualizatsi-aider-devstral
 ### TASK-016: Реализация обработки ошибок и восстановления
-- **Статус**: blocked
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/error_handler.py
