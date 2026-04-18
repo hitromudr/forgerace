@@ -1225,6 +1225,10 @@ def main():
     # stats
     sub.add_parser("stats", help="Вывести статистику задач")
 
+    # rollback
+    rollback_p = sub.add_parser("rollback", help="Восстановить состояние после задачи")
+    rollback_p.add_argument("task_id", help="ID задачи (TASK-001)")
+
     args = parser.parse_args()
 
     if args.command == "help" or args.command is None:
@@ -1319,6 +1323,23 @@ def main():
     # stats
     if args.command == "stats":
         _cmd_stats()
+        return
+
+    if args.command == "rollback":
+        from .checkpoint import store
+        task_id = args.task_id
+        if not task_id.startswith("TASK-"):
+            print(f"  {C['red']}Некорректный ID задачи: {task_id}. Ожидается формат TASK-001{R}")
+            return
+        checkpoint = store.rollback(task_id)
+        if checkpoint:
+            print(f"  ✓ Восстановлено состояние после {task_id}")
+            print(f"    Время: {checkpoint.timestamp}")
+            print(f"    Коммит: {checkpoint.git_sha[:7]}")
+            print(f"    Агент: {checkpoint.agent}")
+            print(f"    Метрики: {checkpoint.metrics}")
+        else:
+            print(f"  ✗ Не удалось восстановить {task_id}")
         return
 
     # run
