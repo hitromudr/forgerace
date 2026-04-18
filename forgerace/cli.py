@@ -1227,7 +1227,8 @@ def main():
     sub.add_parser("help", help="Полная справка с примерами")
 
     # stats
-    sub.add_parser("stats", help="Вывести статистику задач")
+    stats_p = sub.add_parser("stats", help="Вывести статистику задач")
+    stats_p.add_argument("--format", choices=["text", "json"], default="text", help="Формат вывода")
 
     # rollback
     rollback_p = sub.add_parser("rollback", help="Восстановить состояние после задачи")
