@@ -111,7 +111,7 @@
 - **Ветка**: task/task-009-realizovat-dashboardrenderer-aider-devstral
 
 ### TASK-010: Реализовать Notifier
-- **Статус**: in_progress:aider-gptoss
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/notifier.py
@@ -122,8 +122,8 @@
 - **Проверка**: python -m unittest test_notifier.py
 - **Критерий готовности**: Notifier должен корректно отправлять уведомления
 - **Дискуссия**: observability-v1
-- **Агент**: aider-gptoss
-- **Ветка**: task/task-010-realizovat-notifier-aider-gptoss
+- **Агент**: aider-devstral
+- **Ветка**: task/task-010-realizovat-notifier-aider-devstral
 
 ### TASK-011: Реализовать синхронизацию доступа к состоянию
 - **Статус**: blocked
