@@ -49,7 +49,7 @@
 - **Ветка**: task/task-004-realizatsiya-litellm-watchdog-aider-gptoss
 
 ### TASK-005: Реализация Stale Task Cleaner
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -141,7 +141,7 @@
 - **Ветка**: task/task-011-realizovat-sinhronizatsiyu-dostupa-k-sos-aider-devstral
 
 ### TASK-012: Реализовать persistence timeline
-- **Статус**: blocked
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/timeline.py
@@ -156,7 +156,7 @@
 - **Ветка**: task/task-012-realizovat-persistence-timeline-aider-devstral
 
 ### TASK-014: Реализация параллельного выполнения задач
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/runner.py
