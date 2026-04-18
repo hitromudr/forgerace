@@ -258,12 +258,24 @@ es.onerror=function(){document.getElementById("ts").textContent="Connection lost
 # ---------------------------------------------------------------------------
 
 class _Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        pass  # suppress request logging
+
     def do_GET(self):
+        try:
+            self._handle_get()
+        except BrokenPipeError:
+            pass
+
+    def _handle_get(self):
         if self.path == "/":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(_HTML.encode("utf-8"))
+        elif self.path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
         elif self.path == "/events":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
