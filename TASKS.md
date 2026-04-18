@@ -33,7 +33,7 @@
 - **Ветка**: task/task-003-realizatsiya-checkpoints-aider-devstral
 
 ### TASK-004: Реализация LiteLLM Watchdog
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
