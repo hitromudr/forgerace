@@ -562,10 +562,13 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 short = team_name.replace("championship-v2-", "")[:15]
                 filled = int(BAR_LEN * done / total) if total else 0
                 bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (BAR_LEN - filled)}{R}"
+                pending = total - done - ip - blocked
                 if ip > 0:
                     status_str = f"  {C['magenta']}coding ({ip}){R}"
                 elif blocked > 0:
                     status_str = f"  {C['red']}blocked ({blocked}){R}"
+                elif pending > 0:
+                    status_str = f"  {C['yellow']}pending ({pending}){R}"
                 else:
                     status_str = ""
                 print(f"  {C['bold']}{short}{R}  {pct}  {bar}{status_str}")
