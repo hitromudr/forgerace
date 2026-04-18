@@ -61,8 +61,8 @@
 - **Проверка**: `python -m unittest test_stale_task_cleaner.py`
 - **Критерий готовности**: успешный запуск `clean_stale_tasks()` без ошибок
 - **Дискуссия**: stability-v1
-- **Агент**: —
-- **Ветка**: — 
+- **Агент**: aider-devstral
+- **Ветка**: task/task-005-realizatsiya-stale-task-cleaner-aider-devstral
 
 ### TASK-006: Реализация Flat Dependencies
 - **Статус**: open
@@ -152,8 +152,8 @@
 - **Проверка**: python -m unittest test_timeline.py
 - **Критерий готовности**: Timeline должен корректно сохранять события
 - **Дискуссия**: observability-v1
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: aider-devstral
+- **Ветка**: task/task-012-realizovat-persistence-timeline-aider-devstral
 
 ### TASK-014: Реализация параллельного выполнения задач
 - **Статус**: open
