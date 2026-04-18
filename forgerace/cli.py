@@ -523,11 +523,11 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 proc_str = f"{C['green']}▶ {procs} running{R}"
             else:
                 proc_str = f"{C['red']}■ stopped{R}"
-            print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}{R}  {proc_str}  {litellm_status}  {C['dim']}(Ctrl+C){R}")
+            print(f"  {C['cyan']}{C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}{R}  {proc_str}  {litellm_status}  {C['dim']}(Ctrl+C){R}")
             print()
 
             # Teams table
-            print(f"  {C['dim']}{'Team':<18} {'Done':>5}  {'Progress':<{BAR_LEN}}  Status{R}")
+            print(f"  {C['cyan']}{'Team':<18} {'Done':>5}  {'Progress':<{BAR_LEN}}  Status{R}")
             print(f"  {'─' * 55}")
 
             active_tasks = []
@@ -590,7 +590,7 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 for t in sorted(tt, key=lambda x: x.id):
                     coding = t.id in _coding_now
                     if t.status == "done":
-                        print(f"    {C['dim']}✓ {t.id}  {t.name[:45]}{R}")
+                        print(f"    {C['green']}✓{R} {C['dim']}{t.id}  {t.name[:45]}{R}")
                     elif t.status == "skip":
                         print(f"    {C['dim']}⊘ {t.id}  {t.name[:40]} (skip){R}")
                     elif coding:
