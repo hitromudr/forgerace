@@ -6,6 +6,10 @@ import select
 import subprocess
 import time
 import threading
+from .health_monitor import start_health_monitor
+
+# Start the LiteLLM health monitor as soon as the agents module is imported.
+_health_monitor = start_health_monitor()
 
 # Suppress node.js deprecation warnings (gemini CLI punycode spam)
 os.environ.setdefault("NODE_OPTIONS", "--no-deprecation")
