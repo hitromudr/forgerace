@@ -504,22 +504,15 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                                      capture_output=True, text=True).stdout.strip() or "0")
             except Exception:
                 procs = 0
-            # LiteLLM health check — must bypass system proxy (HTTP_PROXY)
-            _litellm_ok = True
-            _saved = {k: os.environ.pop(k, None) for k in
-                      ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy")}
+            # LiteLLM health check — use curl to bypass system proxy
             try:
-                import urllib.request as _ur
-                _req = _ur.Request("http://127.0.0.1:4000/health")
-                _req.add_header("Authorization", "Bearer fr-local-dev")
-                with _ur.urlopen(_req, timeout=2):
-                    pass
+                _hc = _sp.run(["curl", "-s", "--noproxy", "*", "-o", "/dev/null", "-w", "%{http_code}",
+                               "-H", "Authorization: Bearer fr-local-dev",
+                               "http://127.0.0.1:4000/health"],
+                              capture_output=True, text=True, timeout=3)
+                _litellm_ok = _hc.stdout.strip() in ("200", "401")
             except Exception:
                 _litellm_ok = False
-            finally:
-                for k, v in _saved.items():
-                    if v is not None:
-                        os.environ[k] = v
             litellm_status = f"{C['green']}LiteLLM ✓{R}" if _litellm_ok else f"{C['red']}LiteLLM ✗{R}"
             print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}  {procs} processes  {litellm_status}  {C['dim']}(Ctrl+C){R}")
             print(f"  {C['green']}✓{R}done  {C['magenta']}⚡{R}coding  {C['red']}✗{R}blocked  {C['yellow']}…{R}pending\n")
