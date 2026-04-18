@@ -50,9 +50,16 @@ def _create_worktree_impl(agent_num: int, branch: str) -> Path:
 
     # Удаляем старую ветку — может быть залочена мёртвым worktree
     run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
-    # Если не удалилась (залочена) — ещё раз prune и retry
+    # Если не удалилась — kill all worktrees referencing it, prune, retry
     branch_check = run_cmd(["git", "branch", "--list", branch], cwd=cfg.root_dir, check=False)
     if branch_check.stdout.strip():
+        # Find and remove any worktree using this branch
+        wt_list = run_cmd(["git", "worktree", "list", "--porcelain"], cwd=cfg.root_dir, check=False)
+        for line in (wt_list.stdout or "").split("\n"):
+            if line.startswith("worktree ") and branch in (wt_list.stdout or ""):
+                wt_path = line.split(" ", 1)[1]
+                run_cmd(["git", "worktree", "remove", wt_path, "--force"],
+                        cwd=cfg.root_dir, check=False)
         run_cmd(["git", "worktree", "prune"], cwd=cfg.root_dir, check=False)
         run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
 
