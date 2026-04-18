@@ -491,7 +491,8 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
     BAR_LEN = 15
     try:
         while True:
-            print("\033[2J\033[H", end="")
+            # Cursor home + clear to end of screen (no flicker vs full clear)
+            print("\033[H\033[J", end="")
             tasks = parse_tasks()
             teams = {}
             for t in tasks:
@@ -651,14 +652,16 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                     color = agent_color(agent)
                     acfg = cfg.agents.get(agent)
                     frame = f"+{acfg.default_frame}" if acfg and acfg.default_frame else ""
+                    name = f"{agent}{frame}"
+                    pad = max(1, 22 - len(name))
                     if len(info) == 3:
                         tid, role, detail = info
-                        tid_str = tid or ""
                         role_color = C['blue'] if role == "review" else C['magenta']
-                        print(f"  {color}{agent}{frame:<20}{R} {role_color}{role:<8}{R} {tid_str}  {C['dim']}{detail}{R}")
+                        tid_str = f"{C['yellow']}{tid}{R} " if tid else ""
+                        print(f"  {color}{name}{R}{' '*pad}{role_color}{role:<8}{R} {tid_str}{C['dim']}{detail}{R}")
                     else:
                         tid, action = info
-                        print(f"  {color}{agent}{frame:<20}{R} {C['magenta']}{'coding':<8}{R} {tid}  {C['dim']}{action}{R}")
+                        print(f"  {color}{name}{R}{' '*pad}{C['magenta']}{'coding':<8}{R} {C['yellow']}{tid}{R}  {C['dim']}{action}{R}")
 
             if once:
                 break
