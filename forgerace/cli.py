@@ -522,12 +522,12 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             if procs > 0:
                 proc_str = f"{C['green']}▶ {procs} running{R}"
             else:
-                proc_str = f"{C['dim']}■ stopped{R}"
+                proc_str = f"{C['red']}■ stopped{R}"
             print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}{R}  {proc_str}  {litellm_status}  {C['dim']}(Ctrl+C){R}")
             print()
 
             # Teams table
-            print(f"  {C['bold']}{'Team':<15} {'Done':>6}  {'Progress':<{BAR_LEN}}  Status{R}")
+            print(f"  {C['dim']}{'Team':<18} {'Done':>5}  {'Progress':<{BAR_LEN}}  Status{R}")
             print(f"  {'─' * 55}")
 
             active_tasks = []
@@ -590,11 +590,11 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 for t in sorted(tt, key=lambda x: x.id):
                     coding = t.id in _coding_now
                     if t.status == "done":
-                        print(f"    {C['green']}✓{R} {t.id}  {C['dim']}{t.name[:45]}{R}")
+                        print(f"    {C['dim']}✓ {t.id}  {t.name[:45]}{R}")
                     elif t.status == "skip":
-                        print(f"    {C['dim']}⊘ {t.id}  {t.name[:45]} (skip){R}")
+                        print(f"    {C['dim']}⊘ {t.id}  {t.name[:40]} (skip){R}")
                     elif coding:
-                        print(f"    {C['magenta']}⚡{R} {t.id}  {t.name[:45]}")
+                        print(f"    {C['magenta']}⚡{R} {C['bold']}{t.id}{R}  {t.name[:45]}")
                     elif "blocked" in t.status.lower() or (t.deps and not all(
                         any(d2.id == d and d2.status == "done" for d2 in tt) or d not in {x.id for x in tt}
                         for d in t.deps)):
