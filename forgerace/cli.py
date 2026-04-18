@@ -4,6 +4,16 @@ import argparse
 import os
 import signal
 import sys
+# Import error‑path test runner (optional integration)
+try:
+    from .test_error_paths import run_error_path_tests
+    # If the benchmark is invoked with a special flag, run the tests.
+    if "--test-error-paths" in sys.argv:
+        exit_code = run_error_path_tests()
+        sys.exit(exit_code)
+except Exception:
+    # Silently ignore if the test module is not present or any import error occurs.
+    pass
 from pathlib import Path
 
 from .config import cfg, init_config, run_hint
