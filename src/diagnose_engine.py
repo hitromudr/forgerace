@@ -67,14 +67,16 @@ class DiagnoseEngine:
     async def subscribe(self) -> AsyncIterator[SystemSnapshot]:
         """Подписывается на обновления снимков состояния."""
         queue = asyncio.Queue()
-        self._subscribers.add(queue)
+        with self._lock:
+            self._subscribers.add(queue)
 
         try:
             while True:
                 snapshot = await queue.get()
                 yield snapshot
         finally:
-            self._subscribers.discard(queue)
+            with self._lock:
+                self._subscribers.discard(queue)
 
     async def _update_loop(self):
         """Фоновая задача для периодического обновления снимков."""

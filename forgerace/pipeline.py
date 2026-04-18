@@ -1490,6 +1490,13 @@ def run_pipeline(
         # Redirect all worktree/merge operations to feature branch
         cfg.dev_branch = feature_branch
 
+    # Очистка зависших задач
+    from src.stale_task_cleaner import clean_stale_tasks
+    cleaned = clean_stale_tasks()
+    if cleaned > 0:
+        log.info(f"Очищено {cleaned} зависших задач")
+        tasks = _parse()  # Перечитаем задачи после очистки
+
     # Автозакрытие чекпоинт-задач если check_command проходит
     if cfg.check_command:
         for t in tasks:
