@@ -1,7 +1,6 @@
 """CLI точка входа: argparse, команды run/discuss/status/merge-pending."""
 
 import argparse
-import logging
 import os
 import signal
 import sys
@@ -13,7 +12,11 @@ from .merge import merge_to_develop
 from .utils import C, R, agent_color
 from .pipeline import run_pipeline
 from .tasks import parse_tasks, update_task_status
+from .types import MergeResult
+from .decompose import create_checkpoint_task
 from .utils import log, run_cmd, setup_logging
+from typing import Optional
+from .benchmark import BenchmarkStore
 
 
 _AGENT_CONFIGS = {
@@ -170,7 +173,7 @@ def _generate_brief(cwd: Path, brief_path: Path):
         if files:
             # Ограничиваем до 100 файлов
             file_list = files.split("\n")[:100]
-            context_parts.append(f"## Структура файлов\n" + "\n".join(file_list))
+            context_parts.append("## Структура файлов\n" + "\n".join(file_list))
     except Exception:
         pass
 
@@ -401,7 +404,7 @@ def show_status():
             ready_marker = f" {C['green']}◀ ready{R}" if tid in ready_ids and s == "open" else ""
             print(f"{prefix}{color}{icon}{R} {C['bold']}{tid}{R}: {t.name}{ready_marker}")
             for child in unlocks.get(tid, []):
-                connector = "  " + "│ " * indent + "├─"
+                "  " + "│ " * indent + "├─"
                 # Не печатаем connector отдельно — он часть дочернего вызова
                 _print_tree(child, indent + 1)
 
@@ -438,11 +441,21 @@ def merge_pending_tasks():
             continue
 
         print(f"  → Мержу {t.id} ({t.name}): {branch} → {cfg.dev_branch}...")
-        if merge_to_develop(branch, t.id):
+        m_res: MergeResult = merge_to_develop(branch, t.id)
+        if m_res.success:
             update_task_status(t.id, "done")
             print(f"  ✓ {t.id} → done")
         else:
-            print(f"  ✗ {t.id} — конфликт, нужен ручной мерж")
+            if m_res.is_test_failure:
+                print(f"  ✗ {t.id} — тесты провалены (код {m_res.returncode})")
+                # Используем свойства .stderr/.stdout для совместимости с subprocess.CompletedProcess
+                output = m_res.stderr or m_res.stdout or ""
+                stderr = output[-1000:]
+                create_checkpoint_task(stderr)
+            else:
+                print(f"  ✗ {t.id} — ошибка мержа (конфликт?), нужен ручной разбор")
+                if m_res.merge_stderr:
+                    print(f"    {(m_res.merge_stderr or m_res.merge_stdout)[:300]}")
 
     print()
     show_status()
@@ -456,7 +469,254 @@ def _cmd_agents_list():
     for name, acfg in cfg.agents.items():
         status = f"{C['green']}ON{R}" if acfg.enabled else f"{C['red']}OFF{R}"
         print(f"  {C['bold']}{name}{R}: {status}  ({acfg.command})")
-    print(f"\n  Активные: {C['bold']}{cfg.agent_names}{R}")
+    print(f"\n  Активные: {C['bold']}{cfg.all_agent_names}{R}")
+
+
+def _cmd_monitor(interval: int = 10, once: bool = False):
+    """Live dashboard: progress with auto-refresh."""
+    import time as _time
+    import subprocess as _sp
+    BAR_LEN = 15
+    try:
+        while True:
+            print("\033[2J\033[H", end="")
+            tasks = parse_tasks()
+            teams = {}
+            for t in tasks:
+                d = t.discussion or ""
+                if d and d != "—" and len(d) < 60 and "**" not in d and not d.startswith("- "):
+                    teams.setdefault(d, []).append(t)
+
+            now = _time.strftime("%H:%M:%S")
+            # Count live processes
+            try:
+                procs = int(_sp.run(["pgrep", "-fc", "forgerace.py run"],
+                                     capture_output=True, text=True).stdout.strip() or "0")
+            except Exception:
+                procs = 0
+            print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}  {procs} processes  (Ctrl+C){R}")
+            print(f"  {C['green']}✓{R}done  {C['magenta']}⚡{R}coding  {C['red']}✗{R}blocked  {C['yellow']}…{R}pending\n")
+
+            # Teams table
+            print(f"  {C['bold']}{'Team':<15} {'Done':>6}  {'Progress':<{BAR_LEN}}  Status{R}")
+            print(f"  {'─' * 55}")
+
+            active_tasks = []
+
+            # Detect actually-coding tasks from fresh logs (not stale TASKS.md)
+            import re as _re
+            _coding_now = set()  # task IDs that are actively being coded
+            for logf in list(cfg.log_dir.glob("ch3-*.log")) + [cfg.log_dir / "orchestrator.log"]:
+                try:
+                    if not logf.exists() or _time.time() - logf.stat().st_mtime > 600:
+                        continue
+                    for line in logf.read_text(errors="replace").splitlines()[-30:]:
+                        m = _re.search(r"\[(TASK-\d+)/", line)
+                        if m:
+                            _coding_now.add(m.group(1))
+                except Exception:
+                    pass
+
+            for team_name, tt in sorted(teams.items()):
+                done = sum(1 for t in tt if t.status == "done")
+                total = len(tt)
+                if done == total and total > 0:
+                    continue
+                # Combine TASKS.md status + live log detection
+                ip_tasks = [t for t in tt if "progress" in t.status or t.id in _coding_now]
+                blocked_tasks = [t for t in tt if "blocked" in t.status.lower() and t.id not in _coding_now]
+                ip = len(ip_tasks)
+                blocked = len(blocked_tasks)
+
+                filled = int(BAR_LEN * done / total) if total else 0
+                bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (BAR_LEN - filled)}{R}"
+
+                pct = f"{done}/{total}"
+                short = team_name.replace("championship-v2-", "")[:15]
+                filled = int(BAR_LEN * done / total) if total else 0
+                bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (BAR_LEN - filled)}{R}"
+                print(f"  {C['bold']}{short}{R}  {pct}  {bar}")
+
+                # Show each task in this team
+                for t in sorted(tt, key=lambda x: x.id):
+                    coding = t.id in _coding_now
+                    if t.status == "done":
+                        print(f"    {C['green']}✓{R} {t.id}  {C['dim']}{t.name[:45]}{R}")
+                    elif coding:
+                        print(f"    {C['magenta']}⚡{R} {t.id}  {t.name[:45]}")
+                    elif "blocked" in t.status.lower() or (t.deps and not all(
+                        any(d2.id == d and d2.status == "done" for d2 in tt) or d not in {x.id for x in tt}
+                        for d in t.deps)):
+                        deps = ", ".join(t.deps[:3]) if t.deps else "?"
+                        print(f"    {C['red']}✗{R} {t.id}  {t.name[:35]:<35}  {C['dim']}waits: {deps}{R}")
+                        active_tasks.append(t)
+                    else:
+                        print(f"    {C['yellow']}…{R} {t.id}  {t.name[:45]}")
+                print()
+
+            # Blocked section removed — already shown inline per team
+
+            # Totals — sum from visible teams only (excludes completed old teams)
+            visible_tasks = [t for team_tt in teams.values() for t in team_tt
+                             if sum(1 for x in teams.get(t.discussion or "", []) if x.status == "done") < len(teams.get(t.discussion or "", []))]
+            total_done = sum(1 for t in visible_tasks if t.status == "done")
+            total_all = len(visible_tasks)
+            pct = f"{total_done*100//total_all}%" if total_all else "—"
+            print(f"\n  {C['bold']}Total: {C['green']}{total_done}{R}{C['bold']}/{total_all} ({pct}){R}  {C['dim']}Refresh: {interval}s{R}")
+
+            # Per-agent activity: parse from all logs
+            import re as _re
+            agent_activity = {}
+            now_ts = _time.time()
+            log_files = list(cfg.log_dir.glob("championship-v2-*.log"))
+            orch = cfg.log_dir / "orchestrator.log"
+            if orch.exists():
+                log_files.append(orch)
+            for logf in log_files:
+                try:
+                    if now_ts - logf.stat().st_mtime > 300:
+                        continue  # skip logs inactive > 5min
+                    lines = logf.read_text(errors="replace").splitlines()[-100:]
+                    for line in reversed(lines):
+                        m = _re.search(r"\[(TASK-\d+)/([\w,-]+)\].*?(⏳ \S+\s*—\s*(.+)|Applied edit to (.+)|📖 Read (.+)|✏️\s+\w+ (.+)|💻 Bash: (.+)|🔍 (?:Grep|Glob): (.+)|📝 Прогресс: (.+)|replace (.+)|write_file (.+))", line)
+                        if m:
+                            agent = m.group(2).split(",")[0]
+                            if agent not in agent_activity:
+                                task_id = m.group(1)
+                                action = m.group(4) or m.group(5) or m.group(6) or m.group(7) or m.group(8) or m.group(9) or ""
+                                agent_activity[agent] = (task_id, action.strip()[:50])
+                except Exception:
+                    pass
+
+            # Also scan for review/discuss activity
+            for logf in cfg.log_dir.glob("championship-v2-*.log"):
+                try:
+                    if now_ts - logf.stat().st_mtime > 120:
+                        continue
+                    lines = logf.read_text(errors="replace").splitlines()[-50:]
+                    for line in reversed(lines):
+                        # Review: [TASK-123/ревью] llama→gemini: APPROVED
+                        m = _re.search(r"\[(TASK-\d+)/ревью\].*?(\w[\w-]*)→(\w[\w-]*)", line)
+                        if m and m.group(2) not in agent_activity:
+                            agent_activity[m.group(2)] = (m.group(1), "review", f"→{m.group(3)}")
+                        # Review: 📋 llama ревьюит gemini
+                        m = _re.search(r"📋\s+(\w[\w-]*)\s+ревьюит\s+(\w[\w-]*)", line)
+                        if m and m.group(1) not in agent_activity:
+                            agent_activity[m.group(1)] = (None, "review", f"→{m.group(2)}")
+                except Exception:
+                    pass
+
+            if agent_activity:
+                print(f"\n  {C['bold']}Agent Activity{R}")
+                for agent, info in sorted(agent_activity.items()):
+                    color = agent_color(agent)
+                    acfg = cfg.agents.get(agent)
+                    frame = f"+{acfg.default_frame}" if acfg and acfg.default_frame else ""
+                    if len(info) == 3:
+                        tid, role, detail = info
+                        tid_str = tid or ""
+                        role_color = C['blue'] if role == "review" else C['magenta']
+                        print(f"  {color}{agent}{frame:<20}{R} {role_color}{role:<8}{R} {tid_str}  {C['dim']}{detail}{R}")
+                    else:
+                        tid, action = info
+                        print(f"  {color}{agent}{frame:<20}{R} {C['magenta']}{'coding':<8}{R} {tid}  {C['dim']}{action}{R}")
+
+            if once:
+                break
+            _time.sleep(interval)
+    except KeyboardInterrupt:
+        print(f"\n  {C['dim']}Monitor stopped.{R}")
+
+
+def _cmd_feature(subcmd: str | None, args):
+    """Feature branch management."""
+    if subcmd == "list" or subcmd is None:
+        result = run_cmd(["git", "branch", "--list", "feature/*"], cwd=cfg.root_dir, check=False)
+        branches = [b.strip().lstrip("* ") for b in result.stdout.strip().split("\n") if b.strip()]
+        if not branches:
+            print(f"  {C['dim']}Нет feature branches. Создаются автоматически при ./fr run --team <name>{R}")
+            return
+        tasks = parse_tasks()
+        print(f"\n  {C['bold']}Feature Branches{R}\n")
+        for b in branches:
+            # Count tasks linked to this feature
+            team_name = b.replace("feature/", "")
+            team_tasks = [t for t in tasks if team_name in (t.discussion or "")]
+            done = sum(1 for t in team_tasks if t.status == "done")
+            total = len(team_tasks)
+            bar = f"{C['green']}{done}{R}/{total}" if total else f"{C['dim']}0{R}"
+            print(f"  {C['bold']}{b}{R}  задачи: {bar}")
+        print()
+    elif subcmd == "score":
+        _cmd_feature_score()
+    elif subcmd == "merge":
+        branch = getattr(args, "branch", "")
+        if not branch.startswith("feature/"):
+            branch = f"feature/{branch}"
+        print(f"  Мерж {C['bold']}{branch}{R} → {C['bold']}{cfg.dev_branch}{R}")
+        result = run_cmd(["git", "merge", branch, "--no-ff", "-m",
+                          f"Merge {branch} → {cfg.dev_branch}"],
+                         cwd=cfg.root_dir, check=False)
+        if result.returncode == 0:
+            print(f"  {C['green']}Успешно{R}")
+        else:
+            print(f"  {C['red']}Ошибка: {result.stderr[:200]}{R}")
+
+
+def _cmd_feature_score():
+    """Scoreboard: per-team metrics from logs."""
+    tasks = parse_tasks()
+    # Find all championship discussions
+    teams = {}
+    for t in tasks:
+        d = t.discussion or ""
+        if d and d != "—":
+            teams.setdefault(d, []).append(t)
+
+    if not teams:
+        print(f"  {C['dim']}Нет задач с привязкой к дискуссиям{R}")
+        return
+
+    print(f"\n  {C['bold']}{'Команда':<40} {'Done':>5} {'Total':>6} {'Cost':>8}{R}")
+    print(f"  {'─' * 62}")
+    for team_name, tt in sorted(teams.items()):
+        done = sum(1 for t in tt if t.status == "done")
+        total = len(tt)
+        # Parse cost from logs
+        cost = 0.0
+        for t in tt:
+            for logf in cfg.log_dir.glob(f"{t.id.lower()}-*.log"):
+                try:
+                    text = logf.read_text(errors="replace")
+                    for line in text.split("\n"):
+                        if "Стоимость:" in line or "cost:" in line.lower():
+                            import re as _re
+                            m = _re.search(r"\$(\d+\.?\d*)", line)
+                            if m:
+                                cost += float(m.group(1))
+                except OSError:
+                    pass
+        f"{done*100//total}%" if total else "—"
+        cost_str = f"${cost:.2f}" if cost > 0 else "—"
+        color = C['green'] if done == total and total > 0 else ""
+        print(f"  {color}{team_name:<40} {done:>5} {total:>6} {cost_str:>8}{R}")
+    print()
+
+def _cmd_benchmark(agent: Optional[str] = None, format_: str = "table"):
+    """Показать таблицу метрик производительности агентов."""
+    store = BenchmarkStore()
+    if format_ == "json":
+        print(store.as_json())
+    else:
+        print(store.as_table())
+
+def _cmd_benchmark(agent: Optional[str] = None, format_: str = "table"):
+    """Показать таблицу метрик производительности агентов."""
+    store = BenchmarkStore()
+    if format_ == "json":
+        print(store.as_json())
+    else:
+        print(store.as_table())
 
 
 def _cmd_mode(mode_name: str):
@@ -499,9 +759,9 @@ def _cmd_mode(mode_name: str):
     mode_color = C['cyan'] if mode_name == "competitive" else C['magenta']
     print(f"  Режим: {mode_color}{C['bold']}{mode_name}{R}")
     if mode_name == "competitive":
-        print(f"  Все агенты на каждую задачу, race-to-merge")
+        print("  Все агенты на каждую задачу, race-to-merge")
     else:
-        print(f"  Задачи распределяются по агентам round-robin")
+        print("  Задачи распределяются по агентам round-robin")
 
 
 def _cmd_agent_toggle(agent_name: str, enable: bool):
@@ -523,7 +783,7 @@ def _cmd_agent_toggle(agent_name: str, enable: bool):
 
     # Ищем enabled в секции агента или добавляем
     lines = content.splitlines()
-    section_idx = next(i for i, l in enumerate(lines) if l.strip() == section)
+    section_idx = next(i for i, line in enumerate(lines) if line.strip() == section)
 
     # Найдём конец секции (следующая [секция] или EOF)
     end_idx = len(lines)
@@ -554,7 +814,7 @@ def _cmd_agent_toggle(agent_name: str, enable: bool):
     action = "включён" if enable else "выключен"
     color = C['green'] if enable else C['red']
     print(f"  {color}{agent_name} {action}{R}")
-    print(f"  Активные: {C['bold']}{cfg.agent_names}{R}")
+    print(f"  Активные: {C['bold']}{cfg.all_agent_names}{R}")
 
 
 def _print_full_help():
@@ -573,9 +833,15 @@ def _print_full_help():
 {Y}ЗАПУСК ЗАДАЧ:{R}
   ./fr run                               Все готовые задачи (конкурентно)
   ./fr run --task TASK-032               Конкретная задача
+  ./fr run --team championship-ensemble  Задачи команды (фильтр по дискуссии)
   ./fr run --retry                       Перезапуск упавших (blocked → open)
   ./fr run --auto --max-tasks 4          Авто-цикл: разблокированные → запуск
   ./fr run --dry-run                     Показать что запустится (без запуска)
+
+{Y}FEATURE BRANCHES:{R}
+  ./fr feature list                      Все feature branches и прогресс
+  ./fr feature score                     Скорборд по командам (задачи, стоимость)
+  ./fr feature merge <branch>            Мерж feature branch в develop
 
 {Y}ДИСКУССИИ:{R}
   ./fr discuss new <тема> '<вопрос>'     Создать дискуссию
@@ -764,17 +1030,37 @@ def main():
     # run
     run_p = sub.add_parser("run", help="Запустить задачи",
         epilog="Примеры:\n"
-               "  ./fr run                    все готовые задачи\n"
-               "  ./fr run --task TASK-032     конкретная задача\n"
-               "  ./fr run --retry            перезапуск упавших\n"
-               "  ./fr run --auto             авто-цикл разблокированных\n",
+               "  ./fr run                                все готовые задачи\n"
+               "  ./fr run --task TASK-032                конкретная задача\n"
+               "  ./fr run --team championship-ensemble   задачи команды (по дискуссии)\n"
+               "  ./fr run --retry                        перезапуск упавших\n"
+               "  ./fr run --auto                         авто-цикл разблокированных\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     run_p.add_argument("--task", help="Конкретная задача (TASK-032)")
+    run_p.add_argument("--team", help="Задачи команды по дискуссии (championship-ensemble-review)")
     run_p.add_argument("--retry", action="store_true", help="Перезапустить упавшие (blocked → open)")
     run_p.add_argument("--dry-run", action="store_true", help="Показать что запустится, без запуска")
     run_p.add_argument("--auto", action="store_true", help="Авто-цикл: разблокированные → запуск")
     run_p.add_argument("--max-tasks", type=int, default=None,
                         help="Макс. задач параллельно (дефолт из TOML)")
+
+    # feature
+    feat_p = sub.add_parser("feature", help="Feature branches (команды)",
+        epilog="Примеры:\n"
+               "  ./fr feature list                     все feature branches\n"
+               "  ./fr feature score                    скорборд по командам\n"
+               "  ./fr feature merge <branch>           мерж feature в develop\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    feat_sub = feat_p.add_subparsers(dest="feat_cmd")
+    feat_sub.add_parser("list", help="Список feature branches")
+    feat_sub.add_parser("score", help="Скорборд по командам")
+    feat_merge = feat_sub.add_parser("merge", help="Мерж feature branch в develop")
+    feat_merge.add_argument("branch", help="Имя feature branch")
+
+    # monitor
+    mon_p = sub.add_parser("monitor", help="Live dashboard прогресса")
+    mon_p.add_argument("--interval", type=int, default=10, help="Интервал обновления (сек)")
+    mon_p.add_argument("--once", action="store_true", help="Однократный вывод (без loop)")
 
     # discuss
     disc_p = sub.add_parser("discuss", help="Дискуссии",
@@ -844,6 +1130,11 @@ def main():
     models_p.add_argument("--test", action="store_true", help="Протестировать каждую модель запросом")
     models_p.add_argument("--top", type=int, default=30, help="Макс. моделей для теста (default: 30)")
 
+    # benchmark
+    bench_p = sub.add_parser("benchmark", help="Показать таблицу метрик производительности")
+    bench_p.add_argument("--agent", help="Показать метрики только для конкретного агента")
+    bench_p.add_argument("--format", choices=["table", "json"], default="table", help="Формат вывода")
+
     # help
     sub.add_parser("help", help="Полная справка с примерами")
 
@@ -909,9 +1200,23 @@ def main():
             print(f"  Режим: {mode_color}{C['bold']}{cfg.mode}{R}")
         return
 
+    # feature
+    if args.command == "feature":
+        _cmd_feature(getattr(args, "feat_cmd", None), args)
+        return
+
+    if args.command == "monitor":
+        _cmd_monitor(getattr(args, "interval", 10), getattr(args, "once", False))
+        return
+
     # models
     if args.command == "models":
         _cmd_models(test=args.test, top=args.top)
+        return
+
+    # benchmark
+    if args.command == "benchmark":
+        _cmd_benchmark(agent=args.agent, format_=args.format)
         return
 
     # merge-pending
@@ -933,7 +1238,7 @@ def main():
     log.info("ForgeRace запущен")
     log.info(f"Корень: {cfg.root_dir}")
     cli_names = [f"{agent_color(n)}{n}{R}" for n in cfg.cli_agent_names]
-    api_names = [f"{agent_color(n)}{n}{R}" for n in cfg.agent_names if n not in cfg.cli_agent_names]
+    api_names = [f"{agent_color(n)}{n}{R}" for n in cfg.all_agent_names if n not in cfg.cli_agent_names]
     parts = [f"код: [{', '.join(cli_names)}]"]
     if api_names:
         parts.append(f"ревью: [{', '.join(api_names)}]")
@@ -941,12 +1246,17 @@ def main():
     log.info(f"Макс. задач: {max_tasks}")
     log.info("=" * 60)
 
+    team = getattr(args, "team", None)
+    if team:
+        log.info(f"Команда: {C['bold']}{team}{R}")
+
     run_pipeline(
         specific_task=getattr(args, "task", None),
         dry_run=getattr(args, "dry_run", False),
         max_tasks=max_tasks,
         retry=getattr(args, "retry", False),
         auto=getattr(args, "auto", False),
+        team=team,
     )
 
     # os._exit(0) вызывается внутри run_pipeline

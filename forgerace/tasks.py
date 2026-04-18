@@ -1,19 +1,39 @@
 """Модель задачи, парсер TASKS.md, обновление статусов."""
 
-import json
 import os
 import re
 import tempfile
+import json
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import cfg
-from .utils import log, run_cmd, slugify, is_valid_path
+from .utils import log, slugify, is_valid_path
 
-# Global lock for all TASKS.md write operations (read-modify-write).
-# Prevents race conditions when multiple threads update the file concurrently.
+# Legacy threading lock — kept for backward compat but file lock is primary.
 _tasks_file_lock = threading.Lock()
+
+
+import fcntl
+
+class _FileLock:
+    """Cross-process file lock using fcntl.flock."""
+    def __init__(self, path):
+        self._path = path
+        self._fd = None
+    def __enter__(self):
+        self._fd = open(self._path, "a+")
+        fcntl.flock(self._fd, fcntl.LOCK_EX)
+        return self
+    def __exit__(self, *args):
+        fcntl.flock(self._fd, fcntl.LOCK_UN)
+        self._fd.close()
+
+
+def tasks_file_lock():
+    """Combined thread + file lock for TASKS.md operations."""
+    return _FileLock(str(cfg.tasks_file) + ".lock")
 
 
 # --- Модель задачи ---
@@ -37,6 +57,9 @@ class Task:
     branch: str         # task/001-frame-allocator / —
     discussion: str     # 001-scheduler-design / —
     raw_section: str    # исходный markdown-блок
+    complexity: int = 0 # оценка сложности (в памяти)
+    rework_count: int = 0
+    last_attempts: list = field(default_factory=list)
 
 
 # --- Парсер TASKS.md ---
@@ -69,13 +92,40 @@ def parse_tasks(path: Path | None = None) -> list[Task]:
             branch=_field(raw, r"\*\*Ветка\*\*:\s*(.+)"),
             discussion=_field(raw, r"\*\*Дискуссия\*\*:\s*(.+)"),
             raw_section=raw.strip(),
+            rework_count=int(_field(raw, r"\*\*Переделки\*\*:\s*(\d+)") or "0"),
+            last_attempts=_parse_last_attempts(raw),
         ))
-    return tasks
+    return _deduplicate_tasks(tasks)
 
 
 def _field(text: str, pattern: str) -> str:
     m = re.search(pattern, text)
     return m.group(1).strip() if m else ""
+
+def _parse_last_attempts(text: str) -> list[dict]:
+    """Парсит поле last_attempts из Markdown.
+    Ожидается формат: **Последние попытки**: [JSON-массив]
+    Возвращает список словарей или пустой список при ошибке.
+    """
+    pattern = r"\*\*Последние попытки\*\*:\s*(.+)"
+    m = re.search(pattern, text)
+    if not m:
+        return []
+    
+    raw = m.group(1).strip()
+    if not raw or raw in ("—", "[]"):
+        return []
+    
+    try:
+        # Пытаемся распарсить как JSON
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return data
+        return []
+    except json.JSONDecodeError:
+        # Fallback: если JSON битый, возвращаем пустой список, чтобы не ломать парсинг
+        log.warning(f"Не удалось распарсить last_attempts как JSON: {raw[:50]}...")
+        return []
 
 
 def _parse_deps(deps_str: str) -> list[str]:
@@ -107,7 +157,7 @@ def _atomic_write(path: Path, content: str):
 
 def update_task_status(task_id: str, new_status: str, agent: str = "", branch: str = ""):
     """Обновляет статус задачи в TASKS.md (в основном репозитории)."""
-    with _tasks_file_lock:
+    with tasks_file_lock():
         tasks_file = cfg.tasks_file
         lines = tasks_file.read_text(encoding="utf-8").splitlines()
         in_task = False
@@ -134,7 +184,7 @@ def update_task_status(task_id: str, new_status: str, agent: str = "", branch: s
 
 def link_task_discussion(task_id: str, topic: str):
     """Прописывает дискуссию в TASKS.md для задачи."""
-    with _tasks_file_lock:
+    with tasks_file_lock():
         tasks_file = cfg.tasks_file
         lines = tasks_file.read_text(encoding="utf-8").splitlines()
         in_task = False
@@ -188,6 +238,9 @@ def is_task_approved(task: Task) -> bool:
         return True
     if not task.discussion or task.discussion in ("—", "future"):
         return True
+    # Skip garbage discussion values (descriptions leaked into field)
+    if len(task.discussion) > 80 or " " in task.discussion or "**" in task.discussion:
+        return True
     filepath = cfg.discuss_dir / f"{task.discussion}.md"
     if not filepath.exists():
         return True  # discussion file missing — don't block execution
@@ -214,7 +267,25 @@ def find_ready_tasks(tasks: list[Task]) -> list[Task]:
                 real_deps.append(d)
         if all(d in done_ids for d in real_deps):
             ready.append(t)
-    return sorted(ready, key=lambda t: t.priority)
+    # Priority: P1 < P2, then tasks that unblock more others go first
+    blocked_by = {}  # task_id → how many tasks depend on it
+    for t in tasks:
+        if t.status == "open":
+            for d in t.deps:
+                if d in all_ids:
+                    blocked_by[d] = blocked_by.get(d, 0) + 1
+    return sorted(ready, key=lambda t: (t.priority, -blocked_by.get(t.id, 0)))
+
+
+def _deduplicate_tasks(tasks: list[Task]) -> list[Task]:
+    """Keep only first occurrence of each task ID."""
+    seen = set()
+    result = []
+    for t in tasks:
+        if t.id not in seen:
+            seen.add(t.id)
+            result.append(t)
+    return result
 
 
 def find_retryable_tasks(tasks: list[Task]) -> list[Task]:

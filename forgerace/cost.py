@@ -1,5 +1,6 @@
 """Учёт токенов и оценка стоимости вызовов LLM."""
 
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -10,31 +11,46 @@ class TokenUsage:
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_input_tokens: int = 0
-    # Ответ ревьюеру на 3: поле estimated_usd добавлено в класс TokenUsage (изменения cost.py могли не попасть в diff)
     estimated_usd: float = 0.0
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def add_input(self, tokens: int):
         """Добавляет входные токены."""
-        self.input_tokens += tokens
+        if tokens < 0:
+            raise ValueError("tokens cannot be negative")
+        with self._lock:
+            self.input_tokens += tokens
 
     def add_output(self, tokens: int):
         """Добавляет выходные токены."""
-        self.output_tokens += tokens
+        if tokens < 0:
+            raise ValueError("tokens cannot be negative")
+        with self._lock:
+            self.output_tokens += tokens
 
     def add_cache_read(self, tokens: int):
         """Добавляет кэшированные входные токены (Claude)."""
-        self.cache_read_input_tokens += tokens
+        if tokens < 0:
+            raise ValueError("tokens cannot be negative")
+        with self._lock:
+            self.cache_read_input_tokens += tokens
 
     def total_input(self) -> int:
         """Возвращает общее количество входных токенов (включая кэш)."""
-        return self.input_tokens + self.cache_read_input_tokens
+        with self._lock:
+            return self.input_tokens + self.cache_read_input_tokens
 
     def accumulate(self, other: "TokenUsage"):
         """Накапливает статистику из другого TokenUsage."""
-        self.input_tokens += other.input_tokens
-        self.output_tokens += other.output_tokens
-        self.cache_read_input_tokens += other.cache_read_input_tokens
-        self.estimated_usd += other.estimated_usd
+        # Захватываем блокировку обоих объектов для безопасности при конкурентном доступе
+        # Порядок захвата важен для избежания deadlock, но здесь мы просто читаем other и пишем в self.
+        # Для полной безопасности при чтении other нужно захватить его lock.
+        with self._lock:
+            with other._lock:
+                self.input_tokens += other.input_tokens
+                self.output_tokens += other.output_tokens
+                self.cache_read_input_tokens += other.cache_read_input_tokens
+                self.estimated_usd += other.estimated_usd
 
     def calc_cost(self, input_price: float, output_price: float, 
                   cache_read_price: Optional[float] = None) -> float:

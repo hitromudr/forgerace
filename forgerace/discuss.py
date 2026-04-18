@@ -1,6 +1,5 @@
 """Система дискуссий: создание, ответы агентов, интерактивный чат, резолюции."""
 
-import json
 import os
 import re
 import select
@@ -12,8 +11,8 @@ from pathlib import Path
 
 from .config import cfg, run_hint, resolve_agent_frame
 from .decompose import insert_tasks_into_tasksmd
-from .tasks import Task, parse_tasks, link_task_discussion
-from .utils import log, run_cmd, C, R, agent_color
+from .tasks import parse_tasks, link_task_discussion
+from .utils import log, C, agent_color
 
 _C = C  # alias для совместимости
 _agent_color = agent_color
@@ -269,7 +268,7 @@ def discuss_chat(topic: str):
             for spec in agents_to_call:
                 _chat_agent_reply(filepath, spec)
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
-            print(f"  Введите текст — добавить свой комментарий в дискуссию")
+            print("  Введите текст — добавить свой комментарий в дискуссию")
             print(f"  {_C['yellow']}/all{_C['reset']} — все агенты   {_C['green']}/ok{_C['reset']} — одобрить и закрыть   {_C['yellow']}/help{_C['reset']} — все команды")
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
             continue
@@ -348,7 +347,7 @@ def discuss_chat(topic: str):
                          f"Агенты: критически пересмотрите резолюцию. "
                          f"Что в ней слабого, недосказанного или ошибочного? "
                          f"Не соглашайтесь по инерции — ищите проблемы.")
-            print(f"[Дискуссия переоткрыта — вызываю всех агентов]\n")
+            print("[Дискуссия переоткрыта — вызываю всех агентов]\n")
             for name in cfg.agent_names:
                 _chat_agent_reply(filepath, name)
             print(f"{_C['dim']}{'─' * 60}{_C['reset']}")
@@ -444,7 +443,7 @@ def discuss_chat(topic: str):
             _chat_append(filepath, "techlead",
                          "Я готов утвердить. Ваши финальные замечания или возражения? "
                          "Если согласны — напишите 'согласен'. Если нет — аргументируйте.")
-            print(f"[Финальный раунд — все агенты высказываются перед закрытием]\n")
+            print("[Финальный раунд — все агенты высказываются перед закрытием]\n")
             for name in cfg.agent_names:
                 _chat_agent_reply(filepath, name)
             _chat_auto_resolve(filepath)
@@ -515,7 +514,7 @@ def _post_resolve(filepath: Path):
 - **Зависимости**: TASK-YYY или —
 - **Файлы (новые)**: src/path/file.rs
 - **Файлы (modify)**: — или путь
-- **Интеграция**: что добавить в lib.rs/main.rs при мерже
+- **Интеграция**: что добавить при мерже (импорты, вызовы) или —
 - **Описание**: что именно реализовать
 - **Запрещено**: конкретные антипаттерны для этой задачи (из дискуссии). Пример: "не хардкодить ID", "не использовать networkidle". Если нет явных запретов — поставь "—"
 - **Проверка**: команда верификации ДЛЯ ЭТОЙ ЗАДАЧИ. Пример: "ruff check src/new_file.py && pytest tests/test_new.py -v". Должна быть конкретной и запускаемой. Если неизвестна — "make check"
@@ -557,14 +556,40 @@ def _post_resolve(filepath: Path):
     if not clean_block.strip():
         clean_block = tasks_block  # fallback если regex не нашёл
 
-    # Вставляем в целевой TASKS.md
-    if target_dir != cfg.root_dir:
-        # Альтернативный путь — вставляем напрямую
+    # Fix single-line tasks: "### TASK-X: Name - **Статус**: open - ..." → multi-line
+    def _fix_oneline_task(line: str) -> str:
+        if line.startswith("### TASK-") and " - **" in line:
+            parts = re.split(r" - (?=\*\*)", line, maxsplit=1)
+            if len(parts) == 2:
+                fields = re.split(r" - (?=\*\*)", parts[1])
+                return parts[0] + "\n" + "\n".join(f"- {f}" for f in fields)
+        return line
+
+    fixed_lines = [_fix_oneline_task(line) for line in clean_block.split("\n")]
+    clean_block = "\n".join(fixed_lines)
+
+    # Renumber tasks to avoid duplicates, then insert — all under file lock
+    from .tasks import tasks_file_lock, _atomic_write
+    with tasks_file_lock():
+        # Re-read current max task number (another process may have written)
+        current_tasks = parse_tasks(tasks_file)
+        actual_max = max((int(re.match(r"TASK-(\d+)", t.id).group(1))
+                          for t in current_tasks if re.match(r"TASK-(\d+)", t.id)), default=0)
+        # Renumber if needed (LLM used stale next_task_num)
+        if actual_max >= next_task_num:
+            task_ids_in_block = re.findall(r"TASK-(\d+)", clean_block)
+            old_ids = sorted(set(task_ids_in_block), key=int)
+            new_start = actual_max + 1
+            for i, old_id in enumerate(old_ids):
+                old_full = f"TASK-{old_id}"
+                new_full = f"TASK-{new_start + i:03d}"
+                clean_block = clean_block.replace(old_full, new_full)
+            log.info(f"Перенумерованы задачи: {old_ids[0]}..{old_ids[-1]} → {new_start}..{new_start + len(old_ids) - 1}")
+
+        # Insert directly (no nested lock — we already hold the file lock)
         content = tasks_file.read_text(encoding="utf-8")
         content = content.rstrip() + "\n\n" + clean_block.rstrip() + "\n"
-        tasks_file.write_text(content, encoding="utf-8")
-    else:
-        insert_tasks_into_tasksmd(clean_block, linked_task_id)
+        _atomic_write(tasks_file, content)
 
     print(f"\n  ✓ Задачи вставлены в {tasks_file}")
     print(f"  ✓ Копия: {copy_file}")
@@ -603,7 +628,7 @@ def _chat_stats(filepath: Path):
     else:
         size_str = f"{size / (1024 * 1024):.1f} MB"
     R = _C["reset"]
-    DIM = _C["dim"]
+    _C["dim"]
     Y = _C["yellow"]
     # Оценка токенов: кириллица ~1 токен на 2 символа, латиница ~1 на 4
     chars = len(text)
@@ -708,7 +733,7 @@ def _chat_review_tasks(filepath: Path):
     R = _C["reset"]
     print(f"\n{review}\n")
     print(f"{_C['dim']}{'─' * 60}{R}")
-    print(f"  Варианты:")
+    print("  Варианты:")
     print(f"  {_C['green']}ок{R}              — применить рекомендации как есть")
     print(f"  {_C['yellow']}(текст){R}         — применить с вашими правками")
     print(f"  {_C['red']}нет{R}             — отменить, ничего не менять")
@@ -798,7 +823,7 @@ def _chat_review_tasks(filepath: Path):
     header = header_match.group(1) if header_match else f"# TASKS — {topic}\n"
     tasks_path.write_text(header + "\n" + clean_block.strip() + "\n", encoding="utf-8")
 
-    print(f"\n  ✓ TASKS.md обновлён")
+    print("\n  ✓ TASKS.md обновлён")
     print(f"  ✓ Бэкап: {backup.name}")
 
 
@@ -904,7 +929,7 @@ def _chat_compact(filepath: Path, keep_last: int = 4):
         print(f"  Нечего компактифицировать (первое сообщение + последние {keep_last} = всё).")
         return
 
-    print(f"[Извлекаю якоря техлида...]")
+    print("[Извлекаю якоря техлида...]")
     anchors = _extract_anchors(to_compact)
 
     # Формируем блок для суммаризации
@@ -939,8 +964,8 @@ def _chat_compact(filepath: Path, keep_last: int = 4):
         for a in anchors[:10]:
             print(f"  {_C['dim']}• {a[:100]}{_C['reset']}")
     else:
-        print(f"[Якорей техлида не найдено]")
-    print(f"[Генерирую сводку...]")
+        print("[Якорей техлида не найдено]")
+    print("[Генерирую сводку...]")
     from .agents import run_text_agent
     summary = run_text_agent(prompt, timeout=cfg.agent_timeout)
     if not summary or summary.startswith("Error:"):
@@ -1122,15 +1147,32 @@ def _chat_agent_reply(filepath: Path, agent_spec: str):
             cmd = [acfg.command, "-p", "-", "--output-format", "text", "--permission-mode", "auto"]
         elif agent_type == "qwen":
             cmd = [acfg.command, "-p", "--output-format", "text", "--approval-mode", "yolo"]
+        elif acfg.command == "goose":
+            # Extract --model and --provider from agent args, override output to text
+            goose_model = "meta/llama-3.3-70b-instruct"
+            goose_provider = "openai"
+            for j, a in enumerate(acfg.args):
+                if a == "--model" and j + 1 < len(acfg.args):
+                    goose_model = acfg.args[j + 1]
+                elif a == "--provider" and j + 1 < len(acfg.args):
+                    goose_provider = acfg.args[j + 1]
+            cmd = [acfg.command, "run", "-i", "/dev/stdin", "--output-format", "text",
+                   "--provider", goose_provider, "--model", goose_model,
+                   "--no-profile"]  # no extensions for discuss/review
         else:
             cmd = [acfg.command, "-p", "", "--output-format", "text"]
+
+        # Build subprocess env (for goose: OPENAI_HOST, OPENAI_API_KEY)
+        proc_env = None
+        if acfg.env:
+            proc_env = {**os.environ, **acfg.env}
 
         reply_lines = []
         start_time = time.time()
         try:
             proc = subprocess.Popen(
                 cmd, cwd=_chat_cwd or cfg.root_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                stdin=subprocess.PIPE, text=True, bufsize=1,
+                stdin=subprocess.PIPE, text=True, bufsize=1, env=proc_env,
             )
             try:
                 proc.stdin.write(prompt)
@@ -1288,7 +1330,7 @@ def _chat_solo_parallel(filepath: Path, agent_names: list[str], prompt: str, tag
             print(f"\r{'   '.join(status_parts)}   ", end="", flush=True)
             time.sleep(1)
     except KeyboardInterrupt:
-        print(f"\n[Прервано]")
+        print("\n[Прервано]")
         for name, proc in procs.items():
             try:
                 proc.kill()
@@ -1435,7 +1477,7 @@ def _colorize_line(line: str) -> str:
     R = _C["reset"]
     BOLD = _C["bold"]
     CYAN = _C["cyan"]
-    GREEN = _C["green"]
+    _C["green"]
     # **bold** → жирный
     line = re.sub(r"\*\*(.+?)\*\*", rf"{BOLD}\1{R}", line)
     # `code` → cyan
@@ -1498,7 +1540,7 @@ def _print_help_detail(topic: str):
     R = _C["reset"]
     DIM = _C["dim"]
     B = _C["bold"]
-    Y = _C["yellow"]
+    _C["yellow"]
 
     # Фреймы
     if topic in cfg.frames:

@@ -78,10 +78,15 @@ class Config:
     build_timeout: int = 120
     max_review_rounds: int = 3
     review_frame: str = "adversarial"  # cognitive frame for self-review when only one agent
+    review_consensus: bool = False  # использовать консенсус ревью (несколько ревьюеров)
+    min_reviewers: int = 2  # минимальное количество ревьюеров для консенсуса
     max_task_complexity: int = 3
     progress_timeout: int = 600  # kill агента если diff не меняется N секунд (10 мин)
     max_concurrent: int = 3  # макс. параллельных задач в ConcurrencyLimiter
     budget_per_task_usd: Optional[float] = None
+    preflight: bool = False  # enable pre-flight analysis
+    preflight_agent: str = "qwen-api"  # agent for pre-flight analysis
+    preflight_mode: str = "auto"  # режим pre-flight анализа: "strict" или "auto"
 
     # --- Pricing ---
     pricing: PricingConfig = field(default_factory=PricingConfig)
@@ -169,7 +174,13 @@ CONFIDENCE: XX%
 
     @property
     def agent_names(self) -> list[str]:
-        """All enabled agents (CLI + API) — for review, decomposition, discussions."""
+        """Agents that can discuss/review (excluding aider — text-only CLI)."""
+        return [name for name, acfg in self.agents.items()
+                if acfg.enabled and acfg.protocol != "text"]
+
+    @property
+    def all_agent_names(self) -> list[str]:
+        """All enabled agents including text-protocol (aider)."""
         return [name for name, acfg in self.agents.items() if acfg.enabled]
 
     @property
@@ -177,6 +188,16 @@ CONFIDENCE: XX%
         """CLI-only agents — for task execution (writing code in worktree)."""
         return [name for name, acfg in self.agents.items()
                 if acfg.enabled and acfg.protocol in ("cli", "text")]
+
+    def get_valid_agents_for_mode(self) -> tuple[list[str], list[str]]:
+        """Возвращает списки допустимых исполнителей и ревьюеров для текущего режима."""
+        if self.mode == "distributed":
+            executors = [name for name in ["gemini", "aider-devstral"] if name in self.agents and self.agents[name].enabled]
+            reviewers = [name for name in ["llama", "qwen-api", "devstral", "gpt-oss"] if name in self.agents and self.agents[name].enabled]
+            return executors, reviewers
+        else:
+            # В конкурентном режиме все включенные агенты являются допустимыми
+            return self.agent_names, self.agent_names
 
 
 # Путь к конфигу, переданный через CLI (заполняется в init_config)
@@ -384,13 +405,26 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     limits = data.get("limits", {})
     for key in ("max_parallel_tasks", "agent_timeout", "max_review_rounds",
                 "max_task_complexity", "progress_timeout", "max_concurrent",
-                "budget_per_task_usd"):
+                "budget_per_task_usd", "preflight", "preflight_agent", "preflight_mode"):
         if key in limits:
             setattr(cfg, key, limits[key])
     if "review_run_log" in limits:
         cfg.review_run_log = limits["review_run_log"]
     if "review_frame" in limits:
         cfg.review_frame = limits["review_frame"]
+    if "review_consensus" in limits:
+        cfg.review_consensus = limits["review_consensus"]
+    if "min_reviewers" in limits:
+        cfg.min_reviewers = limits["min_reviewers"]
+
+    # Валидация режима и агентов для распределенного режима
+    if cfg.mode == "distributed":
+        # Проверяем, что все включенные агенты являются допустимыми исполнителями или ревьюерами
+        for agent_name, agent_config in cfg.agents.items():
+            if agent_config.enabled:
+                if agent_name not in ["gemini", "aider-devstral", "llama", "qwen-api", "devstral", "gpt-oss"]:
+                    log.warning(f"Агент '{agent_name}' не является допустимым исполнителем или ревьюером для распределенного режима. Отключаем его.")
+                    agent_config.enabled = False
 
     # [pricing]
     pricing_data = data.get("pricing", {})
@@ -468,6 +502,26 @@ def init_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
         cfg.dev_branch = current
     # Создаём директории
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
+    # Валидация preflight_agent
+    if cfg.preflight and cfg.preflight_agent:
+        allowed_agents = ["qwen-api", "gemini", "gpt-oss", "llama", "qwen", "claude", "devstral"]
+        if cfg.preflight_agent not in allowed_agents:
+            log.warning(f"preflight_agent '{cfg.preflight_agent}' не в списке разрешённых. Используется 'qwen-api'")
+            cfg.preflight_agent = "qwen-api"
+
+    # Валидация preflight_mode
+    if cfg.preflight and cfg.preflight_mode:
+        allowed_modes = ["strict", "auto"]
+        if cfg.preflight_mode not in allowed_modes:
+            log.warning(f"preflight_mode '{cfg.preflight_mode}' не в списке разрешённых. Используется 'auto'")
+            cfg.preflight_mode = "auto"
+
+    # Валидация preflight_mode
+    if cfg.preflight and cfg.preflight_mode:
+        allowed_modes = ["strict", "auto"]
+        if cfg.preflight_mode not in allowed_modes:
+            log.warning(f"preflight_mode '{cfg.preflight_mode}' не в списке разрешённых. Используется 'auto'")
+            cfg.preflight_mode = "auto"
 
 
 def resolve_agent_frame(agent_spec: str) -> tuple[str, str]:

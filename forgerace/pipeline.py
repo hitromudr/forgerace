@@ -1,18 +1,28 @@
 """Основной пайплайн: запуск агентов, верификация, конкурентный/одиночный режим."""
 
+import atexit
 import os
 import re
 import subprocess
 import threading
 import time
+from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
-from .agents import AgentResult, build_prompt, run_agent_process
+# Optional dependency for CPU/IO metrics
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+
+from .agents import AgentResult, build_prompt, run_agent_process, build_post_mortem_prompt, run_text_agent
+from .benchmark import BenchmarkStore
 from .config import cfg, run_hint, run_hook
 from .cost import TokenUsage
-from .decompose import assess_and_maybe_decompose, create_checkpoint_task
+from .decompose import assess_and_maybe_decompose, create_checkpoint_task, get_task_complexity
 from .merge import merge_to_develop
 from .review import code_review, get_changed_files, get_diff, send_to_rework, single_review
 from .tasks import (
@@ -20,61 +30,171 @@ from .tasks import (
     parse_tasks, task_paths, topic_for_task, translate_slug,
     update_task_status, link_task_discussion,
 )
-from .task_queue import TaskQueue
-from .utils import log, run_cmd, is_valid_path, C, R, agent_color
-from .worktree import cleanup_worktrees, create_worktree, remove_worktree
+from .types import MergeResult
+from .utils import log, run_cmd, is_valid_path, C, R, agent_color, parse_pytest_output
+from .worktree import cleanup_worktrees, create_worktree
 
 
 # --- Heartbeat ---
 
-_active_agents: dict[str, tuple[str, Path, float]] = {}
+@dataclass
+class AgentStatus:
+    """Статус активного агента для heartbeat и dashboard."""
+    task_id: str
+    agent_type: str
+    workdir: Path
+    start_time: float
+    usage: TokenUsage = field(default_factory=TokenUsage)
+    elapsed_sec: int = 0
+    files_changed: list[str] = field(default_factory=list)
+
+    @property
+    def cost_usd(self) -> float:
+        return self.usage.estimated_usd
+
+
+_active_agents: dict[str, AgentStatus] = {}
 _active_agents_lock = threading.Lock()
+_perf_stats: dict[int, list[dict]] = {}
+_heartbeat_stop_event = threading.Event()
+_heartbeat_thread: threading.Thread | None = None
+
+# --- Round-robin ---
+_rr_agent_index = 0
 
 
 def _heartbeat_loop(interval: int = 15):
     """Фоновый поток: прогресс активных агентов."""
-    while True:
+    while not _heartbeat_stop_event.is_set():
         time.sleep(interval)
         with _active_agents_lock:
             agents = dict(_active_agents)
-        for tag, (task_id, workdir, start_time) in agents.items():
-            elapsed = int(time.time() - start_time)
-            mins, secs = divmod(elapsed, 60)
+        
+        max_diff_duration = 0.0
+        
+        for tag, status in agents.items():
+            status.elapsed_sec = int(time.time() - status.start_time)
+            mins, secs = divmod(status.elapsed_sec, 60)
             try:
-                if not workdir.exists():
+                if not status.workdir.exists():
                     continue
+                
+                t0 = time.time()
                 result = subprocess.run(
                     ["git", "diff", "--name-only"],
-                    cwd=workdir, capture_output=True, text=True, timeout=5,
+                    cwd=status.workdir, capture_output=True, text=True, timeout=5,
                 )
+                duration = time.time() - t0
+                max_diff_duration = max(max_diff_duration, duration)
+                
                 files = [f.strip() for f in (result.stdout or "").strip().split("\n") if f.strip()]
+                status.files_changed = files
+                
                 if files:
                     files_str = ", ".join(f.rsplit("/", 1)[-1] for f in files[:5])
                     if len(files) > 5:
                         files_str += f" (+{len(files) - 5})"
-                    log.info(f"[{tag}] ⏳ {mins}m{secs:02d}s — правит: {files_str}")
+                    log.info(f"[{tag}] ⏳ {mins}m{secs:02d}s (${status.cost_usd:.2f}) — правит: {files_str}")
                 else:
-                    log.info(f"[{tag}] ⏳ {mins}m{secs:02d}s — читает код...")
+                    log.info(f"[{tag}] ⏳ {mins}m{secs:02d}s (${status.cost_usd:.2f}) — читает код...")
             except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
                 continue
+                
+        # Агрегация системных метрик (снаружи цикла, один раз за heartbeat)
+        if HAS_PSUTIL:
+            active_count = len(agents)
+            if active_count not in _perf_stats:
+                _perf_stats[active_count] = []
+            
+            perf_metrics = {
+                "cpu_percent": psutil.cpu_percent(),
+                "io_read": psutil.disk_io_counters().read_bytes if hasattr(psutil, "disk_io_counters") else 0
+            }
+            
+            _perf_stats[active_count].append({
+                "time": time.time(),
+                "diff_duration": max_diff_duration,
+                "cpu": perf_metrics["cpu_percent"],
+                "io_read": perf_metrics["io_read"],
+            })
+            # Ограничиваем размер истории
+            if len(_perf_stats[active_count]) > 100:
+                _perf_stats[active_count] = _perf_stats[active_count][-100:]
 
 
 def _start_heartbeat():
+    global _heartbeat_thread
     t = threading.Thread(target=_heartbeat_loop, daemon=True)
+    _heartbeat_thread = t
     t.start()
 
+def _stop_heartbeat():
+    """Останавливает фоновый поток heartbeat."""
+    global _heartbeat_thread
+    if _heartbeat_thread and _heartbeat_thread.is_alive():
+        _heartbeat_stop_event.set()
+        _heartbeat_thread.join(timeout=5)
+        _heartbeat_thread = None
 
-def _register_agent(tag: str, task_id: str, workdir: Path):
+
+def _register_agent(tag: str, task_id: str, workdir: Path, agent_type: str):
     with _active_agents_lock:
-        _active_agents[tag] = (task_id, workdir, time.time())
+        _active_agents[tag] = AgentStatus(
+            task_id=task_id,
+            agent_type=agent_type,
+            workdir=workdir,
+            start_time=time.time()
+        )
+        pass  # dashboard integration TBD
 
 
 def _unregister_agent(tag: str):
+    """Удаляет агента из _active_agents.
+
+    Потокобезопасно: удаление под lock.
+    """
     with _active_agents_lock:
         _active_agents.pop(tag, None)
 
 
+def _create_checkpoint_task_with_log(stderr: str):
+    """Обертка над create_checkpoint_task с доп. логированием (TASK-178)."""
+    tasks_before = parse_tasks()
+    already_exists = any("make check" in (t.acceptance or "") and t.status != "done" for t in tasks_before)
+
+    create_checkpoint_task(stderr)
+
+    if not already_exists:
+        # Находим только что созданную задачу
+        tasks_after = parse_tasks()
+        new_task = next((t for t in reversed(tasks_after) if "Чекпоинт" in t.name), None)
+        if new_task:
+            log.info(f"🛠️ [{new_task.id}] Создана задача‑фикc: {new_task.name}")
+
+
 # --- Верификация ---
+
+def _log_test_results(result: subprocess.CompletedProcess | MergeResult, task: Task | None, cmd_str: str):
+    """Парсит и логирует результаты тестов (TASK-177)."""
+    output = (result.stdout or "") + (result.stderr or "")
+    failed_tests = parse_pytest_output(output)
+    task_id_prefix = f"[{task.id}] " if task else ""
+    if failed_tests:
+        tests_str = ", ".join(failed_tests)
+        log.warning(f"{task_id_prefix}❌ Упали тесты: {tests_str}")
+    elif result.returncode == 0:
+        # Логируем успех только если это явно тесты (pytest или check_command)
+        is_pytest = "pytest" in cmd_str.lower()
+        is_check = cfg.check_command and cfg.check_command in cmd_str
+        if is_pytest or is_check:
+            log.info(f"✅ {task_id_prefix}Все тесты прошли")
+    else:
+        # returncode != 0, но failed_tests пуст. Логируем общую ошибку для тестов.
+        is_pytest = "pytest" in cmd_str.lower()
+        is_check = cfg.check_command and cfg.check_command in cmd_str
+        if is_pytest or is_check:
+            log.warning(f"❌ {task_id_prefix}Команда тестов завершилась с ошибкой (код {result.returncode}), но список упавших тестов пуст")
+
 
 def check_already_done(task: Task) -> bool:
     """Проверяет, выполнен ли критерий готовности задачи уже в develop.
@@ -94,6 +214,7 @@ def check_already_done(task: Task) -> bool:
         # Файлы есть + сборка проходит → done
         for cmd_list in cfg.build_commands:
             result = run_cmd(cmd_list, cwd=cfg.root_dir, timeout=cfg.build_timeout, check=False)
+            _log_test_results(result, task, " ".join(cmd_list))
             if result.returncode != 0:
                 return False
         log.info(f"[{task.id}] pre-check: все файлы существуют, сборка проходит")
@@ -104,6 +225,7 @@ def check_already_done(task: Task) -> bool:
         result = run_cmd(
             ["bash", "-c", cfg.check_command], cwd=cfg.root_dir,
             timeout=cfg.build_timeout, check=False)
+        _log_test_results(result, task, cfg.check_command)
         if result.returncode == 0:
             log.info(f"[{task.id}] pre-check: check_command проходит")
             return True
@@ -130,11 +252,21 @@ def verify_build(workdir: Path, task: Task | None = None) -> tuple[bool, str]:
     status = run_cmd(["git", "status", "--porcelain"], cwd=workdir, check=False)
     has_new_files = bool((status.stdout or "").strip())
 
+    # Reject changes to protected orchestrator files
+    _PROTECTED = {"TASKS.md", "forgerace.toml", "litellm_config.yaml", ".gitignore", "CLAUDE.md"}
+    changed_files = run_cmd(["git", "diff", "--name-only", cfg.dev_branch], cwd=workdir, check=False)
+    for f in (changed_files.stdout or "").strip().split("\n"):
+        if f.strip() in _PROTECTED:
+            # Revert protected file
+            run_cmd(["git", "checkout", cfg.dev_branch, "--", f.strip()], cwd=workdir, check=False)
+            log.warning(f"⚠ Reverted protected file: {f.strip()}")
+
     if not has_changes and not has_new_files:
         if task and "make check" in (task.acceptance or "") and cfg.check_command:
             result = run_cmd(
                 ["bash", "-c", cfg.check_command], cwd=workdir,
                 timeout=cfg.build_timeout, check=False)
+            _log_test_results(result, task, cfg.check_command)
             if result.returncode == 0:
                 return True, ""
             return False, f"check_command failed:\n{result.stderr}\n{result.stdout}"
@@ -153,6 +285,7 @@ def verify_build(workdir: Path, task: Task | None = None) -> tuple[bool, str]:
 
     for cmd in cfg.build_commands:
         result = run_cmd(cmd, cwd=workdir, timeout=cfg.build_timeout, check=False)
+        _log_test_results(result, task, " ".join(cmd))
         if result.returncode != 0:
             return False, f"{' '.join(cmd)} failed:\n{result.stderr}\n{result.stdout}"
 
@@ -240,7 +373,7 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
 
     tag = f"{task.id}/{agent_type}"
     log.info(f"  ▶ [{tag}] agent-{agent_num}")
-    _register_agent(tag, task.id, workdir)
+    _register_agent(tag, task.id, workdir, agent_type)
 
     is_design = task.files_new.startswith("docs/")
     error_log = ""
@@ -254,6 +387,9 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
                                    cancel_event=cancel_event)
         if hasattr(result, "usage") and result.usage:
             total_usage.accumulate(result.usage)
+            with _active_agents_lock:
+                if tag in _active_agents:
+                    _active_agents[tag].usage = total_usage
 
         agent_log = cfg.log_dir / f"{task.id.lower()}-{agent_type}-attempt{attempt}.log"
         agent_log.write_text(
@@ -348,19 +484,42 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
         run_hook(cfg.hook_on_complete, task.id, "done", "pre-check")
         return True
 
-    update_task_status(task.id, "in_progress:both")
-
     from .agents import is_agent_disabled
-    agent_names = [n for n in cfg.cli_agent_names if not is_agent_disabled(n)]
+    # If task has assigned agent(s), use only them (leader's choice)
+    if task.agent and task.agent not in ("—", ""):
+        # Parse: "@gemini", "gemini", "@qwen-api+theory" → "qwen-api"
+        raw = [a.strip().lstrip("@").split("+")[0]
+               for a in task.agent.replace(",", " ").split()
+               if a.strip() not in ("—", "")]
+        # Only use CLI agents (can write code); skip API-only agents
+        assigned = [a for a in raw
+                    if a in cfg.cli_agent_names and not is_agent_disabled(a)]
+        if assigned:
+            agent_names = assigned
+            log.info(f"[{task.id}] Назначенные агенты: {agent_names} [причина: явное указание]")
+        else:
+            # Fallback: assigned agent can't code → competitive with all CLI agents
+            agent_names = [n for n in cfg.cli_agent_names if not is_agent_disabled(n)]
+            if raw:
+                log.warning(f"[{task.id}] Назначенные {raw} не могут кодить → competitive [причина: порог сложности (fallback)]")
+    else:
+        agent_names = [n for n in cfg.cli_agent_names if not is_agent_disabled(n)]
     if not agent_names:
         log.error(f"[{task.id}] ✗ Нет доступных CLI-агентов")
         update_task_status(task.id, "blocked")
         return False
+
+    update_task_status(task.id, f"in_progress:{','.join(agent_names)}")
     all_results = []
     passed = []
     cancel_event = threading.Event()  # сигнал отмены для проигравших
 
     race_winner = None
+
+    # Инициализация метрик
+    start_time = time.perf_counter()
+    review_rounds = 0
+    total_cost = 0.0
 
     with ThreadPoolExecutor(max_workers=len(agent_names)) as pool:
         futures = {}
@@ -386,9 +545,9 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             if result.code_lines > 500:
                 log.warning(f"[{task.id}/{result.agent_type}] ⚠ раздутый diff ({result.code_lines} строк) — возможно переписал файлы целиком")
 
-            # Race: первый финишировавший → ревью другими (или self+frame)
+            # Race: первый финишировавший → ревью другими (или self+frame) (TASK-095)
             from .agents import is_agent_disabled
-            reviewers = [n for n in agent_names
+            reviewers = [n for n in cfg.agent_names
                          if n != result.agent_type and not is_agent_disabled(n)]
             if not reviewers:
                 if cfg.review_frame and cfg.review_frame in cfg.frames:
@@ -400,7 +559,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             changed = get_changed_files(result, task)
             log.info(f"[{task.id}/ревью] {', '.join(reviewers)} проверяют {result.agent_type}")
 
-            # Ревью параллельно, доработка начинается сразу при NEEDS_WORK
+            # Ревью параллельно, доработка начинается сразу при NEEDS_WORK/REJECTED
             rework_comments = []
             with ThreadPoolExecutor(max_workers=len(reviewers)) as review_pool:
                 review_futures = {}
@@ -410,29 +569,46 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                                            workdir=result.workdir)
                     review_futures[f] = rev
                 verdicts = {}
-                rework_started = False
                 for f in as_completed(review_futures):
                     rev = review_futures[f]
                     rv = f.result()
                     verdicts[rev] = rv
-                    log.info(f"[{task.id}/{rev}/ревью] → {result.agent_type}: {rv['verdict']}")
+                    verdict = rv.get("verdict", "FAILED").upper()
+                    log.info(f"[{task.id}/{rev}/ревью] → {result.agent_type}: {verdict}")
                     summary = rv.get('summary', rv.get('comments', '')[:200])
                     if summary:
                         log.info(f"[{task.id}/{rev}/ревью] {summary}")
-                    # Собираем замечания для доработки
-                    if rv["verdict"] != "APPROVED":
+                    
+                    # Собираем замечания для доработки (поддержка NEEDS_WORK, NEEDS_REWORK, REJECTED) (TASK-095)
+                    if verdict != "APPROVED":
                         comments = rv.get("comments", rv.get("summary", ""))
                         if comments:
-                            rework_comments.append(comments)
+                            rework_comments.append(f"### Замечания от {rev} (вердикт: {verdict})\n{comments}")
 
             # APPROVED только если ВСЕ ревьюеры одобрили
-            all_approved = all(v["verdict"] == "APPROVED" for v in verdicts.values())
+            all_approved = all(v.get("verdict") == "APPROVED" for v in verdicts.values())
+            
+            # Проверка на терминальный отказ (TASK-051)
+            is_terminal = any(v.get("is_terminal") for v in verdicts.values())
+            if not all_approved and is_terminal:
+                log.error(f"[{task.id}/{result.agent_type}/ревью] ✗ ТЕРМИНАЛЬНЫЙ ОТКАЗ → BLOCKED")
+                update_task_status(task.id, "blocked", agent=result.agent_type)
+                # Сохраняем замечания для истории (TASK-095)
+                all_comments = "\n\n".join(rework_comments)
+                if all_comments:
+                    task.last_attempts.append({
+                        "comments": all_comments,
+                        "timestamp": int(time.time())
+                    })
+                continue
+
             if all_approved:
                 log.info(f"[{task.id}/{result.agent_type}/ревью] ✅ одобрено")
                 log.info(f"[{task.id}/{result.agent_type}/мерж] 🏆 победитель")
                 cancel_event.set()  # сигнал остальным агентам на завершение
                 # Мержим СРАЗУ, не ждём остальных
-                if merge_to_develop(result.branch, task.id):
+                m_res = merge_to_develop(result.branch, task.id)
+                if m_res.success:
                     update_task_status(task.id, "done", agent=result.agent_type, branch=result.branch)
                     run_hook(cfg.hook_on_complete, task.id, "done", result.agent_type)
                     log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
@@ -441,13 +617,33 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                                       agent=result.agent_type, branch=result.branch)
                     run_hook(cfg.hook_on_complete, task.id, f"review:{result.agent_type}", result.agent_type)
                     log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
+                    if m_res.is_test_failure:
+                         _log_test_results(m_res, task, cfg.check_command)
+                         rework_msg = f"Тесты провалены при мерже в {cfg.dev_branch}:\n{m_res.test_stderr or m_res.test_stdout}"
+                         log.info(f"[{task.id}/{result.agent_type}/доработка] отправлен на исправление (тесты провалены при мерже)")
+                         send_to_rework(result, task, rework_msg)
+                    else:
+                         rework_msg = f"Ошибка мержа в {cfg.dev_branch} (конфликт?):\n{m_res.merge_stderr or m_res.merge_stdout}"
+                         log.info(f"[{task.id}/{result.agent_type}/доработка] отправлен на исправление (ошибка мержа)")
+                         send_to_rework(result, task, rework_msg)
                 race_winner = result
             else:
+                # Проверка лимита переделок (TASK-058/095)
+                max_reworks = getattr(cfg, "max_reworks", 3)
+                if task.rework_count >= max_reworks:
+                    log.error(f"[{task.id}/{result.agent_type}] ✗ Превышен лимит правок ({max_reworks}) → STUCK")
+                    update_task_status(task.id, "stuck", agent=result.agent_type, branch=result.branch)
+                    continue
+
                 # Сразу отправляем на доработку — не ждём других агентов
                 all_comments = "\n\n".join(rework_comments)
                 if all_comments:
                     log.info(f"[{task.id}/{result.agent_type}/доработка] {C['yellow']}отправлен на исправление{R}")
                     send_to_rework(result, task, all_comments)
+                else:
+                    # Если нет комментариев, но вердикт не APPROVED, всё равно отправляем на доработку с заглушкой
+                    log.warning(f"[{task.id}/{result.agent_type}/доработка] Вердикт не APPROVED, но нет комментариев. Отправляем на доработку.")
+                    send_to_rework(result, task, "### Замечания\nНет конкретных комментариев от ревьюеров, но код не одобрен.")
 
     # Все futures завершены — cleanup worktree безопасен
     if race_winner:
@@ -509,6 +705,45 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             log.info(f"[{task.id}/{best_result.agent_type}/ревью] ✅ одобрено")
             break
 
+        # Проверка на терминальный отказ (TASK-051)
+        if rv.get("is_terminal"):
+            log.error(f"[{task.id}] ✗ ТЕРМИНАЛЬНЫЙ ОТКАЗ ({rv.get('verdict')}) → BLOCKED")
+            update_task_status(task.id, "blocked")
+            # Сохраняем замечания для истории (TASK-095)
+            # Собираем все комментарии из всех ревьюеров, если они есть
+            all_comments = "\n\n".join(rework_comments)
+            if not all_comments:
+                all_comments = rv.get("comments", rv.get("summary", ""))
+            if all_comments:
+                task.last_attempts.append({
+                    "comments": all_comments,
+                    "timestamp": int(time.time())
+                })
+            run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+            _log_total_cost(task.id, all_results)
+            cleanup_worktrees(all_results)
+            return False
+
+        # Проверка лимита переделок (TASK-058/095)
+        max_reworks = getattr(cfg, "max_reworks", 3)
+        if task.rework_count >= max_reworks:
+            log.error(f"[{task.id}] ✗ Превышен лимит правок ({max_reworks}) → STUCK")
+            update_task_status(task.id, "stuck")
+            # Сохраняем замечания для истории (TASK-095)
+            # Собираем все комментарии из всех ревьюеров, если они есть
+            all_comments = "\n\n".join(rework_comments)
+            if not all_comments:
+                all_comments = rv.get("comments", rv.get("summary", ""))
+            if all_comments:
+                task.last_attempts.append({
+                    "comments": all_comments,
+                    "timestamp": int(time.time())
+                })
+            run_hook(cfg.hook_on_complete, task.id, "stuck", "none")
+            _log_total_cost(task.id, all_results)
+            cleanup_worktrees(all_results)
+            return False
+
         # Детекция зацикливания: одинаковое замечание 2 раунда подряд → эскалация
         cur_summary = rv.get("summary", "").strip()
         if cur_summary and cur_summary == prev_summary:
@@ -525,7 +760,8 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             repeat_count = 0
         prev_summary = cur_summary
 
-        if rv.get("verdict") == "error" or not rv.get("comments", "").strip():
+        comments_combined = rv.get("comments", rv.get("summary", "")).strip()
+        if rv.get("verdict") == "error" or not comments_combined:
             log.warning(f"[{task.id}] ⚠ Ревью ошибка/без замечаний — пропускаю раунд")
             continue
 
@@ -533,20 +769,36 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             # Параллельная доработка — не ждём медленных
             rework_items = []
             for agent_result in passed:
-                agent_comments = rv["reviews"].get(agent_result.agent_type, {}).get("comments", "")
-                if agent_comments.strip():
-                    rework_items.append((agent_result, agent_comments))
+                rev_obj = rv["reviews"].get(agent_result.agent_type, {})
+                agent_verdict = rev_obj.get("verdict", "FAILED").upper()
+                agent_comments = rev_obj.get("comments", rev_obj.get("summary", ""))
+                # Собираем замечания для доработки (поддержка NEEDS_WORK, NEEDS_REWORK, REJECTED) (TASK-095)
+                if agent_verdict != "APPROVED" and agent_comments.strip():
+                    reviewer_tag = rev_obj.get("reviewer", "ревьюер")
+                    rework_items.append((agent_result, f"### Замечания от {reviewer_tag} (вердикт: {agent_verdict})\n{agent_comments}"))
+                elif agent_verdict != "APPROVED" and not agent_comments.strip():
+                    # Если вердикт не APPROVED, но нет комментариев, добавляем заглушку
+                    reviewer_tag = rev_obj.get("reviewer", "ревьюер")
+                    rework_items.append((agent_result, f"### Замечания от {reviewer_tag} (вердикт: {agent_verdict})\nНет конкретных комментариев."))
+            
             if rework_items:
                 with ThreadPoolExecutor(max_workers=len(rework_items)) as rework_pool:
                     rework_futures = {}
                     for agent_result, agent_comments in rework_items:
                         log.info(f"[{task.id}/{agent_result.agent_type}/доработка] отправлен на исправление")
                         f = rework_pool.submit(send_to_rework, agent_result, task, agent_comments)
-                        rework_futures[f] = agent_result.agent_type
+                        rework_futures[f] = (agent_result, agent_comments)
                     for f in as_completed(rework_futures):
+                        agent_result, agent_comments = rework_futures[f]
                         f.result()  # дождаться завершения
         else:
-            comments = rv.get("comments", "")
+            comments = rv.get("comments", rv.get("summary", ""))
+            # Собираем замечания от ревьюера (поддержка NEEDS_WORK, NEEDS_REWORK, REJECTED) (TASK-095)
+            if rv.get("verdict") != "APPROVED" and comments.strip():
+                reviewer_tag = rv.get("reviewer", "ревьюер")
+                verdict_tag = rv.get("verdict", "NEEDS_REWORK")
+                comments = f"### Замечания от {reviewer_tag} (вердикт: {verdict_tag})\n{comments}"
+            
             log.info(f"[{task.id}/{best_result.agent_type}/доработка] {C['yellow']}отправлен на исправление{R}")
             send_to_rework(best_result, task, comments)
             passed = [best_result]
@@ -564,6 +816,16 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
         else:
             log.error(f"[{task.id}] ✗ не прошёл ревью за {cfg.max_review_rounds}+1 раундов → BLOCKED")
             update_task_status(task.id, "blocked")
+            # Сохраняем финальные замечания для истории (TASK-095)
+            # Собираем все комментарии из всех ревьюеров, если они есть
+            all_comments = "\n\n".join(rework_comments)
+            if not all_comments:
+                all_comments = rv.get("comments", rv.get("summary", ""))
+            if all_comments:
+                task.last_attempts.append({
+                    "comments": all_comments,
+                    "timestamp": int(time.time())
+                })
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, all_results)
             cleanup_worktrees(all_results)
@@ -571,7 +833,8 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
 
     # Мерж
     log.info(f"[{task.id}/{best_result.agent_type}/мерж] 🏆 победитель")
-    if merge_to_develop(best_result.branch, task.id):
+    m_res = merge_to_develop(best_result.branch, task.id)
+    if m_res.success:
         update_task_status(task.id, "done", agent=best_result.agent_type, branch=best_result.branch)
         run_hook(cfg.hook_on_complete, task.id, "done", best_result.agent_type)
         log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
@@ -580,6 +843,15 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                           agent=best_result.agent_type, branch=best_result.branch)
         run_hook(cfg.hook_on_complete, task.id, f"review:{best_result.agent_type}", best_result.agent_type)
         log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
+        if m_res.is_test_failure:
+             _log_test_results(m_res, task, cfg.check_command)
+             rework_msg = f"Тесты провалены при мерже в {cfg.dev_branch}:\n{m_res.test_stderr or m_res.test_stdout}"
+             log.info(f"[{task.id}/{best_result.agent_type}/доработка] отправлен на исправление (тесты провалены при мерже)")
+             send_to_rework(best_result, task, rework_msg)
+        else:
+             rework_msg = f"Ошибка мержа в {cfg.dev_branch} (конфликт?):\n{m_res.merge_stderr or m_res.merge_stdout}"
+             log.info(f"[{task.id}/{best_result.agent_type}/доработка] отправлен на исправление (ошибка мержа)")
+             send_to_rework(best_result, task, rework_msg)
 
     _log_total_cost(task.id, all_results)
     cleanup_worktrees(all_results)
@@ -591,6 +863,8 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
 def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     """Выполнение одним агентом + ревью другим."""
     log.info(f"═══ {task.id}: {task.name} ({agent_type}, ревью другим) ═══")
+    start_time = time.perf_counter()
+    review_rounds = 0
 
     # Pre-check: критерий готовности уже выполнен в develop?
     if check_already_done(task):
@@ -612,8 +886,17 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
 
     log.info(f"[{task.id}/{result.agent_type}] lines={result.code_lines}, bin={result.binary_size}")
 
-    all_agent_names = cfg.agent_names
-    reviewer = next((n for n in all_agent_names if n != agent_type), agent_type)
+    from .agents import is_agent_disabled
+    reviewers = [n for n in cfg.agent_names if n != agent_type and not is_agent_disabled(n)]
+    if not reviewers:
+        if cfg.review_frame and cfg.review_frame in cfg.frames:
+            reviewers = [f"{agent_type}+{cfg.review_frame}"]
+        else:
+            reviewers = [agent_type]
+
+    # Счетчик раундов ревью
+    review_rounds = 0
+    
     diff = get_diff(result, task)
     if not diff:
         log.error(f"[{task.id}] ✗ пустой diff → BLOCKED")
@@ -627,26 +910,98 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     prev_summary = None
     repeat_count = 0
     for review_round in range(1, cfg.max_review_rounds + 1):
-        log.info(f"[{task.id}/{reviewer}/ревью] раунд {review_round}/{cfg.max_review_rounds}, проверяет {agent_type}")
-        rv = single_review(reviewer, agent_type, get_diff(best_result, task), task,
-                           build_passed=True, changed_files=get_changed_files(best_result, task),
-                           workdir=best_result.workdir)
-        log.info(f"[{task.id}/{reviewer}/ревью] → {agent_type}: {rv['verdict']}")
-        summary = rv.get('summary', rv.get('comments', '')[:200])
-        if summary:
-            log.info(f"[{task.id}/{reviewer}/ревью] {summary}")
+        review_rounds += 1
+        log.info(f"[{task.id}/ревью] раунд {review_round}/{cfg.max_review_rounds}, проверяют {', '.join(reviewers)}")
+        
+        rework_comments = []
+        verdicts = {}
+        with ThreadPoolExecutor(max_workers=len(reviewers)) as review_pool:
+            review_futures = {}
+            for rev in reviewers:
+                f = review_pool.submit(single_review, rev, agent_type, get_diff(best_result, task), task,
+                                       build_passed=True, changed_files=get_changed_files(best_result, task),
+                                       workdir=best_result.workdir)
+                review_futures[f] = rev
+            
+            for f in as_completed(review_futures):
+                rev = review_futures[f]
+                rv = f.result()
+                verdicts[rev] = rv
+                verdict = rv.get("verdict", "FAILED").upper()
+                log.info(f"[{task.id}/{rev}/ревью] → {agent_type}: {verdict}")
+                summary = rv.get('summary', rv.get('comments', '')[:200])
+                if summary:
+                    log.info(f"[{task.id}/{rev}/ревью] {summary}")
+                
+                # Собираем замечания для доработки (поддержка NEEDS_WORK, NEEDS_REWORK, REJECTED) (TASK-095)
+                if verdict != "APPROVED":
+                    comments = rv.get("comments", rv.get("summary", ""))
+                    if comments:
+                        rework_comments.append(f"### Замечания от {rev} (вердикт: {verdict})\n{comments}")
+                    # Также сохраняем full_text для детального анализа если нужно
+                    # if rv.get("full_text"):
+                    #     rework_comments.append(f"### Полный текст от {rev}\n{rv['full_text']}")
 
-        if rv["verdict"] == "APPROVED":
+        all_approved = all(v.get("verdict") == "APPROVED" for v in verdicts.values())
+        if all_approved:
             log.info(f"[{task.id}/{agent_type}/ревью] ✅ одобрено")
             break
 
-        # Детекция зацикливания
-        cur_summary = rv.get("summary", "").strip()
+        # Проверка на терминальный отказ (TASK-052)
+        if any(v.get("is_terminal") for v in verdicts.values()):
+            log.error(f"[{task.id}] ✗ ТЕРМИНАЛЬНЫЙ ОТКАЗ → BLOCKED")
+            update_task_status(task.id, "blocked")
+            # Сохраняем замечания для истории (TASK-095)
+            all_comments = "\n\n".join(rework_comments)
+            if not all_comments:
+                # Fallback к первому найденному комментарию если список пуст
+                for v in verdicts.values():
+                    c = v.get("comments", v.get("summary", ""))
+                    if c:
+                        all_comments = c
+                        break
+            if all_comments:
+                task.last_attempts.append({
+                    "comments": all_comments,
+                    "timestamp": int(time.time())
+                })
+            run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
+            _log_total_cost(task.id, [result])
+            cleanup_worktrees([result])
+            return False
+
+        # Проверка лимита переделок (TASK-058/095)
+        max_reworks = getattr(cfg, "max_reworks", 3)
+        if task.rework_count >= max_reworks:
+            log.error(f"[{task.id}] ✗ Превышен лимит правок ({max_reworks}) → STUCK")
+            update_task_status(task.id, "stuck")
+            # Сохраняем замечания для истории (TASK-095)
+            all_comments = "\n\n".join(rework_comments)
+            if not all_comments:
+                # Fallback к первому найденному комментарию если список пуст
+                for v in verdicts.values():
+                    c = v.get("comments", v.get("summary", ""))
+                    if c:
+                        all_comments = c
+                        break
+            if all_comments:
+                task.last_attempts.append({
+                    "comments": all_comments,
+                    "timestamp": int(time.time())
+                })
+            run_hook(cfg.hook_on_complete, task.id, "stuck", "none")
+            _log_total_cost(task.id, [result])
+            cleanup_worktrees([result])
+            return False
+
+        # Детекция зацикливания (по первому ревьюеру для простоты)
+        first_rv = list(verdicts.values())[0]
+        cur_summary = first_rv.get("summary", "").strip()
         if cur_summary and cur_summary == prev_summary:
             repeat_count += 1
             if repeat_count >= 1:
-                log.warning(f"[{task.id}/{reviewer}/ревью] ⚠ зациклился ({repeat_count + 1} раунда одно замечание)")
-                _escalate_review_stall(task, [best_result], rv)
+                log.warning(f"[{task.id}/ревью] ⚠ зациклился ({repeat_count + 1} раунда одно замечание)")
+                _escalate_review_stall(task, [best_result], first_rv)
                 update_task_status(task.id, "blocked")
                 run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
                 _log_total_cost(task.id, [result])
@@ -656,20 +1011,45 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
             repeat_count = 0
         prev_summary = cur_summary
 
-        comments = rv.get("comments", "")
-        if not comments.strip() or rv.get("verdict") == "error":
-            log.warning(f"[{task.id}/{reviewer}/ревью] ⚠ без замечаний или ошибка — пропускаю")
+        all_comments = "\n\n".join(rework_comments)
+        if not all_comments.strip():
+            log.warning(f"[{task.id}/ревью] ⚠ без замечаний или ошибка — пропускаю")
             continue
         log.info(f"[{task.id}/{agent_type}/доработка] {C['yellow']}отправлен на исправление{R}")
-        send_to_rework(best_result, task, comments)
+        send_to_rework(best_result, task, all_comments)
     else:
-        log.info(f"[{task.id}/{reviewer}/ревью] финальный раунд")
-        rv = single_review(reviewer, agent_type, get_diff(best_result, task), task,
-                           build_passed=True, changed_files=get_changed_files(best_result, task),
-                           workdir=best_result.workdir)
-        if rv["verdict"] != "APPROVED":
+        log.info(f"[{task.id}/ревью] финальный раунд, проверяют {', '.join(reviewers)}")
+        verdicts = {}
+        with ThreadPoolExecutor(max_workers=len(reviewers)) as review_pool:
+            review_futures = {}
+            for rev in reviewers:
+                f = review_pool.submit(single_review, rev, agent_type, get_diff(best_result, task), task,
+                                       build_passed=True, changed_files=get_changed_files(best_result, task),
+                                       workdir=best_result.workdir)
+                review_futures[f] = rev
+            for f in as_completed(review_futures):
+                rev = review_futures[f]
+                verdicts[rev] = f.result()
+
+        all_approved = all(v.get("verdict") == "APPROVED" for v in verdicts.values())
+        if not all_approved:
             log.error(f"[{task.id}/{agent_type}/ревью] ✗ не прошёл → BLOCKED")
             update_task_status(task.id, "blocked")
+            # Сохраняем финальные замечания для истории (TASK-095)
+            rework_comments = []
+            for rev, rv in verdicts.items():
+                if rv.get("verdict") != "APPROVED":
+                    comments = rv.get("comments", rv.get("summary", ""))
+                    if comments:
+                        rework_comments.append(f"### Замечания от {rev} (вердикт: {rv.get('verdict')})\n{comments}")
+                    else:
+                        rework_comments.append(f"### Замечания от {rev} (вердикт: {rv.get('verdict')})\nНет конкретных комментариев.")
+            all_comments = "\n\n".join(rework_comments)
+            if all_comments:
+                task.last_attempts.append({
+                    "comments": all_comments,
+                    "timestamp": int(time.time())
+                })
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, [result])
             cleanup_worktrees([result])
@@ -678,7 +1058,8 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
 
     # Мерж
     log.info(f"[{task.id}/{agent_type}/мерж] 🏆 победитель")
-    if merge_to_develop(best_result.branch, task.id):
+    m_res = merge_to_develop(best_result.branch, task.id)
+    if m_res.success:
         update_task_status(task.id, "done", agent=agent_type, branch=best_result.branch)
         run_hook(cfg.hook_on_complete, task.id, "done", agent_type)
         log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
@@ -686,6 +1067,19 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         update_task_status(task.id, f"review:{agent_type}", agent=agent_type, branch=best_result.branch)
         run_hook(cfg.hook_on_complete, task.id, f"review:{agent_type}", agent_type)
         log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
+        if m_res.is_test_failure:
+             _log_test_results(m_res, task, cfg.check_command)
+             rework_msg = f"Тесты провалены при мерже в {cfg.dev_branch}:\n{m_res.test_stderr or m_res.test_stdout}"
+             log.info(f"[{task.id}/{agent_type}/доработка] отправлен на исправление (тесты провалены при мерже)")
+             send_to_rework(best_result, task, rework_msg)
+        else:
+             rework_msg = f"Ошибка мержа в {cfg.dev_branch} (конфликт?):\n{m_res.merge_stderr or m_res.merge_stdout}"
+             log.info(f"[{task.id}/{agent_type}/доработка] отправлен на исправление (ошибка мержа)")
+             send_to_rework(best_result, task, rework_msg)
+
+    # Логируем метрики
+    total_time = time.perf_counter() - start_time
+    log.info(f"[{task.id}] Время выполнения: {total_time:.2f}s, раундов ревью: {review_rounds}")
 
     _log_total_cost(task.id, [result])
     cleanup_worktrees([result])
@@ -700,7 +1094,7 @@ def _cleanup_task_branches(task: Task):
     for d in cfg.agents_dir.glob("agent-*"):
         if d.is_dir():
             run_cmd(["git", "worktree", "remove", str(d), "--force"], cwd=cfg.root_dir, check=False)
-    for agent_type in cfg.agent_names:
+    for agent_type in cfg.all_agent_names:
         branch = f"task/{task.id.lower()}-{slug}-{agent_type}"
         run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
 
@@ -730,29 +1124,112 @@ def _escalate_review_stall(task: Task, results: list, last_rv: dict):
     print(f"    {summary}")
 
     print(f"\n  {C['yellow']}Решение требуется от techlead.{R}")
-    print(f"  Варианты: исправить задачу, поменять ревьюера, или approve вручную.")
+    print("  Варианты: исправить задачу, поменять ревьюера, или approve вручную.")
     print(f"{C['red']}{C['bold']}{'═' * 60}{R}\n")
+
+
+def _ensure_litellm_proxy():
+    """Auto-start LiteLLM proxy if agents need it and it's not running."""
+    import urllib.request
+    # Check if any enabled agent uses localhost proxy
+    proxy_url = ""
+    for name, acfg in cfg.agents.items():
+        if not acfg.enabled:
+            continue
+        for arg in acfg.args:
+            if "127.0.0.1:4000" in arg or "localhost:4000" in arg:
+                proxy_url = "http://127.0.0.1:4000"
+                break
+        if not proxy_url and acfg.env:
+            for v in acfg.env.values():
+                if "127.0.0.1:4000" in str(v) or "localhost:4000" in str(v):
+                    proxy_url = "http://127.0.0.1:4000"
+                    break
+        if proxy_url:
+            break
+
+    if not proxy_url:
+        return  # no agents need proxy
+
+    # Check if proxy is already running (bypass system proxy)
+    try:
+        no_proxy_handler = urllib.request.ProxyHandler({})
+        opener = urllib.request.build_opener(no_proxy_handler)
+        req = urllib.request.Request(f"{proxy_url}/health")
+        req.add_header("Authorization", "Bearer fr-local-dev")
+        with opener.open(req, timeout=3) as resp:
+            if resp.status == 200:
+                return  # proxy is running
+    except Exception:
+        pass
+
+    # Try to start proxy
+    litellm_bin = Path.home() / ".local/share/pipx/venvs/litellm/bin/litellm"
+    config_file = cfg.root_dir / "litellm_config.yaml"
+    if not litellm_bin.exists():
+        log.warning("LiteLLM не установлен — агенты через proxy не будут работать")
+        log.warning("  Установи: pipx install 'litellm[proxy]'")
+        return
+    if not config_file.exists():
+        log.warning(f"litellm_config.yaml не найден в {cfg.root_dir}")
+        return
+
+    log.info("Запускаю LiteLLM proxy (localhost:4000)...")
+    import subprocess as _sp
+    env = {**os.environ, "no_proxy": "127.0.0.1,localhost", "NO_PROXY": "127.0.0.1,localhost"}
+    _sp.Popen(
+        [str(litellm_bin), "--config", str(config_file), "--port", "4000", "--host", "127.0.0.1"],
+        stdout=open(cfg.log_dir / "litellm.log", "w"),
+        stderr=_sp.STDOUT,
+        env=env,
+    )
+    # Wait for startup
+    import time as _time
+    for _ in range(15):
+        _time.sleep(1)
+        try:
+            no_proxy_handler = urllib.request.ProxyHandler({})
+            opener = urllib.request.build_opener(no_proxy_handler)
+            req = urllib.request.Request(f"{proxy_url}/health")
+            req.add_header("Authorization", "Bearer fr-local-dev")
+            with opener.open(req, timeout=2) as resp:
+                if resp.status == 200:
+                    log.info("LiteLLM proxy запущен")
+                    return
+        except Exception:
+            pass
+    log.warning("LiteLLM proxy не стартовал за 15с — агенты через proxy могут не работать")
 
 
 def preflight_check() -> bool:
     """Проверяет текущую ветку на проблемы, пробует собрать через cfg.build_commands."""
-    # Проверяем merge conflict маркеры (ищем в src/ если есть, иначе в корне)
-    src_dir = cfg.root_dir / "src"
-    search_dir = "src/" if src_dir.exists() else "."
-    marker = "<" + "<<<<<<"  # split to avoid self-match
-    result = run_cmd(["grep", "-rlI",
-                       "--exclude-dir=.agents", "--exclude-dir=.git",
-                       "--exclude-dir=__pycache__", "--exclude-dir=node_modules",
-                       "--exclude-dir=vendor", "--exclude-dir=.venv",
-                       "--exclude-dir=venv", "--exclude-dir=dist",
-                       "--exclude-dir=build",
-                       marker, search_dir],
-                      cwd=cfg.root_dir, check=False)
-    if result.stdout.strip():
-        conflicted = result.stdout.strip().split("\n")
-        log.error(f"⚠ Merge conflict маркеры в: {conflicted}")
-        log.error("  Разреши конфликты вручную перед запуском")
-        return False
+    # Проверяем merge conflict маркеры через git
+    result = run_cmd(["git", "diff", "--check"], cwd=cfg.root_dir, check=False)
+    if result.returncode != 0 and result.stdout.strip():
+        conflict_files = set()
+        for line in result.stdout.strip().split("\n"):
+            if ":conflict" in line.lower() or "leftover" in line.lower():
+                conflict_files.add(line.split(":")[0])
+        if conflict_files:
+            # Auto-resolve TASKS.md
+            if "TASKS.md" in conflict_files:
+                import re as _re
+                content = cfg.tasks_file.read_text(encoding="utf-8")
+                orig = content
+                while "<" + "<<<<<<" + " " in content:
+                    content = _re.sub(r"<{7} [^\n]*\n(.*?)={7}\n.*?>{7} [^\n]*\n",
+                                      r"\1", content, count=1, flags=_re.DOTALL)
+                if content != orig:
+                    cfg.tasks_file.write_text(content, encoding="utf-8")
+                    log.warning("⚠ Auto-resolved conflict markers in TASKS.md")
+                conflict_files.discard("TASKS.md")
+            if conflict_files:
+                log.error(f"⚠ Merge conflict маркеры в: {list(conflict_files)}")
+                log.error("  Разреши конфликты вручную перед запуском")
+                return False
+
+    # LiteLLM proxy check: if any agent uses localhost proxy, ensure it's running
+    _ensure_litellm_proxy()
 
     if not cfg.build_commands:
         return True
@@ -760,12 +1237,28 @@ def preflight_check() -> bool:
     # Пробуем первую build-команду для проверки
     for cmd in cfg.build_commands:
         result = run_cmd(cmd, cwd=cfg.root_dir, check=False)
+        _log_test_results(result, None, " ".join(cmd))
         if result.returncode != 0:
-            stderr = result.stderr or ""
-            if "error" in stderr.lower():
-                log.error(f"⚠ {cfg.dev_branch} не собирается! {' '.join(cmd)} failed")
-                log.error(stderr[-500:])
-                return False
+            stderr = (result.stderr or "") + (result.stdout or "")
+            log.error(f"⚠ {cfg.dev_branch} не собирается! {' '.join(cmd)} failed")
+            log.error(stderr[-500:])
+            # TASK-138: Создаём задачу на починку если сборка сломана
+            _create_checkpoint_task_with_log(stderr)
+            return False
+
+    # TASK-138: Проверка тестов перед запуском
+    if cfg.check_command:
+        log.info(f"🔍 Предварительная проверка тестов ({cfg.check_command})...")
+        check_result = run_cmd(
+            ["bash", "-c", cfg.check_command], cwd=cfg.root_dir,
+            timeout=cfg.build_timeout * 2, check=False)
+        _log_test_results(check_result, None, cfg.check_command)
+        if check_result.returncode != 0:
+            stderr = (check_result.stderr or check_result.stdout or "")[-1000:]
+            log.error("❌ Предварительная проверка тестов провалена! Создаю задачу на исправление.")
+            _create_checkpoint_task_with_log(stderr)
+            return False
+        log.info("✅ Предварительная проверка тестов пройдена")
 
     return True
 
@@ -932,26 +1425,17 @@ def _print_next_steps(tasks: list[Task], max_tasks: int, auto: bool):
                 print(f"    {BOLD}{t.id}{R}: {t.name} {DIM}(ждёт: {', '.join(waiting)}){R}")
 
     if not has_action:
-        all_done = tasks and all(t.status == "done" for t in tasks)
-        if all_done:
-            print("\n  ✅ Все задачи выполнены!")
-            check_cmd = cfg.check_command or "make check"
-            print(f"\n  🔍 Запускаю {check_cmd}...")
-            check_result = run_cmd(
-                ["bash", "-c", check_cmd], cwd=cfg.root_dir, timeout=300, check=False)
-            if check_result.returncode == 0:
-                print(f"  ✅ check PASSED — этап закрыт")
-            else:
-                stderr = (check_result.stderr or check_result.stdout or "")[-500:]
-                print(f"  ❌ check FAILED — создаю задачу на фикс...")
-                create_checkpoint_task(stderr)
-        else:
-            _print_flow_guide(tasks)
+        _print_flow_guide(tasks)
 
     print(f"{'═' * 60}\n")
 
 
 # --- Главный пайплайн ---
+
+def _filter_by_team(tasks: list, team: str) -> list:
+    """Filter tasks by discussion name (substring match)."""
+    return [t for t in tasks if team in (t.discussion or "")]
+
 
 def run_pipeline(
     specific_task: Optional[str] = None,
@@ -959,6 +1443,7 @@ def run_pipeline(
     max_tasks: int | None = None,
     retry: bool = False,
     auto: bool = False,
+    team: Optional[str] = None,
 ):
     """Основной цикл оркестратора."""
     if max_tasks is None:
@@ -969,8 +1454,29 @@ def run_pipeline(
 
     if not dry_run:
         _start_heartbeat()
+        atexit.register(_stop_heartbeat)
 
-    tasks = parse_tasks()
+    def _parse():
+        """Parse tasks with optional team filter."""
+        t = parse_tasks()
+        return _filter_by_team(t, team) if team else t
+
+    tasks = _parse()
+    if team:
+        log.info(f"Фильтр --team={team}: {len(tasks)} задач")
+        # Feature branch: each team works on its own branch, not develop
+        feature_branch = f"feature/{team}"
+        original_dev_branch = cfg.dev_branch
+        # Create feature branch from develop if it doesn't exist
+        check = run_cmd(["git", "rev-parse", "--verify", feature_branch],
+                        cwd=cfg.root_dir, check=False)
+        if check.returncode != 0:
+            run_cmd(["git", "branch", feature_branch, cfg.dev_branch], cwd=cfg.root_dir)
+            log.info(f"Создана feature branch: {feature_branch} от {cfg.dev_branch}")
+        else:
+            log.info(f"Feature branch: {feature_branch}")
+        # Redirect all worktree/merge operations to feature branch
+        cfg.dev_branch = feature_branch
 
     # Автозакрытие чекпоинт-задач если check_command проходит
     if cfg.check_command:
@@ -978,13 +1484,14 @@ def run_pipeline(
             if t.status != "done" and "make check" in (t.acceptance or "") and "чекпоинт" in t.name.lower():
                 check_result = run_cmd(["bash", "-c", cfg.check_command],
                                        cwd=cfg.root_dir, timeout=cfg.build_timeout, check=False)
+                _log_test_results(check_result, t, cfg.check_command)
                 if check_result.returncode == 0:
                     log.info(f"[{t.id}] ✅ check_command проходит — чекпоинт автозакрыт")
                     update_task_status(t.id, "done", agent="auto-check")
                     run_hook(cfg.hook_on_complete, t.id, "done", "auto-check")
                 break  # проверяем один раз
 
-    tasks = parse_tasks()
+    tasks = _parse()
     done_count = sum(1 for t in tasks if t.status in ("done", "skip"))
     open_count = len(tasks) - done_count
     log.info(f"Задачи: {open_count} активных, {done_count} завершённых")
@@ -1006,10 +1513,25 @@ def run_pipeline(
                 _cleanup_task_branches(t)
                 update_task_status(t.id, "open")
                 t.status = "open"
-        tasks = parse_tasks()
+        tasks = _parse()
         ready = find_ready_tasks(tasks)
     else:
         done_ids = {t.id for t in tasks if t.status == "done"}
+        # Auto-reset stale in_progress tasks (no log activity > 30 min)
+        for t in tasks:
+            if t.status.startswith("in_progress"):
+                task_logs = list(cfg.log_dir.glob(f"{t.id.lower()}-*-attempt*.log"))
+                stale = False
+                if task_logs:
+                    newest = max(f.stat().st_mtime for f in task_logs)
+                    stale = (time.time() - newest) > 1800  # 30 min
+                else:
+                    stale = True  # no logs = no agent ever ran
+                if stale:
+                    log.warning(f"[{t.id}] ⚠ in_progress > 30мин без активности → open")
+                    update_task_status(t.id, "open")
+                    t.status = "open"
+        tasks = _parse()
         stuck_statuses = ("blocked", "in_progress")
         stuck = [t for t in tasks
                  if any(t.status.startswith(s) for s in stuck_statuses)
@@ -1031,7 +1553,7 @@ def run_pipeline(
                     _cleanup_task_branches(t)
                     update_task_status(t.id, "open")
                     t.status = "open"
-            tasks = parse_tasks()
+            tasks = _parse()
 
         ready = find_ready_tasks(tasks)
         if not ready:
@@ -1044,7 +1566,7 @@ def run_pipeline(
                 for t in retryable:
                     update_task_status(t.id, "open")
                     t.status = "open"
-                tasks = parse_tasks()
+                tasks = _parse()
                 ready = find_ready_tasks(tasks)
 
     if not ready:
@@ -1075,13 +1597,13 @@ def run_pipeline(
                     discuss_reply(topic, agent_name)
             print(f"\n{'═' * 60}")
             print(f"  {t.id}: {t.name}")
-            print(f"  Обсуди подход и утверди через /ok")
+            print("  Обсуди подход и утверди через /ok")
             print(f"{'═' * 60}\n")
             discuss_chat(topic)
 
         # После дискуссий — выходим. Пользователь запустит run отдельно.
         log.info("Дискуссии завершены. Запусти ./fr run для выполнения задач.")
-        tasks = parse_tasks()
+        tasks = _parse()
         _print_next_steps(tasks, max_tasks, auto)
         log.info("ForgeRace завершён")
         os._exit(0)
@@ -1116,7 +1638,7 @@ def run_pipeline(
                 final_ready.append(t)
 
     if decomposed:
-        tasks = parse_tasks()
+        tasks = _parse()
         new_ready = find_ready_tasks(tasks)
         new_approved = [t for t in new_ready if is_task_approved(t)]
         existing_ids = {t.id for t in final_ready}
@@ -1142,7 +1664,7 @@ def run_pipeline(
 
     if not ready:
         log.info("Все задачи уже выполнены (pre-check)")
-        tasks = parse_tasks()
+        tasks = _parse()
         _print_next_steps(tasks, max_tasks, auto)
         return
 
@@ -1157,23 +1679,86 @@ def run_pipeline(
         return
 
     is_competitive = cfg.mode == "competitive"
-    if is_competitive:
-        total_procs = len(batch) * len(agent_names)
-        log.info(f"Режим: конкурентный — {len(batch)} задач × {len(agent_names)} агентов = {total_procs} процессов")
-    else:
-        total_procs = len(batch)
-        log.info(f"Режим: распределённый — {len(batch)} задач, агенты: {agent_names}")
+    # Для распределения простых задач выбираем надежных агентов
+    reliable_agents = [n for n in agent_names if "goose" not in n]
+    if not reliable_agents:
+        reliable_agents = agent_names  # fallback
+
+    global _rr_agent_index
+
+    # Считаем total_procs для max_workers (пессимистично)
+    total_procs = 0
+    for task in batch:
+        complexity = get_task_complexity(task.id)
+        has_assigned = task.agent and task.agent not in ("—", "")
+        # Конкурентный если: глобально competitive И (задача сложная ИЛИ агент назначен)
+        # НО: если всего одна задача в батче, тоже competitive (согласно CLAUDE.md)
+        if (is_competitive or len(batch) == 1) and (complexity > 3 or has_assigned):
+            total_procs += len(agent_names)
+        else:
+            total_procs += 1
+
+    log.info(f"Режим: {'конкурентный' if is_competitive else 'распределённый'} — {len(batch)} задач, {len(agent_names)} агентов")
 
     with ThreadPoolExecutor(max_workers=max(total_procs, 1)) as pool:
         futures = {}
         for idx, task in enumerate(batch, 1):
-            if is_competitive:
-                log.info(f"  {task.id} → конкурентный ({' vs '.join(agent_names)})")
-                future = pool.submit(execute_task_competitive, task, idx)
-            else:
-                agent = agent_names[(idx - 1) % len(agent_names)]
-                log.info(f"  {task.id} → {agent}")
+            complexity = get_task_complexity(task.id)
+            has_assigned = task.agent and task.agent not in ("—", "")
+
+            # Решаем: использовать одного агента или конкурентный режим
+            use_single = False
+            reason = ""
+            
+            if not is_competitive:
+                use_single = True
+                reason = "режим: distributed"
+            elif len(batch) > 1 and complexity <= 3 and not has_assigned:
+                use_single = True
+                reason = "round-robin (простая задача)"
+            
+            if use_single:
+                if has_assigned:
+                    # Пытаемся взять первого назначенного CLI-агента
+                    raw = [a.strip().lstrip("@").split("+")[0]
+                           for a in task.agent.replace(",", " ").split()
+                           if a.strip() not in ("—", "")]
+                    assigned = [a for a in raw if a in cfg.cli_agent_names and not is_agent_disabled(a)]
+                    if assigned:
+                        agent = assigned[0]
+                        reason = "явное указание"
+                    else:
+                        agent = reliable_agents[_rr_agent_index % len(reliable_agents)]
+                        _rr_agent_index += 1
+                        reason = "round-robin (назначенный недоступен)"
+                else:
+                    agent = reliable_agents[_rr_agent_index % len(reliable_agents)]
+                    _rr_agent_index += 1
+                    if not reason:
+                        reason = "round-robin"
+                
+                log.info(f"  {task.id} (сложность {complexity}) → {agent} [причина: {reason}]")
                 future = pool.submit(execute_task_single, task, idx, agent)
+            else:
+                display_agents = " vs ".join(agent_names)
+                if has_assigned:
+                    reason = "явное указание"
+                    # Пытаемся распарсить для лога
+                    raw = [a.strip().lstrip("@").split("+")[0]
+                           for a in task.agent.replace(",", " ").split()
+                           if a.strip() not in ("—", "")]
+                    assigned = [a for a in raw if a in cfg.cli_agent_names and not is_agent_disabled(a)]
+                    if assigned:
+                        display_agents = " vs ".join(assigned)
+                elif complexity > 3:
+                    reason = "порог сложности"
+                elif len(batch) == 1:
+                    reason = "одна задача в батче"
+                else:
+                    reason = "режим: competitive"
+                
+                log.info(f"  {task.id} (сложность {complexity}) → {display_agents} [причина: {reason}]")
+                future = pool.submit(execute_task_competitive, task, idx)
             futures[future] = task
 
         for future in as_completed(futures):
@@ -1187,17 +1772,37 @@ def run_pipeline(
                 update_task_status(task.id, "blocked")
                 run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
 
+    # Проверка тестов после завершения пачки задач (TASK-138)
+    if cfg.check_command:
+        log.info(f"🔍 Запускаю проверку тестов ({cfg.check_command})...")
+        check_result = run_cmd(
+            ["bash", "-c", cfg.check_command], cwd=cfg.root_dir,
+            timeout=cfg.build_timeout * 2, check=False)
+        _log_test_results(check_result, None, cfg.check_command)
+        if check_result.returncode != 0:
+            stderr = (check_result.stderr or check_result.stdout or "")[-1000:]
+            log.error("❌ Проверка тестов провалена! Создаю задачу на исправление.")
+            _create_checkpoint_task_with_log(stderr)
+        else:
+            log.info("✅ Проверка тестов пройдена")
+
     if cfg.review_run_log:
         review_run_log()
 
-    # Коммитим статусы
-    status_diff = run_cmd(["git", "diff", "--stat", "TASKS.md"], cwd=cfg.root_dir, check=False)
-    if status_diff.stdout.strip():
-        run_cmd(["git", "add", "TASKS.md"], cwd=cfg.root_dir, check=False)
-        run_cmd(["git", "commit", "-m", "update: статусы задач после прогона"], cwd=cfg.root_dir, check=False)
-        # git push убран — пуш делает пользователь, не оркестратор
+    # Коммитим статусы (только если НЕ на feature branch — иначе засирает develop)
+    if not team:
+        status_diff = run_cmd(["git", "diff", "--stat", "TASKS.md"], cwd=cfg.root_dir, check=False)
+        if status_diff.stdout.strip():
+            run_cmd(["git", "add", "TASKS.md"], cwd=cfg.root_dir, check=False)
+            run_cmd(["git", "commit", "-m", "update: статусы задач после прогона"], cwd=cfg.root_dir, check=False)
 
-    tasks = parse_tasks()
+    # Restore original dev_branch if we were on a feature branch
+    if team:
+        cfg.dev_branch = original_dev_branch
+        log.info(f"Feature branch {feature_branch} готова. Мерж в {original_dev_branch}:")
+        log.info(f"  git merge {feature_branch}")
+
+    tasks = _parse()
     _print_next_steps(tasks, max_tasks, auto)
 
     log.info("ForgeRace завершён")

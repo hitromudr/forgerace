@@ -5,6 +5,7 @@ import os
 import select
 import subprocess
 import time
+import threading
 
 # Suppress node.js deprecation warnings (gemini CLI punycode spam)
 os.environ.setdefault("NODE_OPTIONS", "--no-deprecation")
@@ -12,6 +13,7 @@ os.environ.setdefault("NODE_OPTIONS", "--no-deprecation")
 # Ответ: Замечание ошибочно, импорт присутствует.
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from .config import cfg
 # Ревьюер: Нет импорта `TokenUsage` и `parse_usage_event` из `.cost`.
@@ -37,7 +39,7 @@ def _log_claude_event(tag: str, event: dict, usage_acc: TokenUsage | None = None
             tool = block.get("name", "?")
             inp = block.get("input", {})
             # Нормализация имён (Qwen: read_file, write_file, run_shell_command, grep_search)
-            tool_lower = tool.lower()
+            tool.lower()
             if tool in ("Read", "read_file"):
                 path = inp.get("file_path", inp.get("absolute_path", "?")).rsplit("/", 1)[-1]
                 log.info(f"[{tag}] 📖 Read {path}")
@@ -181,6 +183,72 @@ def _log_codex_event(tag: str, event: dict, usage_acc: TokenUsage | None = None)
         log.info(f"[{tag}] 📊 turn done, {in_tok // 1000}k in/{out_tok // 1000}k out")
 
 
+def _log_goose_event(tag: str, event: dict, usage_acc: TokenUsage | None = None):
+    """Логирует событие из stream-json вывода Goose CLI.
+
+    Goose format:
+      {"type":"message","message":{"content":[{"type":"text","text":"..."}]}}
+      {"type":"complete","total_tokens":N}
+    """
+    etype = event.get("type", "")
+
+    if etype == "message":
+        msg = event.get("message", {})
+        for block in msg.get("content", []):
+            btype = block.get("type", "")
+            if btype == "tool_use":
+                tool = block.get("name", "?")
+                inp = block.get("input", {})
+                if "read" in tool.lower():
+                    path = inp.get("path", inp.get("file_path", "?")).rsplit("/", 1)[-1]
+                    log.info(f"[{tag}] 📖 Read {path}")
+                elif any(w in tool.lower() for w in ("write", "edit", "replace")):
+                    path = inp.get("path", inp.get("file_path", "?")).rsplit("/", 1)[-1]
+                    log.info(f"[{tag}] ✏️  {tool} {path}")
+                elif any(w in tool.lower() for w in ("bash", "shell", "command", "run")):
+                    cmd_str = str(inp.get("command", "?"))[:120]
+                    log.info(f"[{tag}] 💻 Bash: {cmd_str}")
+                else:
+                    log.info(f"[{tag}] 🔧 {tool}")
+            elif btype == "text":
+                text = block.get("text", "")
+                if text and len(text) < 200:
+                    log.info(f"[{tag}] 💬 {text[:120]}")
+
+    elif etype == "complete":
+        total = event.get("total_tokens", 0)
+        if usage_acc and total:
+            # Goose reports only total_tokens; estimate split 70/30
+            usage_acc.accumulate(TokenUsage(
+                input_tokens=int(total * 0.7),
+                output_tokens=int(total * 0.3),
+            ))
+        log.info(f"[{tag}] 📊 done, {total} total tokens")
+
+
+def _goose_activity_check(event: dict) -> bool:
+    """Goose activity: message events count as activity."""
+    return event.get("type") in ("message", "complete")
+
+
+def _goose_extract_result(stdout_lines: list[str]) -> str:
+    """Extract final text from goose stream-json output."""
+    for raw in reversed(stdout_lines):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            ev = json.loads(raw)
+            if ev.get("type") == "message":
+                msg = ev.get("message", {})
+                for block in msg.get("content", []):
+                    if block.get("type") == "text" and block.get("text", ""):
+                        return block["text"]
+        except json.JSONDecodeError:
+            continue
+    return ""
+
+
 def _codex_activity_check(event: dict) -> bool:
     etype = event.get("type", "")
     if etype in ("item.started", "item.completed"):
@@ -241,6 +309,13 @@ def _event_has_productive_action(event: dict) -> bool:
         tool = event.get("tool", event.get("tool_name", "")).lower()
         if any(w in tool for w in ("write", "edit", "replace", "bash", "run", "command", "shell")):
             return True
+    # Goose: toolRequest inside message content
+    if etype == "message":
+        for block in event.get("message", {}).get("content", []):
+            if block.get("type") == "toolRequest":
+                tool_name = (block.get("toolCall", {}).get("value", {}).get("name", "")).lower()
+                if any(w in tool_name for w in ("write", "edit", "text_editor", "shell", "bash", "command")):
+                    return True
     return False
 
 
@@ -277,9 +352,15 @@ def _run_agent_streaming(
     activity_check_fn,
     extract_result_fn,
     cancel_event: "threading.Event | None" = None,
+    env: dict[str, str] | None = None,
+    prompt_stdin: str = "",
+    on_usage_update: "Callable[[TokenUsage], None] | None" = None,
 ) -> AgentProcessResult:
-    """Общий цикл запуска агента со стримингом."""
-    import threading
+    """Общий цикл запуска агента со стримингом.
+
+    Args:
+        on_usage_update: Optional callback, called every time TokenUsage is updated.
+    """
     stdout_lines = []
     deadline = time.time() + cfg.agent_timeout
     last_activity = time.time()
@@ -294,11 +375,21 @@ def _run_agent_streaming(
     # Ревьюер: В `_run_agent_streaming` нет создания `usage_acc = TokenUsage()`.
     # Ответ: Замечание ошибочно, переменная создаётся:
     usage_acc = TokenUsage()
+    proc_env = {**os.environ, **(env or {})}
+    proc_env["PYTHONUNBUFFERED"] = "1"
+    proc_env["FORCE_COLOR"] = "1"
     try:
         proc = subprocess.Popen(
             cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL, text=True, bufsize=1,
+            stdin=subprocess.PIPE if prompt_stdin else subprocess.DEVNULL,
+            text=False, bufsize=0, env=proc_env,
         )
+        if prompt_stdin:
+            try:
+                proc.stdin.write(prompt_stdin.encode("utf-8"))
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass
         while True:
             remaining = deadline - time.time()
             if remaining <= 0:
@@ -334,9 +425,10 @@ def _run_agent_streaming(
 
             ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 5.0))
             if ready:
-                line = proc.stdout.readline()
-                if not line:
+                line_bytes = proc.stdout.readline()
+                if not line_bytes:
                     break
+                line = line_bytes.decode("utf-8", errors="replace")
                 stdout_lines.append(line)
                 stripped = line.strip()
                 if stripped:
@@ -353,6 +445,9 @@ def _run_agent_streaming(
                         # Ревьюер: В `_run_agent_streaming` нет передачи `usage_acc` в `log_event_fn`.
                         # Ответ: Замечание ошибочно, `usage_acc` передаётся:
                         log_event_fn(tag, event, usage_acc=usage_acc)
+                        # Вызов колбэка при обновлении TokenUsage
+                        if on_usage_update is not None:
+                            on_usage_update(usage_acc)
                     except json.JSONDecodeError:
                         pass
 
@@ -362,12 +457,13 @@ def _run_agent_streaming(
                         log.error(f"[{tag}] ⏰ {tool_calls_since_edit} tool_calls без Edit/Write/Bash — зацикливание, убиваю")
                         return AgentProcessResult(returncode=1, stdout="", stderr="NO_EDIT_ABORT", usage=usage_acc)
             elif proc.poll() is not None:
-                for line in proc.stdout:
-                    stdout_lines.append(line)
+                for line_bytes in proc.stdout:
+                    stdout_lines.append(line_bytes.decode("utf-8", errors="replace"))
                 break
 
         proc.wait(timeout=10)
-        stderr = proc.stderr.read() if proc.stderr else ""
+        stderr_bytes = proc.stderr.read() if proc.stderr else b""
+        stderr = stderr_bytes.decode("utf-8", errors="replace")
         result_text = extract_result_fn(stdout_lines)
 
         return AgentProcessResult(
@@ -426,6 +522,26 @@ def _gemini_extract_result(stdout_lines: list[str]) -> str:
     return ""
 
 
+_AIDER_STDERR_NOISE = (
+    "warning: it's best to only add files",
+    "https://aider.chat/docs/troubleshooting/edit-errors.html",
+    "aider/docs/troubleshooting",
+    "warning: no model settings found",
+)
+
+
+def _filter_aider_stderr(stderr: str) -> str:
+    """Remove known aider noise lines from stderr."""
+    if not stderr:
+        return stderr
+    lines = stderr.splitlines()
+    filtered = [
+        line for line in lines
+        if not any(noise in line.lower() for noise in _AIDER_STDERR_NOISE)
+    ]
+    return "\n".join(filtered).strip()
+
+
 def _run_agent_text(
     cmd: list[str],
     workdir: Path,
@@ -439,6 +555,8 @@ def _run_agent_text(
     Tracks progress via git diff snapshots, logs raw output lines."""
     usage_acc = TokenUsage()
     proc_env = {**os.environ, **(env or {})}
+    proc_env["PYTHONUNBUFFERED"] = "1"
+    proc_env["FORCE_COLOR"] = "1"
     deadline = time.time() + cfg.agent_timeout
     last_diff_snapshot = _get_diff_snapshot(workdir)
     last_diff_change = time.time()
@@ -449,11 +567,11 @@ def _run_agent_text(
         proc = subprocess.Popen(
             cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE if prompt_stdin else subprocess.DEVNULL,
-            text=True, bufsize=1, env=proc_env,
+            text=False, bufsize=0, env=proc_env,
         )
         if prompt_stdin:
             try:
-                proc.stdin.write(prompt_stdin)
+                proc.stdin.write(prompt_stdin.encode("utf-8"))
                 proc.stdin.close()
             except BrokenPipeError:
                 pass
@@ -487,9 +605,10 @@ def _run_agent_text(
 
             ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 5.0))
             if ready:
-                line = proc.stdout.readline()
-                if not line:
+                line_bytes = proc.stdout.readline()
+                if not line_bytes:
                     break
+                line = line_bytes.decode("utf-8", errors="replace")
                 stdout_lines.append(line)
                 stripped = line.strip()
                 if stripped:
@@ -497,12 +616,14 @@ def _run_agent_text(
                     if any(kw in stripped.lower() for kw in ("applied edit", "wrote", "created", "error", "warning")):
                         log.info(f"[{tag}] {stripped[:120]}")
             elif proc.poll() is not None:
-                for line in proc.stdout:
-                    stdout_lines.append(line)
+                for line_bytes in proc.stdout:
+                    stdout_lines.append(line_bytes.decode("utf-8", errors="replace"))
                 break
 
         proc.wait(timeout=10)
-        stderr = proc.stderr.read() if proc.stderr else ""
+        stderr_bytes = proc.stderr.read() if proc.stderr else b""
+        stderr = stderr_bytes.decode("utf-8", errors="replace")
+        stderr = _filter_aider_stderr(stderr)
         return AgentProcessResult(
             returncode=proc.returncode or 0,
             stdout="".join(stdout_lines),
@@ -518,13 +639,29 @@ def _run_agent_text(
         return AgentProcessResult(returncode=1, stdout="", stderr=str(e), usage=usage_acc)
 
 
+_PROTECTED_FILES = {"TASKS.md", "CLAUDE.md", "forgerace.toml", ".gitignore"}
+
+
+def _extract_task_files(task: Task) -> list[str]:
+    """Extract file paths from task.files_new and task.files_modify fields.
+    Excludes orchestrator metadata files that agents must not modify."""
+    files = []
+    for raw in (task.files_new, task.files_modify):
+        if not raw or raw.strip() in ("", "—", "-"):
+            continue
+        for part in raw.replace(",", " ").split():
+            part = part.strip().strip("`")
+            if part and part not in ("—", "-") and part not in _PROTECTED_FILES:
+                files.append(part)
+    return files
+
+
 def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
                       cancel_event: "threading.Event | None" = None) -> AgentProcessResult:
     """Запускает агента нужного типа. cancel_event — для отмены при race-win."""
-    import threading
     acfg = cfg.agents.get(agent_name)
     if acfg is None:
-        raise ValueError(f"Неизвестный агент: {agent_name}. Доступны: {cfg.agent_names}")
+        raise ValueError(f"Неизвестный агент: {agent_name}. Доступны: {cfg.all_agent_names}")
 
     final_cmd = [acfg.command]
     for arg in acfg.args:
@@ -541,6 +678,11 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
 
     # Text-mode agents (aider, etc.) — no stream-json
     if acfg.protocol == "text":
+        # Aider: pass --file args so it only sees task-relevant files
+        if acfg.command == "aider":
+            task_files = _extract_task_files(task)
+            for fpath in task_files:
+                final_cmd.extend(["--file", fpath])
         return _run_agent_text(
             final_cmd, workdir, tag, acfg.inactivity_timeout,
             cancel_event=cancel_event,
@@ -565,6 +707,14 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
             final_cmd, workdir, tag, acfg.inactivity_timeout,
             _log_codex_event, _codex_activity_check, _codex_extract_result,
             cancel_event=cancel_event,
+        )
+    elif acfg.command == "goose":
+        return _run_agent_streaming(
+            final_cmd, workdir, tag, acfg.inactivity_timeout,
+            _log_goose_event, _goose_activity_check, _goose_extract_result,
+            cancel_event=cancel_event,
+            env=acfg.env if acfg.env else None,
+            prompt_stdin=prompt if acfg.prompt_stdin else "",
         )
     else:
         # Qwen и другие CLI с Claude-совместимым stream-json
@@ -619,7 +769,7 @@ def check_agent_quota(name: str) -> bool:
 def preflight_check_agents() -> list[str]:
     """Check all enabled agents for quota before task execution. Returns available agent names."""
     available = []
-    for name in cfg.agent_names:
+    for name in cfg.all_agent_names:
         log.info(f"  🔍 Проверка квоты: {name}...")
         if check_agent_quota(name):
             available.append(name)
@@ -688,15 +838,32 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
         cmd = [acfg.command, "-p", "", "--output-format", "text"]
     elif reviewer_type == "codex":
         cmd = [acfg.command, "exec", "--full-auto"]
+    elif acfg.command == "goose":
+        # Goose review: text output, no extensions (--no-profile), stdin prompt
+        goose_model = "llama-70b"
+        goose_provider = "openai"
+        for j, a in enumerate(acfg.args):
+            if a == "--model" and j + 1 < len(acfg.args):
+                goose_model = acfg.args[j + 1]
+            elif a == "--provider" and j + 1 < len(acfg.args):
+                goose_provider = acfg.args[j + 1]
+        cmd = [acfg.command, "run", "-i", "/dev/stdin", "--output-format", "text",
+               "--provider", goose_provider, "--model", goose_model,
+               "--no-profile"]
     else:
         cmd = [acfg.command]
         for arg in acfg.review_args:
             if arg != "{prompt}":
                 cmd.append(arg)
+    # Build env (for goose, aider with proxy)
+    proc_env = {**os.environ, **(acfg.env if acfg.env else {})}
+    proc_env["PYTHONUNBUFFERED"] = "1"
+    proc_env["FORCE_COLOR"] = "1"
     timeout = acfg.inactivity_timeout or 300
     result = subprocess.run(
         cmd, cwd=cfg.root_dir, input=prompt,
         capture_output=True, text=True, timeout=timeout,
+        env=proc_env,
     )
     if result.returncode != 0:
         log.warning("run_reviewer(%s) exit code %d: %s",
@@ -750,9 +917,13 @@ def run_text_agent(prompt: str, timeout: int = 300, tag: str = "",
 
             # CLI agents
             cmd = [acfg.command] + [a for a in acfg.review_args if a != "{prompt}"]
+            proc_env = {**os.environ}
+            proc_env["PYTHONUNBUFFERED"] = "1"
+            proc_env["FORCE_COLOR"] = "1"
             result = subprocess.run(
                 cmd, cwd=cfg.root_dir, input=prompt,
                 capture_output=True, text=True, timeout=timeout,
+                env=proc_env,
             )
             # Detect quota errors
             stderr_lower = (result.stderr or "").lower()
@@ -785,6 +956,9 @@ def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
 
     prompt = f"""Ты автономный агент разработки {cfg.project_context}.
 {project_section}
+ЗАПРЕЩЕНО РЕДАКТИРОВАТЬ: TASKS.md, CLAUDE.md, forgerace.toml, .gitignore — это файлы оркестратора.
+Правь ТОЛЬКО файлы указанные в секции "Файлы".
+
 ## Твоя задача: {task.id} — {task.name}
 
 {task.description}
@@ -840,6 +1014,16 @@ def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
 Исправь ошибки и попробуй снова.
 """
 
+    # Интеграция pre-flight анализа
+    if cfg.preflight:
+        from .decompose import run_preflight
+        preflight_result = run_preflight(task)
+        if preflight_result:
+            prompt += f"""
+## Pre-flight анализ
+{preflight_result}
+"""
+
     return prompt
 
 
@@ -857,3 +1041,50 @@ class AgentResult:
     # Ревьюер: В `AgentResult` нет поля `usage: TokenUsage`.
     # Ответ: Замечание ошибочно, поле `usage` присутствует.
     usage: TokenUsage = field(default_factory=TokenUsage)
+    system_frames: dict[str, str] = field(default_factory=dict)
+
+# --- Post-mortem ---
+
+POST_MORTEM_SYSTEM_PROMPT = """Ты — экспертный инженер по обеспечению качества и системный аналитик.
+Твоя задача — провести Post-mortem анализ цепочки неудачных попыток решения задачи AI-агентом.
+
+На входе ты получишь логи: замечания ревьюеров, ошибки компиляции, сообщения об ошибках тестов.
+Проанализируй их и выдай структурированный отчет:
+
+1. **Root Cause**: Основная причина неудачи (например, "Агент зациклился на неверном подходе к API X", "Несоответствие типов в контракте Y").
+2. **Verdict**: Краткий вердикт (Stuck / Max Retries reached / Terminal failure).
+3. **Recommendation**: Что нужно изменить в описании задачи или коде, чтобы следующая попытка была успешной.
+
+Будь краток, технически точен и конструктивен.
+"""
+
+def build_post_mortem_prompt(failure_logs: list[str]) -> str:
+    """
+    Формирует промпт для post-mortem анализа на основе накопленных логов.
+    Обеспечивает безопасную экранизацию и ограничение длины (16 KB).
+    """
+    if not failure_logs:
+        return f"{POST_MORTEM_SYSTEM_PROMPT}\n\n"
+
+    # Безопасная экранизация: переводим в строки, убираем лишние пробелы и
+    # заменяем тройные обратные кавычки на одинарные, чтобы не разрывать блок кода.
+    processed = [str(log).strip().replace("```", "'''") for log in failure_logs]
+    logs_text = "\n".join(filter(None, processed))
+
+    # Лимит в 16 KB (16384 символа) на весь промпт.
+    MAX_PROMPT_LEN = 16384
+    header = f"{POST_MORTEM_SYSTEM_PROMPT}\n\n```\n"
+    footer = "\n```"
+
+    if len(header) + len(logs_text) + len(footer) > MAX_PROMPT_LEN:
+        prefix = "...(truncated)...\n"
+        # Вычисляем доступное место для текста логов, учитывая префикс
+        available = MAX_PROMPT_LEN - len(header) - len(footer) - len(prefix)
+        if available >= 0:
+            logs_text = prefix + (logs_text[-available:] if available > 0 else "")
+        else:
+            # Если места не хватает даже на префикс, берем остаток без него
+            available = max(0, MAX_PROMPT_LEN - len(header) - len(footer))
+            logs_text = logs_text[-available:] if available > 0 else ""
+
+    return f"{header}{logs_text}{footer}"

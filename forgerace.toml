@@ -41,10 +41,10 @@ enabled = true
 protocol = "openai"
 base_url = "https://integrate.api.nvidia.com/v1"
 api_key = "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"
-model = "qwen/qwen3.5-122b-a10b"
+model = "qwen/qwen2.5-coder-32b-instruct"
 default_frame = "theory"
 inactivity_timeout = 180
-enabled = true
+enabled = true  # switched from qwen3.5-122b (timeout) to coder-32b
 
 [agents.devstral]
 protocol = "openai"
@@ -65,11 +65,37 @@ inactivity_timeout = 180
 enabled = true
 
 # Aider-based coding agents (nvidia free API)
+# Aider agents — через LiteLLM proxy (localhost:4000)
+# aider-llama disabled: llama-70b зацикливается при кодинге
 [agents.aider-llama]
 command = "aider"
-args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
-        "--openai-api-key", "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",
-        "--model", "openai/meta/llama-3.3-70b-instruct",
+args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
+        "--openai-api-key", "fr-local-dev",
+        "--model", "openai/llama-70b",
+        "--edit-format", "whole",
+        "--message-file", "/dev/stdin",
+        "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
+        "--no-show-model-warnings", "--no-gitignore",
+        "--no-browser", "--no-analytics", "--no-check-update"]
+protocol = "text"
+prompt_stdin = true
+inactivity_timeout = 300
+enabled = false
+[agents.aider-llama.env]
+BROWSER = "true"
+no_proxy = "127.0.0.1,localhost"
+NO_PROXY = "127.0.0.1,localhost"
+HTTP_PROXY = ""
+HTTPS_PROXY = ""
+ALL_PROXY = ""
+
+# aider-qwen: qwen3.5-122b через LiteLLM — замена нерабочему llama
+# aider-qwen disabled: qwen format not parsed by aider
+[agents.aider-qwen]
+command = "aider"
+args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
+        "--openai-api-key", "fr-local-dev",
+        "--model", "openai/qwen/qwen2.5-coder-32b-instruct",
         "--edit-format", "diff",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
@@ -79,6 +105,13 @@ protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
 enabled = true
+[agents.aider-qwen.env]
+BROWSER = "true"
+no_proxy = "127.0.0.1,localhost"
+NO_PROXY = "127.0.0.1,localhost"
+HTTP_PROXY = ""
+HTTPS_PROXY = ""
+ALL_PROXY = ""
 
 [agents.aider-devstral]
 command = "aider"
@@ -94,6 +127,73 @@ protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
 enabled = true
+[agents.aider-devstral.env]
+BROWSER = "true"
+no_proxy = "127.0.0.1,localhost"
+NO_PROXY = "127.0.0.1,localhost"
+HTTP_PROXY = ""
+HTTPS_PROXY = ""
+ALL_PROXY = ""
+
+
+# aider-gptoss: gpt-oss-120b — works for coding and decomposition
+[agents.aider-gptoss]
+command = "aider"
+args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
+        "--openai-api-key", "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",
+        "--model", "openai/openai/gpt-oss-120b",
+        "--edit-format", "diff",
+        "--message-file", "/dev/stdin",
+        "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
+        "--no-show-model-warnings", "--no-gitignore",
+        "--no-browser", "--no-analytics", "--no-check-update"]
+protocol = "text"
+prompt_stdin = true
+inactivity_timeout = 300
+enabled = true
+[agents.aider-gptoss.env]
+BROWSER = "true"
+HTTP_PROXY = ""
+HTTPS_PROXY = ""
+ALL_PROXY = ""
+
+# Goose agents — через LiteLLM proxy (localhost:4000)
+# Кодинг: goose-llama NO_EDIT_ABORT (25 reads без write), goose-devstral не тестирован как кодер
+# Ревью: "Error: not connected" — goose CLI не предназначен для одноразовых review вызовов
+# TODO: разобраться с goose session management для forgerace
+[agents.goose-llama]
+command = "goose"
+args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
+        "--model", "llama-70b", "--provider", "openai"]
+protocol = "cli"
+prompt_stdin = true
+inactivity_timeout = 300
+enabled = false
+[agents.goose-llama.env]
+OPENAI_HOST = "http://127.0.0.1:4000"
+OPENAI_API_KEY = "fr-local-dev"
+no_proxy = "127.0.0.1,localhost"
+NO_PROXY = "127.0.0.1,localhost"
+HTTP_PROXY = ""
+HTTPS_PROXY = ""
+ALL_PROXY = ""
+
+[agents.goose-devstral]
+command = "goose"
+args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
+        "--model", "devstral-123b", "--provider", "openai"]
+protocol = "cli"
+prompt_stdin = true
+inactivity_timeout = 300
+enabled = false
+[agents.goose-devstral.env]
+OPENAI_HOST = "http://127.0.0.1:4000"
+OPENAI_API_KEY = "fr-local-dev"
+no_proxy = "127.0.0.1,localhost"
+NO_PROXY = "127.0.0.1,localhost"
+HTTP_PROXY = ""
+HTTPS_PROXY = ""
+ALL_PROXY = ""
 
 # Когнитивные фреймы из frames/
 [frames.reviewer]
@@ -166,14 +266,15 @@ Find:
 Be specific about the user scenario and what goes wrong."""
 
 [build]
-commands = []
-check_command = ""
+commands = [["python3", "-c", "import forgerace"]]
+check_command = "python3 -c 'import forgerace; from forgerace.tasks import parse_tasks; parse_tasks()'"
 
 [limits]
-max_parallel_tasks = 2
-agent_timeout = 900
-max_review_rounds = 3
-review_frame = "reviewer"
+max_parallel_tasks = 4
+agent_timeout = 300
+max_review_rounds = 2
+review_frame = "evidence"
+max_task_complexity = 5  # decompose only complex tasks (5+/5)
 
 # [hooks]
 # on_complete = "curl -X POST https://hooks.slack.com/... -d '{\"text\": \"$FORGERACE_TASK_ID: $FORGERACE_STATUS ($FORGERACE_AGENT)\"}'"

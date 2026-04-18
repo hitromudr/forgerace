@@ -1,14 +1,13 @@
-"""Крест-на-крест ревью, одиночное ревью, парсинг вердикта."""
-
-import random
 import re
+import time
+import random
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .agents import AgentResult, build_prompt, run_agent_process, run_reviewer, is_agent_disabled
-from .config import cfg, resolve_agent_frame
-from .tasks import Task, task_paths
-from .utils import log, run_cmd
-
+from .utils import log, run_cmd, C, R
+from .config import cfg
+from .agents import AgentResult, run_agent_process, is_agent_disabled
+from .tasks import Task, task_paths, update_task_status
 
 _DIFF_MAX = 20000
 _DIFF_EXCLUDE = ["*.yaml", "*.yml", "*.json", "*.lock", "*.log", "*.csv", "*.bin"]
@@ -20,24 +19,11 @@ def get_diff(result: AgentResult, task: Task | None = None) -> str:
     for pattern in _DIFF_EXCLUDE:
         exclude_args.extend([":(exclude)" + pattern])
 
-    paths = task_paths(task) if task else []
-    if paths:
-        diff_result = run_cmd(
-            ["git", "diff", cfg.dev_branch, "--"] + paths + exclude_args,
-            cwd=result.workdir, check=False,
-        )
-        diff_text = (diff_result.stdout or "").strip()
-        if diff_text:
-            if len(diff_text) > _DIFF_MAX:
-                diff_text = diff_text[:_DIFF_MAX] + "\n... (обрезано)"
-            return diff_text
-
-    # Fallback: полный diff без бинарников
     diff_result = run_cmd(
-        ["git", "diff", cfg.dev_branch, "--"] + exclude_args,
+        ["git", "diff", cfg.dev_branch, "--"] + (task_paths(task) if task else []) + exclude_args,
         cwd=result.workdir, check=False,
     )
-    diff_text = (diff_result.stdout or "").strip()
+    diff_text = diff_result.stdout or ""
     if len(diff_text) > _DIFF_MAX:
         diff_text = diff_text[:_DIFF_MAX] + "\n... (обрезано)"
     return diff_text
@@ -51,14 +37,11 @@ def get_changed_files(result: AgentResult, task: Task | None = None) -> list[str
             ["git", "diff", "--name-only", cfg.dev_branch, "--"] + paths,
             cwd=result.workdir, check=False,
         )
-        files = [f.strip() for f in (diff_result.stdout or "").strip().splitlines() if f.strip()]
-        if files:
-            return files
-    # Fallback: все изменённые файлы
-    diff_result = run_cmd(
-        ["git", "diff", "--name-only", cfg.dev_branch],
-        cwd=result.workdir, check=False,
-    )
+    else:
+        diff_result = run_cmd(
+            ["git", "diff", "--name-only", cfg.dev_branch],
+            cwd=result.workdir, check=False,
+        )
     return [f.strip() for f in (diff_result.stdout or "").strip().splitlines() if f.strip()]
 
 
@@ -71,7 +54,8 @@ def pick_reviewer(passed: list[AgentResult]) -> str:
     if non_authors:
         return random.choice(non_authors)
 
-    if len(passed) >= 2:
+    # Если все доступные агенты участвовали, выбираем кого-то другого
+    if len(passed) > 1:
         return passed[1].agent_type
 
     return passed[0].agent_type
@@ -80,117 +64,69 @@ def pick_reviewer(passed: list[AgentResult]) -> str:
 def single_review(reviewer: str, author: str, diff: str, task: Task,
                    build_passed: bool = True, build_log: str = "",
                    changed_files: list[str] | None = None,
-                   workdir: "Path | None" = None) -> dict:
+                   workdir: Path | None = None) -> dict:
     """Один ревьюер проверяет одного автора. Запускается как полноценный агент в worktree автора."""
-    from pathlib import Path
+    from .pipeline import run_text_agent
+    
+    files_context = f"Файлы: {', '.join(changed_files)}" if changed_files else ""
+    prompt = f"""Сделай code review для задачи {task.id}: {task.name}.
+Автор: {author}
+{files_context}
 
-    # Предупреждение о раздутом diff
-    diff_lines = diff.count("\n")
-    bloat_warning = ""
-    if diff_lines > 300:
-        bloat_warning = f"""
-⚠ ВНИМАНИЕ: diff содержит {diff_lines} строк — это подозрительно много.
-Проверь: агент мог ПЕРЕПИСАТЬ файлы целиком вместо точечных правок.
-Если агент удалил/заменил существующий код без необходимости — это NEEDS_WORK.
+## Diff
+```diff
+{diff}
+```
+
+## Правила ревью
+1. Проверь соответствие описанию задачи.
+2. Проверь на баги, утечки, плохой стиль.
+3. Оцени, насколько решение полное.
+
+## Формат ответа
+VERDICT: APPROVED | NEEDS_WORK | REJECTED
+IS_TERMINAL: TRUE | FALSE (TRUE если решение фундаментально неверно и доработка не поможет)
+COMMENTS: твои замечания
+SUMMARY: краткое резюме одной строкой
+
+Важно: в поле VERDICT пиши ТОЛЬКО одно слово.
 """
-
-    prompt = f"""Ты ревьюер кода. Ты проверяешь реализацию агента {author} для задачи {task.id}.
-
-## Задача
-{task.id} — {task.name}
-Описание: {task.description}
-Критерий готовности: {task.acceptance}
-{bloat_warning}
-## Что делать
-1. Прочитай изменённые файлы (используй Read/Grep/Glob).
-2. Проверь что код РЕАЛЬНО написан и соответствует задаче.
-3. Если нужно — запусти тесты (Bash).
-4. Напиши вердикт.
-
-ВАЖНО:
-- НЕ правь файлы. Только анализируй.
-- НЕ описывай что ты "будешь делать" или "проверишь" — полные файлы и diff уже приложены ниже. Читай их и сразу пиши вердикт.
-- НЕ используй инструменты (Read/Bash/Grep) — всё что нужно уже в промпте.
-- Файл существует если он есть в секции "Полные файлы" ниже. Не пиши "файл не найден" если видишь его содержимое.
-- ОБЯЗАТЕЛЬНО закончи выводом VERDICT/COMMENTS/SUMMARY.
-
-## Формат ответа — строго:
-VERDICT: APPROVED или NEEDS_WORK
-COMMENTS: <что проверено и какие проблемы. При APPROVED — докажи что проверил. При NEEDS_WORK — конкретные замечания.>
-SUMMARY: <итог в 1-2 строки>
-
-APPROVED = код готов к мержу.
-NEEDS_WORK = нужны правки.
-- Файлы из `.gitignore` НЕ могут быть изменены — не требуй их правки.
-Пиши на русском.
-"""
-
-    # Resolve cognitive frame if reviewer has +frame suffix
-    frame_section = ""
-    actual_reviewer = reviewer
-    if "+" in reviewer:
-        model_name, frame_content = resolve_agent_frame(reviewer)
-        actual_reviewer = model_name
-        if frame_content:
-            frame_section = f"\n## Когнитивный фрейм ревьюера\n{frame_content}\n"
-
     try:
-        # Собираем контекст: полные файлы из worktree + diff
-        files_content = ""
-
-        # Способ 1: читаем из worktree
-        if workdir and workdir.exists() and changed_files:
-            for f in changed_files[:5]:
-                fpath = workdir / f
-                if fpath.exists() and fpath.stat().st_size < 10000:
-                    try:
-                        content = fpath.read_text(encoding="utf-8", errors="ignore")
-                        files_content += f"\n### {f}\n```\n{content}\n```\n"
-                    except Exception:
-                        pass
-
-        # Способ 2: если worktree не сработал — извлекаем из git show
-        if not files_content and workdir and workdir.exists():
-            try:
-                name_result = run_cmd(
-                    ["git", "diff", "--name-only", cfg.dev_branch],
-                    cwd=workdir, check=False)
-                git_files = [f.strip() for f in (name_result.stdout or "").splitlines() if f.strip()]
-                for f in git_files[:5]:
-                    show_result = run_cmd(
-                        ["git", "show", f"HEAD:{f}"],
-                        cwd=workdir, check=False)
-                    if show_result.returncode == 0 and show_result.stdout:
-                        content = show_result.stdout
-                        if len(content) < 10000:
-                            files_content += f"\n### {f}\n```\n{content}\n```\n"
-            except Exception:
-                pass
-
-        full_prompt = prompt + frame_section
-        if files_content:
-            full_prompt += f"\n## Полные файлы (код РЕАЛЬНО существует в репозитории)\n{files_content}"
-        full_prompt += f"\n## Diff от {author}\n```diff\n{diff[:15000]}\n```"
-
-        # Retry on transient API errors (empty response)
+        # Пытаемся запустить ревьюера (до 3 раз при пустых ответах)
         review_text = ""
+        actual_reviewer = reviewer.split("+")[0]
         for _retry in range(3):
-            review_text = run_reviewer(actual_reviewer, full_prompt)
+            review_text = run_text_agent(reviewer, prompt, workdir=workdir)
             if review_text:
                 break
             if is_agent_disabled(actual_reviewer):
                 break  # quota, no point retrying
             log.warning(f"[{reviewer}] пустой ответ, retry {_retry + 1}/3...")
         if not review_text:
-            return {"verdict": "error", "reviewer": reviewer, "author": author,
-                    "full_text": "", "comments": "", "summary": "Пустой ответ"}
+            return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
+                    "full_text": "", "comments": "", "summary": "Пустой ответ от ревьюера"}
 
         verdict_match = re.search(r"\**VERDICT\**:\s*\**(\w+)\**", review_text, re.IGNORECASE)
+        terminal_match = re.search(r"\**IS_TERMINAL\**:\s*\**(\w+)\**", review_text, re.IGNORECASE)
         comments_match = re.search(r"\**COMMENTS\**:\s*(.+?)(?=\n\**SUMMARY\**:|\Z)", review_text, re.IGNORECASE | re.DOTALL)
         summary_match = re.search(r"\**SUMMARY\**:\s*(.+)", review_text, re.IGNORECASE)
 
-        verdict = verdict_match.group(1).upper() if verdict_match else "NEEDS_WORK"
+        # Если ответ не содержит VERDICT или содержит битый JSON — технический сбой
+        if not verdict_match:
+            return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
+                    "full_text": review_text, "comments": "", "summary": "Ответ не содержит VERDICT"}
+
+        verdict = verdict_match.group(1).upper() if verdict_match else "FAILED"
+        is_terminal = terminal_match.group(1).upper() == "TRUE" if terminal_match else False
         comments = comments_match.group(1).strip() if comments_match else ""
+
+        # REJECTED может быть терминальным
+        if verdict == "REJECTED":
+            # Если ревьюер явно сказал IS_TERMINAL: TRUE или в комментариях есть ключевые слова
+            comments_lower = comments.lower()
+            terminal_keywords = ["невозможно", "бессмыслен", "невыполним", "противоречит"]
+            if any(kw in comments_lower for kw in terminal_keywords):
+                is_terminal = True
 
         # APPROVED без обоснования — невалидное ревью
         if verdict == "APPROVED" and len(comments) < 20:
@@ -213,6 +149,7 @@ NEEDS_WORK = нужны правки.
 
         return {
             "verdict": verdict,
+            "is_terminal": is_terminal,
             "reviewer": reviewer,
             "author": author,
             "full_text": review_text,
@@ -220,8 +157,84 @@ NEEDS_WORK = нужны правки.
             "summary": summary_match.group(1).strip() if summary_match else "",
         }
     except Exception as e:
-        return {"verdict": "error", "reviewer": reviewer, "author": author,
-                "full_text": "", "comments": "", "summary": f"Ошибка: {e}"}
+        return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
+                "full_text": "", "comments": "", "summary": f"Техническая ошибка: {e}"}
+
+
+def is_review_successful(rv: dict) -> bool:
+    """
+    Проверяет, был ли ответ ревьюера успешным (технически).
+    Успешным считается любой вердикт, кроме FAILED и error.
+    """
+    v = rv.get("verdict")
+    return v is not None and v not in ("FAILED", "error")
+
+
+def calculate_consensus(reviews_by_author: dict[str, list[dict]], min_reviewers: int = 1) -> tuple[str, str, str]:
+    """
+    Определяет лучшего автора и общий вердикт на основе набора ревью.
+    Использует веса моделей: gemini=1.5, остальное=1.0.
+    
+    Returns:
+        (best, verdict, reason)
+    """
+    weights = {"gemini": 1.5}
+    best = None
+    best_score = -999.0
+    
+    author_stats = {}
+    
+    for author, reviews in reviews_by_author.items():
+        total_reviews = len(reviews)
+        
+        if total_reviews < min_reviewers:
+            author_stats[author] = {
+                "score": -1.0, 
+                "verdict": "NEEDS_WORK", 
+                "reason": f"Недостаточно ревьюеров ({total_reviews} < {min_reviewers})"
+            }
+            continue
+            
+        total_weight_score = 0.0
+        has_rejected = False
+        for rv in reviews:
+            v = rv.get("verdict")
+            if v == "FAILED":
+                continue
+            
+            reviewer_name = rv.get("reviewer", "").split("+")[0]
+            weight = weights.get(reviewer_name, 1.0)
+            
+            if v == "APPROVED":
+                total_weight_score += 1.0 * weight
+            elif v == "NEEDS_WORK":
+                total_weight_score += 0.0 * weight
+            elif v == "REJECTED":
+                total_weight_score -= 1.0 * weight
+                has_rejected = True
+            elif v == "error":
+                total_weight_score -= 0.5 * weight
+        
+        # Средневзвешенный балл
+        avg_score = total_weight_score / total_reviews if total_reviews > 0 else -1.0
+        
+        verdict = "APPROVED" if avg_score > 0 and not has_rejected else "NEEDS_WORK"
+        author_stats[author] = {"score": avg_score, "verdict": verdict, "reviews_count": total_reviews}
+        
+        if avg_score > best_score:
+            best_score = avg_score
+            best = author
+            
+    if not best:
+        # Fallback if no one has enough reviews
+        best = list(reviews_by_author.keys())[0] if reviews_by_author else "none"
+        return best, "NEEDS_WORK", "Недостаточно ревьюеров для принятия решения"
+        
+    res = author_stats[best]
+    if res["score"] <= 0:
+        return best, "NEEDS_WORK", f"Лучший автор ({best}) требует доработки (рейтинг {res['score']})"
+        
+    return best, res["verdict"], f"Автор {best} выбран как лучший (наивысший взвешенный рейтинг {res['score']})"
 
 
 def code_review(passed: list[AgentResult], task: Task) -> dict:
@@ -237,14 +250,21 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
             workdir_map[r.agent_type] = r.workdir
 
     if not diffs:
-        return {"verdict": "error", "reason": "Нет diff для ревью"}
+        return {
+            "verdict": "error",
+            "reason": "Нет diff для ревью",
+            "best": "none",
+            "author_success_counts": {},
+            "reviews": {},
+            "comments": [],
+            "reviewer": "cross-review",
+            "full_text": "Нет diff для ревью"
+        }
 
     all_agent_names = cfg.agent_names
     author_names = list(diffs.keys())
 
     # Round-robin: каждый автор ревьюится ОДНИМ другим агентом (не N²)
-    # Disabled agents (quota/auth) are excluded; fallback to self-review with frame
-    # If all agents disabled — auto-approve (no review possible)
     available = [n for n in all_agent_names if not is_agent_disabled(n)]
     if not available:
         log.error("    ✗ Все агенты отключены (квота) — ревью невозможно, задача → blocked")
@@ -254,9 +274,10 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
             "reviewer": "none",
             "best": best,
             "verdict": "error",
-            "comments": "Нет доступных ревьюеров — все агенты отключены по квоте",
+            "comments": [],
             "reason": "нет ревьюеров",
             "reviews": {},
+            "author_success_counts": {a: 0 for a in author_names},
         }
 
     review_pairs = []
@@ -265,15 +286,16 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
         if others:
             reviewer = others[i % len(others)]
         elif cfg.review_frame and cfg.review_frame in cfg.frames:
-            # Self-review with cognitive frame (single available agent)
+            # Fallback: self-review
             reviewer = f"{author}+{cfg.review_frame}"
-            log.info(f"    Fallback: {author} ревьюит себя через +{cfg.review_frame}")
         else:
             reviewer = author
         review_pairs.append((reviewer, author))
 
-    pairs_str = ", ".join(f"{rev}→{auth}" for rev, auth in review_pairs)
-    log.info(f"    Ревью крест-на-крест: {pairs_str}")
+    # reviews_by_author: {author: [{reviewer, verdict, comments, ...}, ...]}
+    reviews_by_author: dict[str, list[dict]] = {a: [] for a in author_names}
+    reviews = {}  # backward compat: {author: last_review}
+    author_success_counts: dict[str, int] = {a: 0 for a in author_names}
 
     with ThreadPoolExecutor(max_workers=len(review_pairs)) as pool:
         futures = {}
@@ -283,14 +305,17 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
                             changed_files=files_map.get(author),
                             workdir=workdir_map.get(author))
             futures[f] = (reviewer, author)
-        # reviews_by_author: {author: [{reviewer, verdict, comments, ...}, ...]}
-        reviews_by_author: dict[str, list[dict]] = {a: [] for a in author_names}
-        reviews = {}  # backward compat: {author: last_review}
+
         for f in as_completed(futures):
             reviewer, author = futures[f]
             rv = f.result()
             reviews_by_author[author].append(rv)
-            reviews[author] = rv  # для send_to_rework
+            reviews[author] = rv
+
+            # Подсчет успешных ответов внутри цикла as_completed гарантирует точность
+            # при параллельной обработке (инкремент выполняется в основном потоке)
+            if is_review_successful(rv):
+                author_success_counts[author] += 1
 
     # Логируем результаты
     full_text_parts = []
@@ -298,39 +323,17 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
         for rv in reviews_by_author[author]:
             header = f"📋 {rv['reviewer']} ревьюит {author}: {rv['verdict']}"
             log.info(f"    {header}")
-            log.info(f"    {rv.get('summary', rv.get('comments', '')[:200])}")
             full_text_parts.append(f"=== {rv['reviewer']} ревьюит {author} ===\n{rv['full_text']}")
 
     full_text = "\n\n".join(full_text_parts)
 
-    # Определяем лучшего: APPROVED = все НЕ-error ревьюеры одобрили
-    def _real_reviews(author: str) -> list[dict]:
-        """Ревью без ошибок (таймауты и т.п. не считаются)."""
-        return [rv for rv in reviews_by_author[author] if rv["verdict"] != "error"]
+    min_reviewers = getattr(cfg, 'min_reviewers', 1)
+    best, verdict, reason = calculate_consensus(reviews_by_author, min_reviewers)
 
-    def _all_approved(author: str) -> bool:
-        real = _real_reviews(author)
-        return len(real) > 0 and all(rv["verdict"] == "APPROVED" for rv in real)
-
-    def _approval_count(author: str) -> int:
-        return sum(1 for rv in reviews_by_author[author] if rv["verdict"] == "APPROVED")
-
-    fully_approved = [a for a in author_names if _all_approved(a)]
-
-    if fully_approved:
-        best = fully_approved[0]
-        verdict = "APPROVED"
-        reason = f"{best} одобрен всеми ревьюерами"
-        comments = ""
-    else:
-        # Никто не получил полного одобрения — берём с максимумом approve
-        best = max(author_names, key=_approval_count)
-        verdict = "NEEDS_WORK"
-        # Собираем замечания от тех кто не одобрил лучшего
-        nw_comments = [rv.get("comments", "") for rv in reviews_by_author[best]
-                       if rv["verdict"] != "APPROVED" and rv.get("comments", "").strip()]
-        comments = "\n\n".join(nw_comments)
-        reason = f"{best} получил {_approval_count(best)}/{len(reviews_by_author[best])} одобрений"
+    comments = []
+    for rv in reviews_by_author[best]:
+        if rv["verdict"] != "APPROVED" and rv.get("comments", "").strip():
+            comments.append(rv["comments"])
 
     return {
         "full_text": full_text,
@@ -340,6 +343,7 @@ def code_review(passed: list[AgentResult], task: Task) -> dict:
         "comments": comments,
         "reason": reason,
         "reviews": reviews,
+        "author_success_counts": author_success_counts,
     }
 
 
@@ -347,7 +351,6 @@ def send_to_rework(result: AgentResult, task: Task, comments: str) -> bool:
     """Отправляет замечания ревью агенту на доработку. Возвращает True если сборка ок."""
     from .pipeline import verify_build  # lazy import to avoid circular
 
-    tag = f"{task.id}/{result.agent_type}"
     tag_rework = f"{task.id}/{result.agent_type}/доработка"
     from .utils import C, R
     log.info(f"[{tag_rework}] {C['yellow']}правки по замечаниям ревью{R}")
@@ -375,7 +378,7 @@ def send_to_rework(result: AgentResult, task: Task, comments: str) -> bool:
 ## Правила
 {cfg.agent_rules}
 """
-    run_result = run_agent_process(result.agent_type, result.workdir, task, prompt)
+    run_agent_process(result.agent_type, result.workdir, task, prompt)
     review_file.unlink(missing_ok=True)
 
     # Коммитим ВСЕ правки (агент мог создать файлы вне task_paths)
@@ -394,4 +397,15 @@ def send_to_rework(result: AgentResult, task: Task, comments: str) -> bool:
         return False
 
     log.info(f"[{tag_rework}] ✓ сборка ок")
+
+    # Обновляем статус задачи и сохраняем текст замечаний
+    task.rework_count += 1
+    task.last_attempts.append({
+        "comments": comments,
+        "diff": diff.stdout.strip(),
+        "timestamp": int(time.time())
+    })
+    from .tasks import update_task_status
+    update_task_status(task.id, f"in_progress:{result.agent_type}", agent=result.agent_type, branch=result.branch)
+
     return True

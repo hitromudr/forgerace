@@ -1,21 +1,26 @@
 """Оценка сложности задач и авто-декомпозиция."""
 
 import re
-import subprocess
 
 from .config import cfg, run_hint
-from .tasks import Task, parse_tasks, task_paths, _tasks_file_lock, _atomic_write
+from .tasks import Task, parse_tasks, _tasks_file_lock, _atomic_write, tasks_file_lock
 from .utils import log, is_valid_path
 
-# Кэш: задачи, которые уже оценивались и не требуют декомпозиции
-_assessed_tasks: set[str] = set()
+# Кэш: задачи, которые уже оценивались (id -> complexity)
+_task_complexity: dict[str, int] = {}
+
+
+def get_task_complexity(task_id: str) -> int:
+    """Возвращает оцененную сложность задачи (или 0 если не оценивалась)."""
+    return _task_complexity.get(task_id, 0)
 
 
 def assess_and_maybe_decompose(task: Task, agent_name: str = "") -> bool:
     """Оценивает сложность задачи через LLM. Если > max — разбивает.
     agent_name — конкретный агент для оценки, иначе round-robin.
     Возвращает True если задача была декомпозирована."""
-    if task.id in _assessed_tasks:
+    if task.id in _task_complexity:
+        task.complexity = _task_complexity[task.id]
         return False
 
     tasks_list = parse_tasks()
@@ -91,8 +96,9 @@ COMPLEXITY: N
 Правила подзадач:
 - Нумерация с TASK-{next_num:03d}
 - Каждая подзадача — один файл или одна функциональность
-- Зависимости: ТОЛЬКО реальные (задача B использует код из задачи A). Если работают с разными файлами — "—". НЕ ставь линейную цепочку.
-- Максимизируй параллелизм: как можно больше задач без зависимостей
+- Зависимости: ставь "—" для ВСЕХ подзадач. Подзадачи ВСЕГДА параллельны.
+- Максимум 3 подзадачи
+- ЗАПРЕЩЕНО: цепочки зависимостей между подзадачами
 - Пиши на русском
 """
 
@@ -118,9 +124,10 @@ COMPLEXITY: N
 
         complexity = int(complexity_match.group(1))
         log.info(f"  📊 {task.id} сложность: {complexity}/5 (порог: {cfg.max_task_complexity})")
+        task.complexity = complexity
+        _task_complexity[task.id] = complexity
 
         if complexity <= cfg.max_task_complexity:
-            _assessed_tasks.add(task.id)
             return False
 
         # Сложность высокая — проверяем наличие подзадач
@@ -139,7 +146,9 @@ COMPLEXITY: N
     if not new_task_ids:
         if complexity and complexity > cfg.max_task_complexity:
             log.error(f"  ✗ [{task.id}] Ни один агент не смог декомпозировать (сложность {complexity}) — запускаю как есть")
-        _assessed_tasks.add(task.id)
+        c = complexity or 3
+        task.complexity = c
+        _task_complexity[task.id] = c
         return False
 
     # Сохраняем копию
@@ -147,18 +156,65 @@ COMPLEXITY: N
     decompose_file.write_text(tasks_block + "\n", encoding="utf-8")
 
     # Принудительно подставляем дискуссию родителя в подзадачи
-    if task.discussion and task.discussion != "—":
-        tasks_block = re.sub(
-            r"(\*\*Дискуссия\*\*:\s*).*",
-            rf"\g<1>{task.discussion}",
-            tasks_block,
-        )
+    disc = task.discussion if task.discussion and task.discussion != "—" else ""
+    if disc:
+        # Replace existing discussion field
+        if re.search(r"\*\*Дискуссия\*\*:", tasks_block):
+            tasks_block = re.sub(
+                r"(\*\*Дискуссия\*\*:\s*).*",
+                rf"\g<1>{disc}",
+                tasks_block,
+            )
+        else:
+            # Field missing — add after each task header's last field
+            tasks_block = re.sub(
+                r"(- \*\*Ветка\*\*:\s*.*)",
+                rf"\g<1>\n- **Дискуссия**: {disc}",
+                tasks_block,
+            )
+            # If no Ветка field either, add after Агент
+            if "**Дискуссия**:" not in tasks_block:
+                tasks_block = re.sub(
+                    r"(- \*\*Агент\*\*:\s*.*)",
+                    rf"\g<1>\n- **Дискуссия**: {disc}",
+                    tasks_block,
+                )
 
-    # Вставляем в TASKS.md
-    insert_tasks_into_tasksmd(tasks_block, task.id)
+    # Перенумеровать и вставить под file lock (avoid duplicate IDs)
+    with tasks_file_lock():
+        current_tasks = parse_tasks()
+        existing_ids = {t.id for t in current_tasks}
+        actual_max = max((int(re.match(r"TASK-(\d+)", t.id).group(1))
+                          for t in current_tasks if re.match(r"TASK-(\d+)", t.id)), default=0)
+        # Renumber subtasks to avoid collisions
+        old_ids = sorted(set(re.findall(r"TASK-(\d+)", tasks_block)), key=int)
+        new_start = actual_max + 1
+        id_map = {}
+        for i, old_id in enumerate(old_ids):
+            old_full = f"TASK-{old_id}"
+            if old_full in existing_ids or old_full == task.id:
+                new_full = f"TASK-{new_start + i:03d}"
+                tasks_block = tasks_block.replace(old_full, new_full)
+                id_map[old_full] = new_full
+            else:
+                id_map[old_full] = old_full
+        new_task_ids = [id_map.get(f"TASK-{x}", f"TASK-{x}") for x in old_ids
+                        if id_map.get(f"TASK-{x}", f"TASK-{x}") != task.id]
+
+        # Insert directly (already under lock)
+        content = cfg.tasks_file.read_text(encoding="utf-8")
+        # Replace parent task or append
+        pattern = rf"(### {re.escape(task.id)}: .+?)(?=\n### TASK-|\n---|\Z)"
+        m = re.search(pattern, content, re.DOTALL)
+        if m:
+            content = content[:m.start()] + tasks_block.rstrip() + "\n" + content[m.end():]
+        else:
+            content = content.rstrip() + "\n\n" + tasks_block.rstrip() + "\n"
+        _atomic_write(cfg.tasks_file, content)
+
     if new_task_ids:
         last_subtask = new_task_ids[-1]
-        with _tasks_file_lock:
+        with tasks_file_lock():
             content = cfg.tasks_file.read_text(encoding="utf-8")
             lines = content.splitlines()
             for i, line in enumerate(lines):
@@ -190,20 +246,16 @@ COMPLEXITY: N
             desc_short = (t.description or "")[:100].rstrip()
             log.info(f"    {t.id}: {t.name} [{status}]\n      → {desc_short}")
 
-    # Коммитим
-    from .utils import run_cmd
-    run_cmd(["git", "add", "TASKS.md"], cwd=cfg.root_dir, check=False)
-    run_cmd(
-        ["git", "commit", "-m", f"decompose: {task.id} → {', '.join(new_task_ids)}"],
-        cwd=cfg.root_dir, check=False,
-    )
+    # TASKS.md обновлён на диске, но НЕ коммитим автоматически —
+    # при --team это засирает develop, пользователь коммитит сам
 
     return True
 
 
 def insert_tasks_into_tasksmd(tasks_block: str, linked_task_id: str):
     """Вставляет сгенерированные задачи в TASKS.md."""
-    with _tasks_file_lock:
+    from .tasks import tasks_file_lock
+    with tasks_file_lock():
         content = cfg.tasks_file.read_text(encoding="utf-8")
 
         if linked_task_id:
@@ -258,9 +310,5 @@ def create_checkpoint_task(error_log: str):
 - **Ветка**: —"""
 
     insert_tasks_into_tasksmd(task_block, "")
-    from .utils import run_cmd
-    run_cmd(["git", "add", "TASKS.md"], cwd=cfg.root_dir, check=False)
-    run_cmd(["git", "commit", "-m", f"auto: {next_id} — чекпоинт make check"],
-            cwd=cfg.root_dir, check=False)
     print(f"  ✅ Создана {next_id}: Чекпоинт — починить make check")
     print(f"\n    → {run_hint()}")
