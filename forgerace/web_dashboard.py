@@ -133,7 +133,7 @@ code,.mono{font-family:'JetBrains Mono',monospace,monospace}
 .header h1 span{color:#4ade80}
 .summary{display:flex;flex-wrap:wrap;gap:.8em;margin-left:auto}
 .pill{background:#16213e;border:1px solid #2a2a4e;border-radius:20px;padding:.35em .9em;font-size:.85em;white-space:nowrap;transition:background .3s ease}
-.pill.on{border-color:#4ade80;color:#4ade80} .pill.off{border-color:#ef4444;color:#ef4444}
+.pill.on{border-color:#4ade80;color:#4ade80} .pill.off{border-color:#ef4444;color:#ef4444} .pill.starting{border-color:#eab308;color:#eab308}
 .ts{color:#6b7280;font-size:.8em;margin-left:auto;align-self:center}
 .activity{margin-bottom:1.5em}
 .activity-title{font-size:.95em;color:#a855f7;margin-bottom:.5em;font-weight:600}
@@ -185,7 +185,12 @@ function renderSummary(d){
   const pct=d.total_all?Math.round(d.total_done/d.total_all*100):0;
   let h=`<span class="pill">${d.total_done}/${d.total_all} tasks (${pct}%)</span>`;
   h+=`<span class="pill">${d.processes} proc</span>`;
-  h+=`<span class="pill ${d.litellm?'on':'off'}" style="cursor:pointer" onclick="toggleLitellm(${d.litellm})" title="Click to ${d.litellm?'stop':'start'}">LiteLLM ${d.litellm?'ON':'OFF'}</span>`;
+  if(_litellmPending&&!d.litellm){
+    h+=`<span class="pill starting" style="cursor:pointer">⟳ starting...</span>`;
+  }else{
+    _litellmPending=false;
+    h+=`<span class="pill ${d.litellm?'on':'off'}" style="cursor:pointer" onclick="toggleLitellm(${d.litellm})" title="Click to ${d.litellm?'stop':'start'}">LiteLLM ${d.litellm?'ON':'OFF'}</span>`;
+  }
   document.getElementById("summary").innerHTML=h;
 }
 
@@ -199,11 +204,16 @@ function renderActivity(agents){
   el.innerHTML=h;
 }
 
+let _litellmPending=false;
 function toggleLitellm(isOn){
+  if(_litellmPending)return;
+  _litellmPending=true;
+  const pill=document.querySelector('.pill.on,.pill.off');
+  if(pill){pill.className='pill starting';pill.innerHTML='⟳ LiteLLM starting...';}
   const action=isOn?'stop':'start';
   fetch('/api/litellm/'+action).then(r=>r.json()).then(d=>{
-    console.log('LiteLLM',action,d);
-  }).catch(e=>console.error(e));
+    if(action==='stop'&&pill){pill.className='pill off';pill.innerHTML='LiteLLM OFF';_litellmPending=false;}
+  }).catch(e=>{console.error(e);_litellmPending=false;});
 }
 
 function renderTeams(teams){
