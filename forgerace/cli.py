@@ -619,12 +619,13 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                     pass
 
             # Also scan for review/discuss activity
-            for logf in cfg.log_dir.glob("championship-v2-*.log"):
+            for logf in cfg.log_dir.glob("*.log"):
                 try:
                     if now_ts - logf.stat().st_mtime > 120:
                         continue
                     lines = logf.read_text(errors="replace").splitlines()[-50:]
                     for line in reversed(lines):
+                        line = _ansi_re.sub('', line)
                         # Review: [TASK-123/ревью] llama→gemini: APPROVED
                         m = _re.search(r"\[(TASK-\d+)/ревью\].*?(\w[\w-]*)→(\w[\w-]*)", line)
                         if m and m.group(2) not in agent_activity:
