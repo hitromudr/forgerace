@@ -6,7 +6,7 @@ import select
 import subprocess
 import time
 import threading
-from .health_monitor import start_health_monitor
+from src.health_monitor import start_health_monitor
 
 # Start the LiteLLM health monitor as soon as the agents module is imported.
 _health_monitor = start_health_monitor()
