@@ -49,7 +49,7 @@
 - **Ветка**: task/task-004-realizatsiya-litellm-watchdog-aider-gptoss
 
 ### TASK-005: Реализация Stale Task Cleaner
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
