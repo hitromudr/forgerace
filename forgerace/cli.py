@@ -608,7 +608,7 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                     lines = logf.read_text(errors="replace").splitlines()[-100:]
                     for line in reversed(lines):
                         line = _ansi_re.sub('', line)  # strip ANSI codes
-                        m = _re.search(r"\[(TASK-\d+)/([\w,-]+)\].*?(⏳ \S+\s*—\s*(.+)|Applied edit to (.+)|📖 Read (.+)|✏️\s+\w+ (.+)|💻 Bash: (.+)|🔍 (?:Grep|Glob): (.+)|📝 Прогресс: (.+)|replace (.+)|write_file (.+))", line)
+                        m = _re.search(r"\[(TASK-\d+)/([\w,-]+)\].*?(⏳ \S+.*?—\s*(.+)|Applied edit to (.+)|📖 Read (.+)|✏️\s+\w+ (.+)|💻 Bash: (.+)|🔍 (?:Grep|Glob): (.+)|📝 Прогресс: (.+)|replace (.+)|write_file (.+))", line)
                         if m:
                             agent = m.group(2).split(",")[0]
                             if agent not in agent_activity:
