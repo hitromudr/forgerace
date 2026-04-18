@@ -57,9 +57,8 @@ class Dashboard:
         pending_tasks = queue.get_pending_tasks()
         if pending_tasks:
             table.add_section()
-            table.add_column("Queue", style="dim")
             for priority, task_id in pending_tasks[:5]:  # Показываем первые 5 задач
-                table.add_row(Text(task_id, style="dim"))
+                table.add_row(Text(task_id, style="dim"), "", "", "", "")
 
         self.live.update(table)
         self.live.refresh()

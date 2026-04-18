@@ -77,34 +77,44 @@ class BenchmarkStore:
         """
         Добавляет запись в хранилище (потокобезопасно).
         Если record не указан, сохраняет весь буфер в файл.
-        Использует единую блокировку файла для чтения‑модификации‑записи.
+        Использует атомарную запись через временный файл и os.replace.
         """
         with self._lock:
-            with acquire_file_lock(self.path):
-                # Открываем файл в режиме r+. Файл гарантированно существует,
-                # так как acquire_file_lock использует os.O_CREAT.
-                with self.path.open('r+', encoding='utf-8') as f:
-                    try:
-                        content = f.read()
-                        raw_data = json.loads(content) if content.strip() else []
+            # Читаем существующие данные через asdict для сериализации
+            # Нам нужны словари для записи в JSON
+            raw_data = []
+            if self.path.exists():
+                try:
+                    content = self.path.read_text(encoding="utf-8")
+                    if content.strip():
+                        raw_data = json.loads(content)
                         if not isinstance(raw_data, list):
                             raw_data = []
-                    except (json.JSONDecodeError, OSError):
-                        raw_data = []
+                except (json.JSONDecodeError, OSError):
+                    raw_data = []
 
-                    if record:
-                        raw_data.append(asdict(record))
-                    else:
-                        raw_data.extend(asdict(r) for r in self._buffer)
-                        self._buffer = []
+            if record:
+                # Добавляем одну запись
+                raw_data.append(asdict(record))
+            else:
+                # Сохраняем весь буфер
+                for r in self._buffer:
+                    raw_data.append(asdict(r))
+                self._buffer = []
 
-                    try:
-                        f.seek(0)
-                        json.dump(raw_data, f, indent=2, ensure_ascii=False)
-                        f.truncate()
-                        f.flush()
-                    except (OSError, TypeError, ValueError):
-                        pass
+            # Атомарная запись: сначала во временный файл, затем os.replace
+            # Временный файл создаётся в той же директории, чтобы os.replace был атомарным
+            temp_path = self.path.with_suffix(".tmp")
+            try:
+                temp_path.write_text(json.dumps(raw_data, indent=2, ensure_ascii=False), encoding="utf-8")
+                os.replace(temp_path, self.path)
+            except Exception:
+                # Если что-то пошло не так, удаляем временный файл чтобы не засорять диск
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+                raise
 
     def add(self, record: BenchmarkRecord) -> None:
         """
@@ -116,11 +126,9 @@ class BenchmarkStore:
 
     def get_all(self) -> List[BenchmarkRecord]:
         """Возвращает все записи из хранилища (из файла + из буфера)."""
-        # self._lock защищает доступ к буферу в памяти,
-        # acquire_file_lock защищает файл от изменений другими процессами.
-        with self._lock, acquire_file_lock(self.path, mode='shared'):
+        with acquire_file_lock(self.path, mode='shared'):
             file_records = self._read_file()
-            # Объединяем с буфером (копия списка под блокировкой)
+            # Объединяем с буфером (копия списка для безопасности)
             return file_records + list(self._buffer)
 
     def aggregate(self, agent: Optional[str] = None) -> Dict[str, Dict[str, float]]:

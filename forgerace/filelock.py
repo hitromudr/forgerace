@@ -1,16 +1,12 @@
 """Кроссплатформенный файловый блокировщик для BenchmarkStore."""
 
 import os
-try:
-    import fcntl
-except ImportError:
-    fcntl = None
-
-try:
-    import msvcrt
-except ImportError:
-    msvcrt = None
 from contextlib import contextmanager
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 from pathlib import Path
 from typing import Optional
 
