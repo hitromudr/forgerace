@@ -96,7 +96,7 @@ ALL_PROXY = ""
 command = "aider"
 args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
         "--openai-api-key", "fr-local-dev",
-        "--model", "openai/qwen/qwen2.5-coder-32b-instruct",
+        "--model", "openai/qwen-122b",
         "--edit-format", "diff",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
@@ -118,9 +118,9 @@ ALL_PROXY = ""
 
 [agents.aider-devstral]
 command = "aider"
-args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
-        "--openai-api-key", "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",
-        "--model", "openai/mistralai/devstral-2-123b-instruct-2512",
+args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
+        "--openai-api-key", "fr-local-dev",
+        "--model", "openai/devstral-123b",
         "--edit-format", "diff",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
