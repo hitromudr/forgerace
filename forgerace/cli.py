@@ -544,7 +544,10 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             for team_name, tt in sorted(teams.items()):
                 done = sum(1 for t in tt if t.status == "done")
                 total = len(tt)
+                # Show completed teams as collapsed single line
                 if done == total and total > 0:
+                    bar = f"{C['green']}{'█' * BAR_LEN}{R}"
+                    print(f"  {C['green']}{team_name[:15]}{R}  {done}/{total}  {bar}  {C['green']}DONE{R}\n")
                     continue
                 # Combine TASKS.md status + live log detection
                 ip_tasks = [t for t in tt if "progress" in t.status or t.id in _coding_now]
