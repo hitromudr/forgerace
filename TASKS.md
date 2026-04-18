@@ -33,7 +33,7 @@
 - **Ветка**: task/task-003-realizatsiya-checkpoints-aider-devstral
 
 ### TASK-004: Реализация LiteLLM Watchdog
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -81,7 +81,7 @@
 - **Ветка**: task/task-006-realizatsiya-flat-dependencies-aider-devstral
 
 ### TASK-008: Реализовать WebServer с SSE
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/web_server.py
