@@ -418,6 +418,11 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
             error_log = stderr
             continue
 
+        # Restore protected files before commit (agent may have deleted/modified them)
+        for pf in ("TASKS.md", "forgerace.toml", "litellm_config.yaml",
+                    "CLAUDE.md", ".gitignore"):
+            run_cmd(["git", "checkout", cfg.dev_branch, "--", pf],
+                    cwd=workdir, check=False)
         # Коммит — добавляем ВСЕ изменения, не только task_paths
         # (агент мог создать файлы вне указанных путей)
         run_cmd(["git", "add", "-A"], cwd=workdir, check=False)

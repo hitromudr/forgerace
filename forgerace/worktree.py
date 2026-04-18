@@ -66,11 +66,11 @@ def _create_worktree_impl(agent_num: int, branch: str) -> Path:
         raise RuntimeError(f"git worktree add failed: {result.stderr}")
 
     # Remove orchestrator files from worktree — agents must not edit them
-    for protected in ("TASKS.md", "forgerace.toml", "litellm_config.yaml"):
+    for protected in ("TASKS.md", "forgerace.toml", "litellm_config.yaml",
+                       "CLAUDE.md", ".gitignore"):
         pf = agent_dir / protected
         if pf.exists():
             pf.unlink()
-    run_cmd(["git", "checkout", "--", "TASKS.md"], cwd=agent_dir, check=False)
 
     log.info(f"Worktree создан: {agent_dir} → {branch}")
     return agent_dir
