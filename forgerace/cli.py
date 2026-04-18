@@ -504,12 +504,14 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                                      capture_output=True, text=True).stdout.strip() or "0")
             except Exception:
                 procs = 0
-            # LiteLLM health check — curl with connect-timeout, 401=alive
+            # LiteLLM health check — clean env to bypass system proxy
             try:
-                _hc = _sp.run(["curl", "-s", "--noproxy", "*", "--connect-timeout", "2",
+                _clean_env = {k: v for k, v in os.environ.items()
+                              if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")}
+                _hc = _sp.run(["curl", "-s", "--connect-timeout", "2",
                                "-o", "/dev/null", "-w", "%{http_code}",
                                "http://127.0.0.1:4000/health"],
-                              capture_output=True, text=True, timeout=5)
+                              capture_output=True, text=True, timeout=5, env=_clean_env)
                 _litellm_ok = _hc.stdout.strip() in ("200", "401")
             except Exception:
                 _litellm_ok = False
