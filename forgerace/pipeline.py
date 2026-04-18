@@ -1164,17 +1164,21 @@ def _ensure_litellm_proxy():
     if not proxy_url:
         return  # no agents need proxy
 
-    # Check if proxy is already running (bypass system proxy)
+    # Check if proxy is already running (must unset HTTP_PROXY to bypass system proxy)
+    _saved = {k: os.environ.pop(k, None) for k in
+              ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy")}
     try:
-        no_proxy_handler = urllib.request.ProxyHandler({})
-        opener = urllib.request.build_opener(no_proxy_handler)
         req = urllib.request.Request(f"{proxy_url}/health")
         req.add_header("Authorization", "Bearer fr-local-dev")
-        with opener.open(req, timeout=3) as resp:
+        with urllib.request.urlopen(req, timeout=3) as resp:
             if resp.status == 200:
                 return  # proxy is running
     except Exception:
         pass
+    finally:
+        for k, v in _saved.items():
+            if v is not None:
+                os.environ[k] = v
 
     # Try to start proxy
     litellm_bin = Path.home() / ".local/share/pipx/venvs/litellm/bin/litellm"
