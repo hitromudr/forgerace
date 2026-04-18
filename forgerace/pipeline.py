@@ -1564,7 +1564,8 @@ def run_pipeline(
                 if run_count < max_auto_retries * cfg.max_retries:
                     retryable_stuck.append(t)
                 else:
-                    log.warning(f"[{t.id}] ⚠ Превышен лимит авто-retry ({run_count} попыток) — пропускаю. Исправь задачу вручную.")
+                    log.warning(f"[{t.id}] ⚠ Превышен лимит авто-retry ({run_count} попыток) → skip")
+                    update_task_status(t.id, "skip")
             if retryable_stuck:
                 log.info(f"Авто-retry застрявших: {[t.id for t in retryable_stuck]}")
                 for t in retryable_stuck:

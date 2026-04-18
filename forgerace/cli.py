@@ -519,7 +519,7 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 _litellm_ok = False
             litellm_status = f"{C['green']}LiteLLM ✓{R}" if _litellm_ok else f"{C['red']}LiteLLM ✗{R}"
             print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}  {procs} processes  {litellm_status}  {C['dim']}(Ctrl+C){R}")
-            print(f"  {C['green']}✓{R}done  {C['magenta']}⚡{R}coding  {C['red']}✗{R}blocked  {C['yellow']}…{R}pending\n")
+            print()
 
             # Teams table
             print(f"  {C['bold']}{'Team':<15} {'Done':>6}  {'Progress':<{BAR_LEN}}  Status{R}")
