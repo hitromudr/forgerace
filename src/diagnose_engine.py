@@ -54,21 +54,23 @@ class DiagnoseEngine:
         """Обновляет текущий снимок состояния."""
         with self._lock:
             self._snapshot = snapshot
-
-        # Уведомляем всех подписчиков
-        for queue in self._subscribers:
-            queue.put_nowait(snapshot)
+            # Уведомляем всех подписчиков внутри lock, чтобы гарантировать атомарность
+            for queue in self._subscribers:
+                queue.put_nowait(snapshot)
 
     def get_snapshot(self) -> Optional[SystemSnapshot]:
         """Возвращает текущий снимок состояния."""
         with self._lock:
-            return self._snapshot
+            return self._snapshot.copy() if self._snapshot else None
 
     async def subscribe(self) -> AsyncIterator[SystemSnapshot]:
         """Подписывается на обновления снимков состояния."""
         queue = asyncio.Queue()
         with self._lock:
             self._subscribers.add(queue)
+            # Отправляем текущий снимок новому подписчику
+            if self._snapshot:
+                queue.put_nowait(self._snapshot)
 
         try:
             while True:
@@ -90,6 +92,7 @@ class DiagnoseEngine:
                     agents=[],
                     metrics={}
                 )
+                # Используем update_snapshot, который уже имеет lock
                 self.update_snapshot(snapshot)
 
                 # Обновляем каждые 5 секунд

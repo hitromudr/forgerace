@@ -1205,9 +1205,8 @@ def _ensure_litellm_proxy():
                             f"{proxy_url}/health"],
                            capture_output=True, text=True, timeout=5, env=_clean)
             if hc.stdout.strip() in ("200", "401"):
-                if resp.status == 200:
-                    log.info("LiteLLM proxy запущен")
-                    return
+                log.info("LiteLLM proxy запущен")
+                return
         except Exception:
             pass
     log.warning("LiteLLM proxy не стартовал за 15с — агенты через proxy могут не работать")

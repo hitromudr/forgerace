@@ -27,7 +27,8 @@ from .decompose import create_checkpoint_task
 from .utils import log, run_cmd, setup_logging
 from typing import Optional
 from .benchmark import BenchmarkStore
-from .web_server import create_web_server
+# web_server, checkpoint, diagnose_engine — created by agents, not yet merged
+# from .web_server import create_web_server
 
 
 _AGENT_CONFIGS = {
@@ -1337,7 +1338,11 @@ def main():
         return
 
     if args.command == "rollback":
-        from .checkpoint import store
+        try:
+            from .checkpoint import store
+        except ImportError:
+            print(f"  {C['red']}Модуль checkpoint не найден — функция ещё не реализована{R}")
+            return
         task_id = args.task_id
         if not task_id.startswith("TASK-"):
             print(f"  {C['red']}Некорректный ID задачи: {task_id}. Ожидается формат TASK-001{R}")
@@ -1354,8 +1359,12 @@ def main():
         return
 
     if args.command == "web-server":
-        import asyncio
-        from .diagnose_engine import DiagnoseEngine
+        try:
+            import asyncio
+            from .diagnose_engine import DiagnoseEngine
+        except ImportError:
+            print(f"  {C['red']}Модуль web_server/diagnose_engine не найден — функция ещё не реализована{R}")
+            return
         engine = DiagnoseEngine()
         server = create_web_server(engine)
         asyncio.run(server.start())
