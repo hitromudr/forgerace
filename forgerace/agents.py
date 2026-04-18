@@ -1037,6 +1037,43 @@ def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
 {preflight_result}
 """
 
+    # Text-protocol agents (aider): inject file contents and SEARCH/REPLACE instructions
+    acfg = cfg.agents.get(agent_type)
+    if acfg and acfg.protocol == "text":
+        file_contents = ""
+        task_files = _extract_task_files(task)
+        for fpath in task_files:
+            full = cfg.root_dir / fpath
+            if full.exists() and full.is_file():
+                try:
+                    content = full.read_text(encoding="utf-8", errors="ignore")
+                    # Limit per-file content to avoid blowing up context
+                    if len(content) > 4000:
+                        content = content[:4000] + "\n... (truncated)"
+                    file_contents += f"\n--- {fpath} ---\n{content}\n"
+                except (OSError, UnicodeDecodeError):
+                    pass
+        if file_contents:
+            prompt += f"""
+## Current file contents
+{file_contents}
+"""
+        prompt += """
+## Edit instructions
+Edit the files using SEARCH/REPLACE blocks. Example:
+<<<<<<< SEARCH
+old code here
+=======
+new code here
+>>>>>>> REPLACE
+
+Make minimal, targeted changes. Do not rewrite entire files.
+"""
+        # Limit prompt for text-protocol agents (smaller context window)
+        max_chars = 15000
+        if len(prompt) > max_chars:
+            prompt = prompt[:max_chars] + "\n\n... (prompt truncated)"
+
     return prompt
 
 

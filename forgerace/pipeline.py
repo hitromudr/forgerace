@@ -1489,12 +1489,23 @@ def run_pipeline(
         # Redirect all worktree/merge operations to feature branch
         cfg.dev_branch = feature_branch
 
-    # Очистка зависших задач
-    from src.stale_task_cleaner import clean_stale_tasks
-    cleaned = clean_stale_tasks()
-    if cleaned > 0:
-        log.info(f"Очищено {cleaned} зависших задач")
-        tasks = _parse()  # Перечитаем задачи после очистки
+    # Auto-clean stale states
+    _stale_cleaned = 0
+    for t in tasks:
+        if t.status.startswith("in_progress"):
+            # Check if any worktree exists for this task
+            worktree_exists = any(cfg.agents_dir.glob("agent-*")) if cfg.agents_dir.exists() else False
+            if not worktree_exists:
+                log.warning(f"[{t.id}] stale in_progress (no worktree) \u2192 open")
+                update_task_status(t.id, "open")
+                _stale_cleaned += 1
+        elif t.status == "blocked" and not t.deps:
+            log.warning(f"[{t.id}] blocked without deps \u2192 open")
+            update_task_status(t.id, "open")
+            _stale_cleaned += 1
+    if _stale_cleaned > 0:
+        log.info(f"Очищено {_stale_cleaned} зависших задач")
+        tasks = _parse()
 
     # Автозакрытие чекпоинт-задач если check_command проходит
     if cfg.check_command:

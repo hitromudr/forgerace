@@ -1,6 +1,7 @@
 """Core tests: imports, config, task parsing, agent routing."""
 import pytest
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -119,3 +120,75 @@ def test_review_majority_vote():
     ]
     approved = sum(1 for r in reviews if r["verdict"] == "APPROVED")
     assert approved > len(reviews) / 2  # 2 > 1.5
+
+
+def test_validate_generated_tasks_phantom_deps():
+    """Phantom dependencies are removed from generated tasks."""
+    from forgerace.decompose import validate_generated_tasks
+    from forgerace.tasks import Task
+    from dataclasses import fields
+
+    def _make(id, status="done"):
+        kwargs = {f.name: "" for f in fields(Task)}
+        kwargs.update(id=id, status=status, priority="P1",
+                      deps=[], rework_count=0, last_attempts=[])
+        return Task(**kwargs)
+
+    existing = [_make("TASK-001"), _make("TASK-002")]
+    block = """### TASK-010: Test task
+- **Статус**: open
+- **Зависимости**: TASK-001, TASK-999
+"""
+    result = validate_generated_tasks(block, existing)
+    assert "TASK-999" not in result
+    assert "TASK-001" in result
+
+
+def test_validate_generated_tasks_duplicate_ids():
+    """Duplicate TASK IDs in generated block are renumbered."""
+    from forgerace.decompose import validate_generated_tasks
+    from forgerace.tasks import Task
+    from dataclasses import fields
+
+    def _make(id, status="done"):
+        kwargs = {f.name: "" for f in fields(Task)}
+        kwargs.update(id=id, status=status, priority="P1",
+                      deps=[], rework_count=0, last_attempts=[])
+        return Task(**kwargs)
+
+    existing = [_make("TASK-001")]
+    block = """### TASK-010: First
+- **Статус**: open
+- **Зависимости**: —
+
+### TASK-010: Duplicate
+- **Статус**: open
+- **Зависимости**: —
+"""
+    result = validate_generated_tasks(block, existing)
+    # Should have two different TASK IDs now
+    task_ids = re.findall(r"### (TASK-\d+):", result)
+    assert len(task_ids) == 2
+    assert len(set(task_ids)) == 2, f"Still has duplicates: {task_ids}"
+
+
+def test_validate_generated_tasks_no_changes_needed():
+    """Valid tasks block passes through unchanged (except whitespace)."""
+    from forgerace.decompose import validate_generated_tasks
+    from forgerace.tasks import Task
+    from dataclasses import fields
+
+    def _make(id, status="done"):
+        kwargs = {f.name: "" for f in fields(Task)}
+        kwargs.update(id=id, status=status, priority="P1",
+                      deps=[], rework_count=0, last_attempts=[])
+        return Task(**kwargs)
+
+    existing = [_make("TASK-001")]
+    block = """### TASK-010: Clean task
+- **Статус**: open
+- **Зависимости**: TASK-001
+"""
+    result = validate_generated_tasks(block, existing)
+    assert "TASK-010" in result
+    assert "TASK-001" in result

@@ -1,6 +1,7 @@
 """Оценка сложности задач и авто-декомпозиция."""
 
 import re
+from pathlib import Path
 
 from .config import cfg, run_hint
 from .tasks import Task, parse_tasks, _tasks_file_lock, _atomic_write, tasks_file_lock
@@ -8,6 +9,87 @@ from .utils import log, is_valid_path
 
 # Кэш: задачи, которые уже оценивались (id -> complexity)
 _task_complexity: dict[str, int] = {}
+
+
+def validate_generated_tasks(tasks_block: str, existing_tasks: list[Task]) -> str:
+    """Validate and fix generated tasks block before inserting into TASKS.md.
+
+    Fixes:
+    - Phantom dependencies (refs to non-existent TASK IDs)
+    - Duplicate TASK IDs within the block
+    - Suspicious file paths (common agent hallucinations)
+
+    Returns cleaned tasks_block.
+    """
+    existing_ids = {t.id for t in existing_tasks}
+    block_ids = re.findall(r"### (TASK-\d+):", tasks_block)
+
+    # 1. Detect and fix duplicate IDs within the generated block
+    seen_ids: set[str] = set()
+    duplicates: list[str] = []
+    for tid in block_ids:
+        if tid in seen_ids:
+            duplicates.append(tid)
+        seen_ids.add(tid)
+
+    if duplicates:
+        # Renumber duplicates: find max number in block + existing
+        all_nums = [int(re.match(r"TASK-(\d+)", t).group(1))
+                     for t in (seen_ids | existing_ids) if re.match(r"TASK-(\d+)", t)]
+        next_num = max(all_nums, default=0) + 1
+        for dup_id in duplicates:
+            # Replace only the second (and later) occurrence
+            parts = tasks_block.split(f"### {dup_id}:")
+            if len(parts) > 2:
+                # Rebuild: keep first occurrence, renumber the rest
+                rebuilt = parts[0] + f"### {dup_id}:" + parts[1]
+                for extra_part in parts[2:]:
+                    new_id = f"TASK-{next_num:03d}"
+                    rebuilt += f"### {new_id}:" + extra_part
+                    # Also fix internal refs to the duplicate
+                    log.warning(f"  Duplicate {dup_id} renumbered to {new_id}")
+                    next_num += 1
+                tasks_block = rebuilt
+
+    # 2. Validate dependencies: remove phantom refs
+    all_valid_ids = existing_ids | set(re.findall(r"### (TASK-\d+):", tasks_block))
+
+    def _fix_deps_line(match: re.Match) -> str:
+        prefix = match.group(1)
+        deps_str = match.group(2)
+        dep_refs = re.findall(r"TASK-\d+", deps_str)
+        if not dep_refs:
+            return match.group(0)
+        valid_deps = [d for d in dep_refs if d in all_valid_ids]
+        phantom = [d for d in dep_refs if d not in all_valid_ids]
+        for p in phantom:
+            log.warning(f"  Phantom dependency removed: {p}")
+        if valid_deps:
+            return prefix + ", ".join(valid_deps)
+        return prefix + "\u2014"
+
+    tasks_block = re.sub(
+        r"(\*\*Зависимости\*\*:\s*)(.+)",
+        _fix_deps_line,
+        tasks_block,
+    )
+
+    # 3. Warn about suspicious file paths (common agent hallucinations)
+    for path_match in re.finditer(r"\*\*Файлы \((новые|modify)\)\*\*:\s*(.+)", tasks_block):
+        paths_str = path_match.group(2).strip()
+        if paths_str in ("\u2014", "-", ""):
+            continue
+        for fpath in paths_str.split(","):
+            fpath = fpath.strip()
+            if not fpath or fpath in ("\u2014", "-"):
+                continue
+            # Check for hallucinated paths: non-existent deep paths
+            full_path = cfg.root_dir / fpath
+            parent = full_path.parent
+            if not parent.exists() and "/" in fpath:
+                log.warning(f"  Suspicious path (parent dir missing): {fpath}")
+
+    return tasks_block
 
 
 def get_task_complexity(task_id: str) -> int:
@@ -154,6 +236,9 @@ COMPLEXITY: N
     # Сохраняем копию
     decompose_file = cfg.log_dir / f"{task.id.lower()}-decomposed.md"
     decompose_file.write_text(tasks_block + "\n", encoding="utf-8")
+
+    # Validate generated tasks (phantom deps, duplicates, suspicious paths)
+    tasks_block = validate_generated_tasks(tasks_block, parse_tasks())
 
     # Принудительно подставляем дискуссию родителя в подзадачи
     disc = task.discussion if task.discussion and task.discussion != "—" else ""

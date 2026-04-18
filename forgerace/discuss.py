@@ -568,6 +568,10 @@ def _post_resolve(filepath: Path):
     fixed_lines = [_fix_oneline_task(line) for line in clean_block.split("\n")]
     clean_block = "\n".join(fixed_lines)
 
+    # Validate generated tasks (phantom deps, duplicates, suspicious paths)
+    from .decompose import validate_generated_tasks
+    clean_block = validate_generated_tasks(clean_block, parse_tasks(tasks_file))
+
     # Renumber tasks to avoid duplicates, then insert — all under file lock
     from .tasks import tasks_file_lock, _atomic_write
     with tasks_file_lock():
