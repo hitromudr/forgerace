@@ -555,38 +555,33 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
 
                 if completed == total and total > 0:
                     bar = f"{C['green']}{'█' * BAR_LEN}{R}"
-                    if skip > 0:
-                        print(f"  {C['green']}{team_name[:15]}{R}  {done}/{total}  {bar}  {C['green']}DONE{R} {C['dim']}({skip} skip){R}\n")
+                    skip_str = f" {C['dim']}({skip} skip){R}" if skip > 0 else ""
+                    status_str = f"  {C['green']}DONE{R}{skip_str}"
+                else:
+                    ip_tasks = [t for t in tt if "progress" in t.status or t.id in _coding_now]
+                    blocked_tasks = [t for t in tt if "blocked" in t.status.lower() and t.id not in _coding_now]
+                    ip = len(ip_tasks)
+                    blocked = len(blocked_tasks)
+                    pending = total - completed - ip - blocked
+
+                    filled = int(BAR_LEN * completed / total) if total else 0
+                    bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (BAR_LEN - filled)}{R}"
+
+                    if ip > 0:
+                        status_str = f"  {C['magenta']}coding ({ip}){R}"
+                    elif blocked > 0 and procs == 0:
+                        status_str = f"  {C['red']}STOPPED{R} {C['dim']}({blocked} failed){R}"
+                    elif blocked > 0:
+                        status_str = f"  {C['red']}blocked ({blocked}){R}"
+                    elif pending > 0 and procs == 0:
+                        status_str = f"  {C['yellow']}IDLE{R} {C['dim']}({pending} waiting){R}"
+                    elif pending > 0:
+                        status_str = f"  {C['yellow']}pending ({pending}){R}"
                     else:
-                        print(f"  {C['green']}{team_name[:15]}{R}  {done}/{total}  {bar}  {C['green']}DONE{R}\n")
-                    continue
-
-                # Combine TASKS.md status + live log detection
-                ip_tasks = [t for t in tt if "progress" in t.status or t.id in _coding_now]
-                blocked_tasks = [t for t in tt if "blocked" in t.status.lower() and t.id not in _coding_now]
-                ip = len(ip_tasks)
-                blocked = len(blocked_tasks)
-                pending = total - completed - ip - blocked
-
-                filled = int(BAR_LEN * completed / total) if total else 0
-                bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (BAR_LEN - filled)}{R}"
+                        status_str = ""
 
                 pct = f"{done}/{total}"
                 short = team_name[:15]
-
-                # Status: what's happening right now
-                if ip > 0:
-                    status_str = f"  {C['magenta']}coding ({ip}){R}"
-                elif blocked > 0 and procs == 0:
-                    status_str = f"  {C['red']}STOPPED{R} {C['dim']}({blocked} failed){R}"
-                elif blocked > 0:
-                    status_str = f"  {C['red']}blocked ({blocked}){R}"
-                elif pending > 0 and procs == 0:
-                    status_str = f"  {C['yellow']}IDLE{R} {C['dim']}({pending} waiting){R}"
-                elif pending > 0:
-                    status_str = f"  {C['yellow']}pending ({pending}){R}"
-                else:
-                    status_str = ""
                 print(f"  {C['bold']}{short}{R}  {pct}  {bar}{status_str}")
 
                 # Show each task in this team
