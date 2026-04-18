@@ -65,12 +65,18 @@ def _create_worktree_impl(agent_num: int, branch: str) -> Path:
         log.error(f"Не удалось создать worktree: {result.stderr}")
         raise RuntimeError(f"git worktree add failed: {result.stderr}")
 
-    # Remove orchestrator files from worktree — agents must not edit them
-    for protected in ("TASKS.md", "forgerace.toml", "litellm_config.yaml",
-                       "CLAUDE.md", ".gitignore"):
+    # Protect orchestrator files: mark as assume-unchanged so git ignores
+    # agent modifications, then replace with empty/minimal content
+    _PROTECTED = ("TASKS.md", "forgerace.toml", "litellm_config.yaml",
+                  "CLAUDE.md", ".gitignore")
+    for protected in _PROTECTED:
         pf = agent_dir / protected
+        # Mark assume-unchanged — git won't track changes even if agent modifies
+        run_cmd(["git", "update-index", "--assume-unchanged", protected],
+                cwd=agent_dir, check=False)
+        # Replace content with stub so agent can't extract useful data
         if pf.exists():
-            pf.unlink()
+            pf.write_text(f"# {protected} — protected by orchestrator, do not edit\n")
 
     log.info(f"Worktree создан: {agent_dir} → {branch}")
     return agent_dir

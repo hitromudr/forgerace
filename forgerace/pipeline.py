@@ -418,9 +418,11 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
             error_log = stderr
             continue
 
-        # Restore protected files before commit (agent may have deleted/modified them)
+        # Restore protected files: unmark assume-unchanged, restore from base branch
         for pf in ("TASKS.md", "forgerace.toml", "litellm_config.yaml",
                     "CLAUDE.md", ".gitignore"):
+            run_cmd(["git", "update-index", "--no-assume-unchanged", pf],
+                    cwd=workdir, check=False)
             run_cmd(["git", "checkout", cfg.dev_branch, "--", pf],
                     cwd=workdir, check=False)
         # Коммит — добавляем ВСЕ изменения, не только task_paths
