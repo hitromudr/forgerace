@@ -1354,6 +1354,7 @@ def main():
         return
 
     if args.command == "web-server":
+        import asyncio
         from .diagnose_engine import DiagnoseEngine
         engine = DiagnoseEngine()
         server = create_web_server(engine)
