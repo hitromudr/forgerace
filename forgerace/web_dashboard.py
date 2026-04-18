@@ -1,7 +1,10 @@
-"""Production web dashboard for ForgeRace — single-file HTTP server with SSE."""
+"""Production web dashboard for ForgeRace — single-file HTTP server with SSE.
+
+Exposes full CLI functionality: dashboard, discussions, agents, history, settings.
+"""
 
 import glob as _glob
-import json, os, re, subprocess, threading, time
+import json, os, re, subprocess, sys, threading, time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
@@ -64,7 +67,6 @@ def _count_processes() -> int:
 
 
 def _list_teams() -> list[str]:
-    """List team names from discussions directory."""
     teams = set()
     try:
         tasks = parse_tasks()
@@ -80,7 +82,6 @@ def _list_teams() -> list[str]:
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
 def _read_history(limit: int = 20) -> list[dict]:
-    """Read recent TASK events from log files."""
     events = []
     log_dir = cfg.log_dir
     if not log_dir.exists():
@@ -147,81 +148,457 @@ def _build_snapshot() -> dict:
         "teams": teams,
         "team_names": _list_teams(),
         "history": _read_history(20),
+        "mode": cfg.mode,
+        "agent_count": len(cfg.agent_names),
+    }
+
+
+def _list_discussions() -> list[dict]:
+    result = []
+    ddir = cfg.discuss_dir
+    if not ddir.exists():
+        return result
+    for f in sorted(ddir.glob("*.md")):
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+            status = "resolved" if "--- RESOLVED ---" in text else "open"
+            participants = set(re.findall(r"^## @(\S+)", text, re.MULTILINE))
+            result.append({"topic": f.stem, "status": status,
+                           "participants": len(participants),
+                           "participant_names": sorted(participants)})
+        except OSError:
+            continue
+    return result
+
+
+def _show_discussion(topic: str) -> str:
+    fp = cfg.discuss_dir / f"{topic}.md"
+    if fp.exists():
+        return fp.read_text(encoding="utf-8", errors="replace")
+    return ""
+
+
+def _list_agents_info() -> list[dict]:
+    result = []
+    for name, acfg in cfg.agents.items():
+        # Check last activity from logs
+        last_activity = ""
+        log_dir = cfg.log_dir
+        if log_dir.exists():
+            for logfile in sorted(log_dir.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True):
+                if name in logfile.name and logfile.name.endswith(".log"):
+                    try:
+                        last_activity = time.strftime("%H:%M:%S", time.localtime(logfile.stat().st_mtime))
+                    except OSError:
+                        pass
+                    break
+        # Count completed tasks
+        active = any(a["agent"] == name for a in _detect_active_agents())
+        status = "active" if active else ("idle" if acfg.enabled else "disabled")
+        result.append({
+            "name": name,
+            "type": "API" if acfg.protocol == "openai" else "CLI",
+            "protocol": acfg.protocol,
+            "enabled": acfg.enabled,
+            "status": status,
+            "last_activity": last_activity,
+            "command": acfg.command,
+        })
+    return result
+
+
+def _read_config_file() -> str:
+    for name in ("forgerace.toml",):
+        p = cfg.root_dir / name
+        if p.exists():
+            try:
+                return p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+    return "# No forgerace.toml found"
+
+
+def _get_system_info() -> dict:
+    branch = ""
+    try:
+        branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                                cwd=str(cfg.root_dir), capture_output=True, text=True,
+                                timeout=3).stdout.strip()
+    except Exception:
+        pass
+    return {
+        "python": sys.version.split()[0],
+        "branch": branch,
+        "root": str(cfg.root_dir),
+        "mode": cfg.mode,
+        "frames": sorted(cfg.frames.keys()) if cfg.frames else [],
     }
 
 
 # ---------------------------------------------------------------------------
-# HTML/CSS/JS
+# HTML/CSS/JS — full management UI
 # ---------------------------------------------------------------------------
 
 _HTML = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ForgeRace Dashboard</title>
-<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:1.2em;min-height:100vh}a{color:#4ade80}.mono{font-family:'JetBrains Mono',monospace}
-.header{display:flex;flex-wrap:wrap;align-items:center;gap:1em;margin-bottom:1.5em;padding-bottom:1em;border-bottom:1px solid #2a2a4e}.header h1{font-size:1.4em;font-weight:600}.header h1 span{color:#4ade80}
-.summary{display:flex;flex-wrap:wrap;gap:.8em;margin-left:auto}.pill{background:#16213e;border:1px solid #2a2a4e;border-radius:20px;padding:.35em .9em;font-size:.85em;white-space:nowrap;cursor:pointer}.pill:hover{background:#1e2748}
-.pill.on{border-color:#4ade80;color:#4ade80}.pill.off,.pill.danger{border-color:#ef4444;color:#ef4444}.pill.starting{border-color:#eab308;color:#eab308}.pill.action{border-color:#60a5fa;color:#60a5fa}
-.ts{color:#6b7280;font-size:.8em;margin-left:auto}.controls{display:flex;flex-wrap:wrap;align-items:center;gap:.6em;margin-bottom:1.2em}.controls select{background:#16213e;color:#e0e0e0;border:1px solid #2a2a4e;border-radius:8px;padding:.35em .7em;font-size:.85em}
-.activity{margin-bottom:1.5em}.activity-title{font-size:.95em;color:#a855f7;margin-bottom:.5em;font-weight:600}
-.agent-card{display:inline-flex;align-items:center;gap:.5em;background:#16213e;border:1px solid #2a2a4e;border-radius:8px;padding:.4em .8em;margin:0 .5em .5em 0;font-size:.85em}.agent-card .dot{width:8px;height:8px;border-radius:50%;background:#a855f7;animation:pulse 1.5s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}.team{background:#16213e;border:1px solid #2a2a4e;border-radius:10px;margin-bottom:1em;overflow:hidden}.team:hover{border-color:#4ade80}
-.team-header{display:flex;align-items:center;gap:.8em;padding:.8em 1em;cursor:pointer;user-select:none}.team-header:hover{background:#1e2748}.team-name{font-weight:600;color:#eab308;flex:1}.team-stats{font-size:.85em;color:#6b7280}
-.team-chevron{color:#6b7280;transition:transform .3s;font-size:.8em}.team.collapsed .team-chevron{transform:rotate(-90deg)}.team.collapsed .team-body{max-height:0;padding:0;opacity:0}
-.bar-wrap{width:140px;height:10px;background:#2a2a4e;border-radius:5px;overflow:hidden;flex-shrink:0}.bar-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,#22c55e,#4ade80);transition:width .6s;position:relative}
-.bar-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.15) 50%,transparent);animation:shimmer 2s infinite}@keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
-.team-body{padding:0 1em;max-height:2000px;opacity:1;transition:max-height .4s,opacity .3s,padding .3s;overflow:hidden}
-.task{display:flex;align-items:center;gap:.6em;padding:.4em .5em;border-radius:6px;font-size:.88em}.task:hover{background:#1e2748}.task:last-child{margin-bottom:.6em}
-.task-icon{width:1.4em;text-align:center;flex-shrink:0}.task-id{color:#6b7280;font-family:monospace;font-size:.85em;width:5.5em;flex-shrink:0}.task-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.task-agent{font-size:.75em;color:#6b7280;background:#2a2a4e;border-radius:4px;padding:.15em .4em;flex-shrink:0}
-.st-done .task-icon{color:#4ade80}.st-skip .task-icon{color:#6b7280}.st-in_progress .task-icon{color:#a855f7;animation:pulse 1.5s infinite}.st-review .task-icon{color:#f59e0b}.st-blocked .task-icon,.st-failed .task-icon{color:#ef4444}.st-open .task-icon{color:#eab308}.st-claimed .task-icon{color:#a855f7}
-.empty{color:#6b7280;padding:2em;text-align:center}.history{background:#16213e;border:1px solid #2a2a4e;border-radius:10px;margin-top:1.2em;padding:.8em 1em;max-height:300px;overflow-y:auto}
-.history-title{font-size:.95em;color:#60a5fa;margin-bottom:.5em;font-weight:600}.history-line{font-family:'JetBrains Mono',monospace;font-size:.78em;padding:.15em 0;border-bottom:1px solid #2a2a3e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hk-done{color:#4ade80}.hk-blocked{color:#ef4444}.hk-review{color:#f59e0b}.hk-coding{color:#a855f7}.hk-info{color:#6b7280}
-.toast{position:fixed;top:1em;right:1em;background:#16213e;border:1px solid #4ade80;border-radius:8px;padding:.6em 1.2em;font-size:.85em;color:#4ade80;opacity:0;transition:opacity .3s;z-index:999;pointer-events:none}.toast.err{border-color:#ef4444;color:#ef4444}.toast.show{opacity:1}
-@media(max-width:640px){body{padding:.6em}.header{flex-direction:column;gap:.5em}.summary{margin-left:0;width:100%}.bar-wrap{width:100px}.task-name{max-width:45vw}}</style></head><body>
+<style>
+:root{--bg:#1a1a2e;--card:#16213e;--border:#2a2a4e;--hover:#1e2748;--green:#4ade80;--red:#ef4444;--yellow:#eab308;--purple:#a855f7;--blue:#60a5fa;--gray:#6b7280;--text:#e0e0e0;--text-dim:#9ca3af}
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',monospace;font-size:.9em}
+.header{display:flex;flex-wrap:wrap;align-items:center;gap:1em;padding:1em 1.5em;border-bottom:1px solid var(--border);background:var(--card)}
+.header h1{font-size:1.3em;font-weight:700}.header h1 span{color:var(--green)}
+.summary{display:flex;flex-wrap:wrap;gap:.5em;margin-left:auto;align-items:center}
+.pill{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:.3em .8em;font-size:.8em;white-space:nowrap;cursor:pointer;transition:all .2s}
+.pill:hover{background:var(--hover);border-color:var(--text-dim)}
+.pill.on{border-color:var(--green);color:var(--green)}.pill.off,.pill.danger{border-color:var(--red);color:var(--red)}
+.pill.starting{border-color:var(--yellow);color:var(--yellow)}.pill.action{border-color:var(--blue);color:var(--blue)}
+.pill.mode{border-color:var(--purple);color:var(--purple)}
+.status-bar{display:flex;flex-wrap:wrap;gap:1em;padding:.5em 1.5em;background:rgba(22,33,62,.5);border-bottom:1px solid var(--border);font-size:.8em;color:var(--text-dim);align-items:center}
+.ts{color:var(--gray);font-size:.8em}
+/* Tabs */
+.tabs{display:flex;gap:0;padding:0 1.5em;background:var(--card);border-bottom:2px solid var(--border)}
+.tab{padding:.7em 1.2em;cursor:pointer;font-size:.85em;font-weight:500;color:var(--text-dim);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s;user-select:none}
+.tab:hover{color:var(--text)}.tab.active{color:var(--green);border-bottom-color:var(--green)}
+.tab-content{display:none;padding:1.2em 1.5em}.tab-content.active{display:block}
+/* Controls */
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:.6em;margin-bottom:1em}
+.controls select{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:.35em .7em;font-size:.85em}
+/* Activity */
+.activity{margin-bottom:1em}.activity-title{font-size:.9em;color:var(--purple);margin-bottom:.4em;font-weight:600}
+.agent-card{display:inline-flex;align-items:center;gap:.5em;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.35em .7em;margin:0 .4em .4em 0;font-size:.82em}
+.agent-card .dot{width:8px;height:8px;border-radius:50%;background:var(--purple);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+/* Teams */
+.team{background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:.8em;overflow:hidden;transition:border-color .2s}
+.team:hover{border-color:var(--green)}.team-header{display:flex;align-items:center;gap:.8em;padding:.7em 1em;cursor:pointer;user-select:none}
+.team-header:hover{background:var(--hover)}.team-name{font-weight:600;color:var(--yellow);flex:1}.team-stats{font-size:.82em;color:var(--gray)}
+.team-chevron{color:var(--gray);transition:transform .3s;font-size:.75em}.team.collapsed .team-chevron{transform:rotate(-90deg)}
+.team.collapsed .team-body{max-height:0;padding:0;opacity:0;overflow:hidden}
+.bar-wrap{width:120px;height:8px;background:var(--border);border-radius:5px;overflow:hidden;flex-shrink:0}
+.bar-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,#22c55e,var(--green));transition:width .6s;position:relative}
+.bar-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.15) 50%,transparent);animation:shimmer 2s infinite}
+@keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+.team-body{padding:0 1em;max-height:2000px;opacity:1;transition:max-height .4s,opacity .3s,padding .3s}
+.task{display:flex;align-items:center;gap:.5em;padding:.35em .5em;border-radius:6px;font-size:.85em}.task:hover{background:var(--hover)}.task:last-child{margin-bottom:.5em}
+.task-icon{width:1.3em;text-align:center;flex-shrink:0}.task-id{color:var(--gray);font-family:monospace;font-size:.82em;width:5.5em;flex-shrink:0}
+.task-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-agent{font-size:.72em;color:var(--gray);background:var(--border);border-radius:4px;padding:.12em .4em;flex-shrink:0}
+.st-done .task-icon{color:var(--green)}.st-skip .task-icon{color:var(--gray)}.st-in_progress .task-icon{color:var(--purple);animation:pulse 1.5s infinite}
+.st-review .task-icon{color:#f59e0b}.st-blocked .task-icon,.st-failed .task-icon{color:var(--red)}.st-open .task-icon{color:var(--yellow)}.st-claimed .task-icon{color:var(--purple)}
+/* History */
+.history-panel{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.8em 1em;max-height:500px;overflow-y:auto}
+.history-title{font-size:.9em;color:var(--blue);margin-bottom:.4em;font-weight:600}
+.history-line{font-family:'JetBrains Mono',monospace;font-size:.75em;padding:.12em 0;border-bottom:1px solid rgba(42,42,78,.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hk-done{color:var(--green)}.hk-blocked{color:var(--red)}.hk-review{color:#f59e0b}.hk-coding{color:var(--purple)}.hk-info{color:var(--gray)}
+.history-filters{display:flex;gap:.5em;margin-bottom:.5em;flex-wrap:wrap;align-items:center}
+.history-filters input,.history-filters select{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:.3em .6em;font-size:.8em}
+/* Discussions */
+.disc-list{display:grid;gap:.6em}.disc-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.8em 1em;cursor:pointer;transition:all .2s}
+.disc-item:hover{border-color:var(--green);background:var(--hover)}
+.disc-topic{font-weight:600;color:var(--yellow);font-size:.95em}.disc-meta{font-size:.78em;color:var(--gray);margin-top:.2em}
+.disc-status{display:inline-block;padding:.1em .5em;border-radius:10px;font-size:.72em;font-weight:600}
+.disc-status.open{background:rgba(74,222,128,.15);color:var(--green)}.disc-status.resolved{background:rgba(107,114,128,.15);color:var(--gray)}
+.disc-viewer{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:1em;max-height:500px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:.82em;white-space:pre-wrap;line-height:1.5}
+/* Agents table */
+.agents-table{width:100%;border-collapse:collapse;font-size:.85em}
+.agents-table th{text-align:left;color:var(--text-dim);font-weight:500;padding:.5em .8em;border-bottom:1px solid var(--border)}
+.agents-table td{padding:.5em .8em;border-bottom:1px solid rgba(42,42,78,.3)}
+.agents-table tr:hover td{background:var(--hover)}
+/* Toggle switch */
+.toggle{position:relative;display:inline-block;width:36px;height:20px;cursor:pointer}
+.toggle input{display:none}.toggle .slider{position:absolute;inset:0;background:var(--border);border-radius:20px;transition:.3s}
+.toggle input:checked+.slider{background:var(--green)}
+.toggle .slider::before{content:'';position:absolute;width:16px;height:16px;left:2px;bottom:2px;background:#fff;border-radius:50%;transition:.3s}
+.toggle input:checked+.slider::before{transform:translateX(16px)}
+/* Settings */
+.config-view{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:1em;max-height:500px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:.8em;white-space:pre-wrap;line-height:1.4;color:var(--text-dim)}
+.sys-info{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.6em;margin-top:1em}
+.sys-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.6em .8em}
+.sys-card label{font-size:.72em;color:var(--gray);text-transform:uppercase;display:block;margin-bottom:.2em}
+.sys-card span{font-size:.9em;font-weight:500}
+/* Modal */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:100}
+.modal-bg.show{display:flex}.modal{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.5em;width:min(90vw,500px);max-height:85vh;overflow-y:auto}
+.modal h3{margin-bottom:1em;color:var(--green)}.modal label{display:block;font-size:.82em;color:var(--text-dim);margin-bottom:.3em;margin-top:.8em}
+.modal input,.modal textarea,.modal select{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:.5em .7em;font-size:.85em;font-family:inherit}
+.modal textarea{min-height:80px;resize:vertical}
+.modal .agent-checks{display:flex;flex-wrap:wrap;gap:.5em;margin-top:.3em}
+.modal .agent-checks label{display:inline-flex;align-items:center;gap:.3em;font-size:.82em;cursor:pointer;color:var(--text)}
+.modal-actions{display:flex;gap:.6em;margin-top:1.2em;justify-content:flex-end}
+.btn{padding:.45em 1em;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);cursor:pointer;font-size:.82em;transition:all .2s}
+.btn:hover{background:var(--hover)}.btn-primary{background:var(--green);color:#000;border-color:var(--green);font-weight:600}
+.btn-primary:hover{background:#22c55e}.btn-danger{border-color:var(--red);color:var(--red)}.btn-danger:hover{background:rgba(239,68,68,.15)}
+.empty{color:var(--gray);padding:2em;text-align:center}
+/* Toast */
+.toast{position:fixed;top:1em;right:1em;background:var(--card);border:1px solid var(--green);border-radius:8px;padding:.5em 1em;font-size:.82em;color:var(--green);opacity:0;transition:opacity .3s;z-index:200;pointer-events:none;max-width:350px}
+.toast.err{border-color:var(--red);color:var(--red)}.toast.show{opacity:1}
+/* Responsive */
+@media(max-width:640px){.header{flex-direction:column;gap:.5em;padding:.8em}.summary{margin-left:0;width:100%}.tabs{overflow-x:auto;padding:0 .5em}
+.tab{padding:.5em .8em;font-size:.8em}.tab-content{padding:.8em}.bar-wrap{width:80px}.task-name{max-width:40vw}.modal{width:95vw;padding:1em}}
+</style></head><body>
 
 <div class="header">
   <h1>Forge<span>Race</span></h1>
   <div class="summary" id="summary"></div>
   <div class="ts" id="ts">connecting...</div>
 </div>
-<div class="controls" id="controls"></div>
-<div class="activity" id="activity"></div>
-<div id="root"></div>
-<div class="history" id="historyPanel" style="display:none"><div class="history-title">Event Log</div><div id="historyBody"></div></div>
+<div class="status-bar" id="statusBar"></div>
+<div class="tabs" id="tabBar">
+  <div class="tab active" data-tab="dashboard">Dashboard</div>
+  <div class="tab" data-tab="discussions">Discussions</div>
+  <div class="tab" data-tab="agents">Agents</div>
+  <div class="tab" data-tab="history">History</div>
+  <div class="tab" data-tab="settings">Settings</div>
+</div>
+
+<!-- Tab: Dashboard -->
+<div class="tab-content active" id="tab-dashboard">
+  <div class="controls" id="controls"></div>
+  <div class="activity" id="activity"></div>
+  <div id="root"></div>
+  <div class="history-panel" id="miniHistory" style="margin-top:1em;display:none">
+    <div class="history-title">Recent Events</div>
+    <div id="miniHistoryBody"></div>
+  </div>
+</div>
+
+<!-- Tab: Discussions -->
+<div class="tab-content" id="tab-discussions">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1em">
+    <h3 style="color:var(--yellow)">Discussions</h3>
+    <span class="btn btn-primary" onclick="showModal('newDiscModal')">New Discussion</span>
+  </div>
+  <div id="discList" class="disc-list"></div>
+  <div id="discViewer" style="margin-top:1em;display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5em">
+      <span id="discViewTitle" style="font-weight:600;color:var(--yellow)"></span>
+      <div style="display:flex;gap:.5em">
+        <span class="btn" onclick="showModal('replyModal')">Reply</span>
+        <span class="btn btn-primary" onclick="showModal('resolveModal')">Resolve</span>
+        <span class="btn" onclick="hideDiscViewer()">Close</span>
+      </div>
+    </div>
+    <div class="disc-viewer" id="discContent"></div>
+  </div>
+</div>
+
+<!-- Tab: Agents -->
+<div class="tab-content" id="tab-agents">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1em">
+    <h3 style="color:var(--purple)">Agents</h3>
+    <div style="display:flex;gap:.8em;align-items:center;font-size:.85em">
+      <span style="color:var(--text-dim)">Mode:</span>
+      <label style="cursor:pointer"><input type="radio" name="modeRadio" value="competitive" onchange="setMode('competitive')"> competitive</label>
+      <label style="cursor:pointer"><input type="radio" name="modeRadio" value="distributed" onchange="setMode('distributed')"> distributed</label>
+    </div>
+  </div>
+  <table class="agents-table">
+    <thead><tr><th>Agent</th><th>Type</th><th>Protocol</th><th>Status</th><th>Last Activity</th><th>Enabled</th></tr></thead>
+    <tbody id="agentsBody"></tbody>
+  </table>
+</div>
+
+<!-- Tab: History -->
+<div class="tab-content" id="tab-history">
+  <h3 style="color:var(--blue);margin-bottom:.8em">Event Log</h3>
+  <div class="history-filters">
+    <input type="text" id="histSearch" placeholder="Search..." oninput="filterHistory()">
+    <select id="histKind" onchange="filterHistory()"><option value="">All Types</option><option value="done">Done</option><option value="blocked">Blocked</option><option value="review">Review</option><option value="coding">Coding</option><option value="info">Info</option></select>
+  </div>
+  <div class="history-panel" id="fullHistory" style="max-height:calc(100vh - 280px)">
+    <div id="fullHistoryBody"></div>
+  </div>
+</div>
+
+<!-- Tab: Settings -->
+<div class="tab-content" id="tab-settings">
+  <h3 style="color:var(--text-dim);margin-bottom:.8em">Configuration</h3>
+  <div class="config-view" id="configView">Loading...</div>
+  <h3 style="color:var(--text-dim);margin-top:1.5em;margin-bottom:.8em">System Info</h3>
+  <div class="sys-info" id="sysInfo"></div>
+</div>
+
+<!-- Modal: New Discussion -->
+<div class="modal-bg" id="newDiscModal">
+  <div class="modal">
+    <h3>New Discussion</h3>
+    <label>Topic (slug)</label><input id="ndTopic" placeholder="my-feature">
+    <label>Question</label><textarea id="ndQuestion" placeholder="What approach should we use for..."></textarea>
+    <label>Invite agents</label>
+    <div class="agent-checks" id="ndAgents"></div>
+    <div class="modal-actions">
+      <span class="btn" onclick="hideModal('newDiscModal')">Cancel</span>
+      <span class="btn btn-primary" onclick="createDiscussion()">Create</span>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Reply -->
+<div class="modal-bg" id="replyModal">
+  <div class="modal">
+    <h3>Agent Reply</h3>
+    <label>Agent</label><select id="replyAgent"></select>
+    <div class="modal-actions">
+      <span class="btn" onclick="hideModal('replyModal')">Cancel</span>
+      <span class="btn btn-primary" onclick="sendReply()">Send Reply</span>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Resolve -->
+<div class="modal-bg" id="resolveModal">
+  <div class="modal">
+    <h3>Resolve Discussion</h3>
+    <label>Resolution</label><textarea id="resolveText" placeholder="Final decision..."></textarea>
+    <div class="modal-actions">
+      <span class="btn" onclick="hideModal('resolveModal')">Cancel</span>
+      <span class="btn btn-primary" onclick="resolveDiscussion()">Resolve</span>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
-<script>const ICONS={done:"\u2713",skip:"\u2298",in_progress:"\u26a1",review:"\u23f3",blocked:"\u2717",open:"\u25cb",failed:"\u274c",claimed:"\u26a1"};
-const collapsed=new Set();let _teamNames=[],_litellmPending=false;
+<script>
+const ICONS={done:"\u2713",skip:"\u2298",in_progress:"\u26a1",review:"\u23f3",blocked:"\u2717",open:"\u25cb",failed:"\u274c",claimed:"\u26a1"};
+const collapsed=new Set();let _teamNames=[],_litellmPending=false,_currentDisc="",_allHistory=[],_agentNames=[];
 const $=id=>document.getElementById(id);
 function esc(s){const d=document.createElement("div");d.textContent=s;return d.innerHTML}
-function toast(msg,err){const t=$("toast");t.textContent=msg;t.className=err?"toast err show":"toast show";setTimeout(()=>t.className="toast",3000)}
-function apiPost(u,b){fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})}).then(r=>r.json()).then(d=>toast(d.msg||d.status||"OK",!d.ok)).catch(e=>toast("Error: "+e,true))}
+function toast(msg,err){const t=$("toast");t.textContent=msg;t.className=err?"toast err show":"toast show";setTimeout(()=>t.className="toast",3500)}
+function apiPost(u,b){return fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})}).then(r=>r.json()).then(d=>{toast(d.msg||d.status||"OK",!d.ok);return d}).catch(e=>{toast("Error: "+e,true)})}
+function apiGet(u){return fetch(u).then(r=>r.json()).catch(e=>{toast("Error: "+e,true)})}
+
+/* Tabs */
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');$('tab-'+t.dataset.tab).classList.add('active');
+  if(t.dataset.tab==='discussions')loadDiscussions();
+  if(t.dataset.tab==='agents')loadAgents();
+  if(t.dataset.tab==='history')loadFullHistory();
+  if(t.dataset.tab==='settings')loadSettings();
+}));
+
+/* Modals */
+function showModal(id){$(id).classList.add('show');if(id==='newDiscModal')populateAgentChecks();if(id==='replyModal')populateReplyAgent()}
+function hideModal(id){$(id).classList.remove('show')}
+document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('show')}));
+
+/* Dashboard */
 function doRun(){const t=$("teamSel").value;t?apiPost("/api/run",{team:t}):toast("Select a team first",true)}
 function doStop(){apiPost("/api/stop")}
 function doRetry(){const t=$("teamSel").value;t?apiPost("/api/retry",{team:t}):toast("Select a team first",true)}
+function doRunAll(){apiPost("/api/run/all")}
 function toggleLitellm(on){if(_litellmPending)return;_litellmPending=true;fetch('/api/litellm/'+(on?'stop':'start')).then(r=>r.json()).then(()=>{if(on)_litellmPending=false}).catch(()=>_litellmPending=false)}
 function toggleTeam(n){collapsed.has(n)?collapsed.delete(n):collapsed.add(n);const e=document.querySelector(`[data-team="${CSS.escape(n)}"]`);if(e)e.classList.toggle("collapsed")}
+
 function renderControls(){let o=_teamNames.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
-$("controls").innerHTML=`<select id="teamSel"><option value="">-- team --</option>${o}</select><span class="pill action" onclick="doRun()">Run Team</span><span class="pill danger" onclick="doStop()">Stop All</span><span class="pill action" onclick="doRetry()">Retry Failed</span>`}
-function renderSummary(d){const p=d.total_all?Math.round(d.total_done/d.total_all*100):0;let h=`<span class="pill">${d.total_done}/${d.total_all} (${p}%)</span><span class="pill">${d.processes} proc</span>`;
+$("controls").innerHTML=`<select id="teamSel"><option value="">-- team --</option>${o}</select>`+
+`<span class="pill action" onclick="doRun()">Run Team</span>`+
+`<span class="pill action" onclick="doRunAll()">Quick Run All</span>`+
+`<span class="pill danger" onclick="doStop()">Stop All</span>`+
+`<span class="pill action" onclick="doRetry()">Retry Failed</span>`+
+`<span class="pill action" onclick="showModal('newDiscModal')">New Discussion</span>`}
+
+function renderSummary(d){const p=d.total_all?Math.round(d.total_done/d.total_all*100):0;
+let h=`<span class="pill">${d.total_done}/${d.total_all} (${p}%)</span><span class="pill">${d.processes} proc</span>`;
 if(_litellmPending&&!d.litellm)h+=`<span class="pill starting">starting...</span>`;
 else{_litellmPending=false;h+=`<span class="pill ${d.litellm?'on':'off'}" onclick="toggleLitellm(${d.litellm})">LiteLLM ${d.litellm?'ON':'OFF'}</span>`}
 $("summary").innerHTML=h}
+
+function renderStatusBar(d){
+$("statusBar").innerHTML=`<span>Mode: <b style="color:var(--purple)">${d.mode||'competitive'}</b></span>`+
+`<span>Active agents: <b>${d.agent_count||0}</b></span>`+
+`<span>Updated: ${d.timestamp}</span>`}
+
 function renderActivity(a){if(!a||!a.length){$("activity").innerHTML="";return}
 $("activity").innerHTML='<div class="activity-title">Agent Activity</div>'+a.map(x=>`<span class="agent-card"><span class="dot"></span><b>${x.agent}</b> &rarr; ${x.task}</span>`).join('')}
+
 function renderTeams(teams){const r=$("root");if(!Object.keys(teams).length){r.innerHTML='<div class="empty">No tasks found.</div>';return}let h="";
 for(const n of Object.keys(teams)){const t=teams[n],p=t.total?Math.round((t.done+t.skip)/t.total*100):0,c=collapsed.has(n);
 h+=`<div class="team${c?' collapsed':''}" data-team="${n}"><div class="team-header" onclick="toggleTeam('${n.replace(/'/g,"\\'")}')"><span class="team-chevron">&#9660;</span><span class="team-name">${esc(n)}</span><span class="team-stats">${t.done+t.skip}/${t.total}</span><div class="bar-wrap"><div class="bar-fill" style="width:${p}%"></div></div></div><div class="team-body">`;
 for(const tk of t.tasks){h+=`<div class="task st-${tk.status}"><span class="task-icon">${ICONS[tk.status]||"\u25cb"}</span><span class="task-id mono">${tk.id}</span><span class="task-name">${esc(tk.name)}</span>${tk.agent?`<span class="task-agent">${esc(tk.agent)}</span>`:''}</div>`}
 h+=`</div></div>`}r.innerHTML=h}
-function renderHistory(ev){const p=$("historyPanel"),b=$("historyBody");if(!ev||!ev.length){p.style.display="none";return}
-p.style.display="block";b.innerHTML=ev.map(e=>`<div class="history-line hk-${e.kind}">${esc(e.text)}</div>`).join('')}
+
+function renderMiniHistory(ev){const p=$("miniHistory"),b=$("miniHistoryBody");if(!ev||!ev.length){p.style.display="none";return}
+p.style.display="block";b.innerHTML=ev.slice(0,10).map(e=>`<div class="history-line hk-${e.kind}">${esc(e.text)}</div>`).join('')}
+
 function render(d){$("ts").textContent="Updated: "+d.timestamp;
 if(JSON.stringify(_teamNames)!==JSON.stringify(d.team_names||[])){_teamNames=d.team_names||[];renderControls()}
-renderSummary(d);renderActivity(d.active_agents);renderTeams(d.teams);renderHistory(d.history)}
-window.addEventListener('load',()=>{const es=new EventSource("/events");es.onmessage=e=>{try{render(JSON.parse(e.data))}catch(err){console.error(err)}};es.onerror=()=>$("ts").textContent="Connection lost, retrying..."});
+renderSummary(d);renderStatusBar(d);renderActivity(d.active_agents);renderTeams(d.teams);renderMiniHistory(d.history);
+_allHistory=d.history||[]}
+
+/* Discussions */
+function loadDiscussions(){apiGet("/api/discuss/list").then(d=>{if(!d)return;
+const list=d.discussions||[];
+if(!list.length){$("discList").innerHTML='<div class="empty">No discussions yet.</div>';return}
+$("discList").innerHTML=list.map(x=>`<div class="disc-item" onclick="viewDiscussion('${esc(x.topic)}')">`+
+`<div style="display:flex;justify-content:space-between;align-items:center"><span class="disc-topic">${esc(x.topic)}</span><span class="disc-status ${x.status}">${x.status}</span></div>`+
+`<div class="disc-meta">${x.participants} participants: ${(x.participant_names||[]).join(', ')}</div></div>`).join('')})}
+
+function viewDiscussion(topic){_currentDisc=topic;$("discViewTitle").textContent=topic;
+apiGet("/api/discuss/show/"+encodeURIComponent(topic)).then(d=>{if(!d)return;
+$("discContent").textContent=d.content||"(empty)";$("discViewer").style.display="block"})}
+function hideDiscViewer(){$("discViewer").style.display="none";_currentDisc=""}
+
+function populateAgentChecks(){apiGet("/api/agents").then(d=>{if(!d)return;
+_agentNames=(d.agents||[]).filter(a=>a.enabled).map(a=>a.name);
+$("ndAgents").innerHTML=_agentNames.map(n=>`<label><input type="checkbox" value="${n}" checked> ${n}</label>`).join('')})}
+
+function populateReplyAgent(){apiGet("/api/agents").then(d=>{if(!d)return;
+const agents=(d.agents||[]).filter(a=>a.enabled);
+$("replyAgent").innerHTML=agents.map(a=>`<option value="${a.name}">${a.name}</option>`).join('')})}
+
+function createDiscussion(){const topic=$("ndTopic").value.trim(),q=$("ndQuestion").value.trim();
+if(!topic||!q){toast("Fill topic and question",true);return}
+const agents=Array.from(document.querySelectorAll('#ndAgents input:checked')).map(i=>i.value);
+apiPost("/api/discuss/new",{topic,question:q,agents}).then(d=>{if(d&&d.ok){hideModal('newDiscModal');$("ndTopic").value='';$("ndQuestion").value='';loadDiscussions()}})}
+
+function sendReply(){if(!_currentDisc){toast("No discussion selected",true);return}
+const agent=$("replyAgent").value;
+apiPost("/api/discuss/reply",{topic:_currentDisc,agent}).then(d=>{if(d&&d.ok){hideModal('replyModal');setTimeout(()=>viewDiscussion(_currentDisc),2000)}})}
+
+function resolveDiscussion(){if(!_currentDisc){toast("No discussion selected",true);return}
+const text=$("resolveText").value.trim();if(!text){toast("Enter resolution text",true);return}
+apiPost("/api/discuss/resolve",{topic:_currentDisc,resolution:text}).then(d=>{if(d&&d.ok){hideModal('resolveModal');$("resolveText").value='';viewDiscussion(_currentDisc);loadDiscussions()}})}
+
+/* Agents */
+function loadAgents(){apiGet("/api/agents").then(d=>{if(!d)return;
+const agents=d.agents||[];
+$("agentsBody").innerHTML=agents.map(a=>{
+const stColor=a.status==='active'?'var(--green)':a.status==='idle'?'var(--text-dim)':'var(--red)';
+return `<tr><td><b>${esc(a.name)}</b></td><td>${a.type}</td><td><span class="mono">${a.protocol}</span></td>`+
+`<td><span style="color:${stColor}">${a.status}</span></td><td class="mono">${a.last_activity||'-'}</td>`+
+`<td><label class="toggle"><input type="checkbox" ${a.enabled?'checked':''} onchange="toggleAgent('${esc(a.name)}',this.checked)"><span class="slider"></span></label></td></tr>`}).join('');
+// Set mode radio
+const modeRadios=document.querySelectorAll('input[name="modeRadio"]');
+modeRadios.forEach(r=>{r.checked=r.value===(d.mode||'competitive')})})}
+
+function toggleAgent(name,enabled){apiPost("/api/agents/toggle",{name,enabled})}
+function setMode(mode){apiPost("/api/mode",{mode})}
+
+/* History */
+function loadFullHistory(){apiGet("/api/history").then(d=>{if(!d)return;_allHistory=d.events||[];filterHistory()})}
+function filterHistory(){const search=($("histSearch").value||'').toLowerCase(),kind=$("histKind").value;
+const filtered=_allHistory.filter(e=>{if(kind&&e.kind!==kind)return false;if(search&&!e.text.toLowerCase().includes(search))return false;return true});
+$("fullHistoryBody").innerHTML=filtered.length?filtered.map(e=>`<div class="history-line hk-${e.kind}">${esc(e.text)}</div>`).join(''):'<div class="empty">No matching events.</div>'}
+
+/* Settings */
+function loadSettings(){apiGet("/api/config").then(d=>{if(!d)return;
+$("configView").textContent=d.config||"";
+const s=d.system||{};
+$("sysInfo").innerHTML=`<div class="sys-card"><label>Python</label><span>${esc(s.python||'?')}</span></div>`+
+`<div class="sys-card"><label>Git Branch</label><span>${esc(s.branch||'?')}</span></div>`+
+`<div class="sys-card"><label>Repo Root</label><span>${esc(s.root||'?')}</span></div>`+
+`<div class="sys-card"><label>Mode</label><span>${esc(s.mode||'?')}</span></div>`+
+`<div class="sys-card"><label>Frames</label><span>${(s.frames||[]).join(', ')||'none'}</span></div>`})}
+
+/* SSE */
+window.addEventListener('load',()=>{const es=new EventSource("/events");
+es.onmessage=e=>{try{render(JSON.parse(e.data))}catch(err){console.error(err)}};
+es.onerror=()=>$("ts").textContent="Connection lost, retrying..."});
 </script></body></html>"""
 
 
@@ -282,7 +659,20 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/teams":
             self._json_response({"ok": True, "teams": _list_teams()})
         elif self.path == "/api/history":
-            self._json_response({"ok": True, "events": _read_history(50)})
+            self._json_response({"ok": True, "events": _read_history(100)})
+        elif self.path == "/api/discuss/list":
+            self._json_response({"ok": True, "discussions": _list_discussions()})
+        elif self.path.startswith("/api/discuss/show/"):
+            topic = self.path.split("/api/discuss/show/", 1)[1]
+            # URL-decode topic
+            from urllib.parse import unquote
+            topic = unquote(topic)
+            content = _show_discussion(topic)
+            self._json_response({"ok": bool(content), "content": content})
+        elif self.path == "/api/agents":
+            self._json_response({"ok": True, "agents": _list_agents_info(), "mode": cfg.mode})
+        elif self.path == "/api/config":
+            self._json_response({"ok": True, "config": _read_config_file(), "system": _get_system_info()})
         else:
             self.send_error(404)
 
@@ -294,6 +684,18 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_stop()
         elif self.path == "/api/retry":
             self._api_retry(body)
+        elif self.path == "/api/run/all":
+            self._api_run_all()
+        elif self.path == "/api/discuss/new":
+            self._api_discuss_new(body)
+        elif self.path == "/api/discuss/reply":
+            self._api_discuss_reply(body)
+        elif self.path == "/api/discuss/resolve":
+            self._api_discuss_resolve(body)
+        elif self.path == "/api/agents/toggle":
+            self._api_agents_toggle(body)
+        elif self.path == "/api/mode":
+            self._api_set_mode(body)
         else:
             self.send_error(404)
 
@@ -304,7 +706,6 @@ class _Handler(BaseHTTPRequestHandler):
         if not team:
             self._json_response({"ok": False, "msg": "No team specified"})
             return
-        # Find forgerace.py relative to this module
         fr_py = Path(__file__).resolve().parent.parent / "forgerace.py"
         cmd = ["python3", str(fr_py), "run", "--auto", "--team", team]
         cfg.log_dir.mkdir(parents=True, exist_ok=True)
@@ -312,6 +713,15 @@ class _Handler(BaseHTTPRequestHandler):
             stdout=open(cfg.log_dir / "web_run.log", "a"),
             stderr=subprocess.STDOUT, start_new_session=True)
         self._json_response({"ok": True, "msg": f"Started run for {team}"})
+
+    def _api_run_all(self):
+        fr_py = Path(__file__).resolve().parent.parent / "forgerace.py"
+        cmd = ["python3", str(fr_py), "run", "--auto"]
+        cfg.log_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(cmd, cwd=str(cfg.root_dir),
+            stdout=open(cfg.log_dir / "web_run.log", "a"),
+            stderr=subprocess.STDOUT, start_new_session=True)
+        self._json_response({"ok": True, "msg": "Started run for all ready tasks"})
 
     def _api_stop(self):
         subprocess.run(["pkill", "-f", "forgerace.py run"], capture_output=True)
@@ -336,6 +746,98 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._json_response({"ok": False, "msg": str(e)})
 
+    def _api_discuss_new(self, body: dict):
+        topic = body.get("topic", "").strip()
+        question = body.get("question", "").strip()
+        agents = body.get("agents", [])
+        if not topic or not question:
+            self._json_response({"ok": False, "msg": "Topic and question required"})
+            return
+        try:
+            from .discuss import discuss_create, discuss_reply
+            discuss_create(topic, question, author="techlead")
+            # Fire agent replies in background
+            for agent in agents:
+                if agent in cfg.agents and cfg.agents[agent].enabled:
+                    threading.Thread(target=discuss_reply, args=(topic, agent),
+                                     daemon=True).start()
+            self._json_response({"ok": True, "msg": f"Discussion '{topic}' created"})
+        except Exception as e:
+            self._json_response({"ok": False, "msg": str(e)})
+
+    def _api_discuss_reply(self, body: dict):
+        topic = body.get("topic", "").strip()
+        agent = body.get("agent", "").strip()
+        if not topic or not agent:
+            self._json_response({"ok": False, "msg": "Topic and agent required"})
+            return
+        try:
+            from .discuss import discuss_reply
+            threading.Thread(target=discuss_reply, args=(topic, agent),
+                             daemon=True).start()
+            self._json_response({"ok": True, "msg": f"Reply from {agent} started"})
+        except Exception as e:
+            self._json_response({"ok": False, "msg": str(e)})
+
+    def _api_discuss_resolve(self, body: dict):
+        topic = body.get("topic", "").strip()
+        resolution = body.get("resolution", "").strip()
+        if not topic or not resolution:
+            self._json_response({"ok": False, "msg": "Topic and resolution required"})
+            return
+        try:
+            filepath = cfg.discuss_dir / f"{topic}.md"
+            if not filepath.exists():
+                self._json_response({"ok": False, "msg": f"Discussion '{topic}' not found"})
+                return
+            from datetime import datetime
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            with open(filepath, "a", encoding="utf-8") as f:
+                f.write(f"\n## @techlead ({now})\n\n\u0420\u0415\u0417\u041e\u041b\u042e\u0426\u0418\u042f: {resolution}\n\n--- RESOLVED ---\n")
+            self._json_response({"ok": True, "msg": f"Discussion '{topic}' resolved"})
+        except Exception as e:
+            self._json_response({"ok": False, "msg": str(e)})
+
+    def _api_agents_toggle(self, body: dict):
+        name = body.get("name", "")
+        enabled = body.get("enabled", True)
+        if not name or name not in cfg.agents:
+            self._json_response({"ok": False, "msg": f"Unknown agent: {name}"})
+            return
+        cfg.agents[name].enabled = bool(enabled)
+        # Try to persist to TOML
+        toml_path = cfg.root_dir / "forgerace.toml"
+        if toml_path.exists():
+            try:
+                content = toml_path.read_text(encoding="utf-8")
+                # Find [agents.NAME] section and toggle enabled
+                pattern = rf'(\[agents\.{re.escape(name)}\][^\[]*?)enabled\s*=\s*(true|false)'
+                val = "true" if enabled else "false"
+                new_content = re.sub(pattern, rf'\1enabled = {val}', content, flags=re.DOTALL)
+                if new_content != content:
+                    toml_path.write_text(new_content, encoding="utf-8")
+            except Exception:
+                pass  # In-memory toggle is enough
+        self._json_response({"ok": True, "msg": f"{name} {'enabled' if enabled else 'disabled'}"})
+
+    def _api_set_mode(self, body: dict):
+        mode = body.get("mode", "")
+        if mode not in ("competitive", "distributed"):
+            self._json_response({"ok": False, "msg": "Invalid mode"})
+            return
+        cfg.mode = mode
+        # Try to persist to TOML
+        toml_path = cfg.root_dir / "forgerace.toml"
+        if toml_path.exists():
+            try:
+                content = toml_path.read_text(encoding="utf-8")
+                new_content = re.sub(r'mode\s*=\s*"[^"]*"', f'mode = "{mode}"', content)
+                if new_content != content:
+                    toml_path.write_text(new_content, encoding="utf-8")
+            except Exception:
+                pass
+        self._json_response({"ok": True, "msg": f"Mode set to {mode}"})
+
     def _api_litellm_start(self):
         litellm_bin = Path.home() / ".local/share/pipx/venvs/litellm/bin/litellm"
         config_file = cfg.root_dir / "litellm_config.yaml"
@@ -359,7 +861,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._json_response({"ok": True, "status": "stopped"})
 
     def _json_response(self, data):
-        body = json.dumps(data).encode("utf-8")
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
