@@ -1215,6 +1215,10 @@ def _ensure_litellm_proxy():
                     return
         except Exception:
             pass
+        finally:
+            for k, v in _sv.items():
+                if v is not None:
+                    os.environ[k] = v
     log.warning("LiteLLM proxy не стартовал за 15с — агенты через proxy могут не работать")
 
 
