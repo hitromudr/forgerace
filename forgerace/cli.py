@@ -519,7 +519,11 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             except Exception:
                 _litellm_ok = False
             litellm_status = f"{C['green']}LiteLLM ✓{R}" if _litellm_ok else f"{C['red']}LiteLLM ✗{R}"
-            print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}  {procs} processes  {litellm_status}  {C['dim']}(Ctrl+C){R}")
+            if procs > 0:
+                proc_str = f"{C['green']}{procs} running{R}"
+            else:
+                proc_str = f"{C['dim']}idle{R}"
+            print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}{R}  {proc_str}  {litellm_status}  {C['dim']}(Ctrl+C){R}")
             print()
 
             # Teams table
@@ -546,28 +550,39 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 done = sum(1 for t in tt if t.status == "done")
                 total = len(tt)
                 # Show completed teams as collapsed single line
-                if done == total and total > 0:
+                skip = sum(1 for t in tt if t.status == "skip")
+                completed = done + skip  # both count as "finished"
+
+                if completed == total and total > 0:
                     bar = f"{C['green']}{'█' * BAR_LEN}{R}"
-                    print(f"  {C['green']}{team_name[:15]}{R}  {done}/{total}  {bar}  {C['green']}DONE{R}\n")
+                    if skip > 0:
+                        print(f"  {C['green']}{team_name[:15]}{R}  {done}/{total}  {bar}  {C['green']}DONE{R} {C['dim']}({skip} skip){R}\n")
+                    else:
+                        print(f"  {C['green']}{team_name[:15]}{R}  {done}/{total}  {bar}  {C['green']}DONE{R}\n")
                     continue
+
                 # Combine TASKS.md status + live log detection
                 ip_tasks = [t for t in tt if "progress" in t.status or t.id in _coding_now]
                 blocked_tasks = [t for t in tt if "blocked" in t.status.lower() and t.id not in _coding_now]
                 ip = len(ip_tasks)
                 blocked = len(blocked_tasks)
+                pending = total - completed - ip - blocked
 
-                filled = int(BAR_LEN * done / total) if total else 0
+                filled = int(BAR_LEN * completed / total) if total else 0
                 bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (BAR_LEN - filled)}{R}"
 
                 pct = f"{done}/{total}"
-                short = team_name.replace("championship-v2-", "")[:15]
-                filled = int(BAR_LEN * done / total) if total else 0
-                bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (BAR_LEN - filled)}{R}"
-                pending = total - done - ip - blocked
+                short = team_name[:15]
+
+                # Status: what's happening right now
                 if ip > 0:
                     status_str = f"  {C['magenta']}coding ({ip}){R}"
+                elif blocked > 0 and procs == 0:
+                    status_str = f"  {C['red']}STOPPED{R} {C['dim']}({blocked} failed){R}"
                 elif blocked > 0:
                     status_str = f"  {C['red']}blocked ({blocked}){R}"
+                elif pending > 0 and procs == 0:
+                    status_str = f"  {C['yellow']}IDLE{R} {C['dim']}({pending} waiting){R}"
                 elif pending > 0:
                     status_str = f"  {C['yellow']}pending ({pending}){R}"
                 else:
@@ -579,6 +594,8 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                     coding = t.id in _coding_now
                     if t.status == "done":
                         print(f"    {C['green']}✓{R} {t.id}  {C['dim']}{t.name[:45]}{R}")
+                    elif t.status == "skip":
+                        print(f"    {C['dim']}⊘ {t.id}  {t.name[:45]} (skip){R}")
                     elif coding:
                         print(f"    {C['magenta']}⚡{R} {t.id}  {t.name[:45]}")
                     elif "blocked" in t.status.lower() or (t.deps and not all(
