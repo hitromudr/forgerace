@@ -584,7 +584,7 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 short = team_name[:15]
                 pad = max(1, 18 - len(short))
                 pct_pad = max(1, 6 - len(pct))
-                print(f"  {C['bold']}{short}{R}{' '*pad}{pct}{' '*pct_pad}{bar}{status_str}")
+                print(f"  {C['yellow']}{C['bold']}{short}{R}{' '*pad}{pct}{' '*pct_pad}{bar}{status_str}")
 
                 # Show each task in this team
                 for t in sorted(tt, key=lambda x: x.id):
