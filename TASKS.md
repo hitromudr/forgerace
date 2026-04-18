@@ -1,7 +1,7 @@
  TASKS — forgerace
 
 ### TASK-001: Реализация команды `stats`
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -111,7 +111,7 @@
 - **Ветка**: task/task-009-realizovat-dashboardrenderer-aider-devstral
 
 ### TASK-010: Реализовать Notifier
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/notifier.py
@@ -126,7 +126,7 @@
 - **Ветка**: — 
 
 ### TASK-011: Реализовать синхронизацию доступа к состоянию
-- **Статус**: blocked
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: —
@@ -170,7 +170,7 @@
 - **Агент**: aider-qwen
 - **Ветка**: task/task-014-realizatsiya-parallelnogo-vypolneniya-za-aider-qwen
 ### TASK-015: Реализация отчётности и визуализации
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/reporting/reporter.py
@@ -198,7 +198,7 @@
 - **Агент**: aider-devstral
 - **Ветка**: task/task-016-realizatsiya-obrabotki-oshibok-i-vosstan-aider-devstral
 ### TASK-017: Реализация валидации формата задач
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/tasks/validator.py
