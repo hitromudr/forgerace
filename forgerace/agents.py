@@ -378,6 +378,9 @@ def _run_agent_streaming(
     proc_env = {**os.environ, **(env or {})}
     proc_env["PYTHONUNBUFFERED"] = "1"
     proc_env["FORCE_COLOR"] = "1"
+    # Remove proxy vars entirely — empty string breaks requests library
+    for pv in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        proc_env.pop(pv, None)
     try:
         proc = subprocess.Popen(
             cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -557,6 +560,9 @@ def _run_agent_text(
     proc_env = {**os.environ, **(env or {})}
     proc_env["PYTHONUNBUFFERED"] = "1"
     proc_env["FORCE_COLOR"] = "1"
+    # Remove proxy vars entirely — empty string breaks requests library
+    for pv in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        proc_env.pop(pv, None)
     deadline = time.time() + cfg.agent_timeout
     last_diff_snapshot = _get_diff_snapshot(workdir)
     last_diff_change = time.time()
@@ -859,6 +865,9 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     proc_env = {**os.environ, **(acfg.env if acfg.env else {})}
     proc_env["PYTHONUNBUFFERED"] = "1"
     proc_env["FORCE_COLOR"] = "1"
+    # Remove proxy vars entirely — empty string breaks requests library
+    for pv in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        proc_env.pop(pv, None)
     timeout = acfg.inactivity_timeout or 300
     result = subprocess.run(
         cmd, cwd=cfg.root_dir, input=prompt,
