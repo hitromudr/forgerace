@@ -97,7 +97,7 @@
 - **Ветка**: task/task-008-realizovat-webserver-s-sse-aider-devstral
 
 ### TASK-009: Реализовать DashboardRenderer
-- **Статус**: in_progress:aider-qwen,aider-devstral,aider-gptoss
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: TASK-007
