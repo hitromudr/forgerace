@@ -49,7 +49,7 @@
 - **Ветка**: task/task-004-realizatsiya-litellm-watchdog-aider-gptoss
 
 ### TASK-005: Реализация Stale Task Cleaner
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -81,7 +81,7 @@
 - **Ветка**: task/task-006-realizatsiya-flat-dependencies-aider-devstral
 
 ### TASK-008: Реализовать WebServer с SSE
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/web_server.py
@@ -170,7 +170,7 @@
 - **Агент**: aider-qwen
 - **Ветка**: task/task-014-realizatsiya-parallelnogo-vypolneniya-za-aider-qwen
 ### TASK-015: Реализация отчётности и визуализации
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/reporting/reporter.py
