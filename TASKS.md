@@ -65,7 +65,7 @@
 - **Ветка**: — 
 
 ### TASK-006: Реализация Flat Dependencies
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
