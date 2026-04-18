@@ -520,9 +520,9 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 _litellm_ok = False
             litellm_status = f"{C['green']}LiteLLM ✓{R}" if _litellm_ok else f"{C['red']}LiteLLM ✗{R}"
             if procs > 0:
-                proc_str = f"{C['green']}{procs} running{R}"
+                proc_str = f"{C['green']}▶ {procs} running{R}"
             else:
-                proc_str = f"{C['dim']}idle{R}"
+                proc_str = f"{C['dim']}■ stopped{R}"
             print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}{R}  {proc_str}  {litellm_status}  {C['dim']}(Ctrl+C){R}")
             print()
 
@@ -582,7 +582,9 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
 
                 pct = f"{done}/{total}"
                 short = team_name[:15]
-                print(f"  {C['bold']}{short}{R}  {pct}  {bar}{status_str}")
+                pad = max(1, 18 - len(short))
+                pct_pad = max(1, 6 - len(pct))
+                print(f"  {C['bold']}{short}{R}{' '*pad}{pct}{' '*pct_pad}{bar}{status_str}")
 
                 # Show each task in this team
                 for t in sorted(tt, key=lambda x: x.id):
