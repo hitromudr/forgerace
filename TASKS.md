@@ -17,7 +17,7 @@
 - **Ветка**: task/task-001-realizatsiya-komandy-stats-aider-devstral
 
 ### TASK-003: Реализация Checkpoints
-- **Статус**: in_progress:aider-devstral
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -49,7 +49,7 @@
 - **Ветка**: task/task-004-realizatsiya-litellm-watchdog-aider-gptoss
 
 ### TASK-005: Реализация Stale Task Cleaner
-- **Статус**: in_progress:aider-devstral
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -81,7 +81,7 @@
 - **Ветка**: task/task-006-realizatsiya-flat-dependencies-aider-devstral
 
 ### TASK-008: Реализовать WebServer с SSE
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/web_server.py
@@ -96,7 +96,7 @@
 - **Ветка**: task/task-008-realizovat-webserver-s-sse-aider-devstral
 
 ### TASK-009: Реализовать DashboardRenderer
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/dashboard_renderer.py
@@ -111,7 +111,7 @@
 - **Ветка**: task/task-009-realizovat-dashboardrenderer-aider-devstral
 
 ### TASK-010: Реализовать Notifier
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/notifier.py
@@ -126,7 +126,7 @@
 - **Ветка**: — 
 
 ### TASK-011: Реализовать синхронизацию доступа к состоянию
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: —
@@ -141,7 +141,7 @@
 - **Ветка**: task/task-011-realizovat-sinhronizatsiyu-dostupa-k-sos-aider-devstral
 
 ### TASK-012: Реализовать persistence timeline
-- **Статус**: in_progress:aider-devstral
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/timeline.py
@@ -156,7 +156,7 @@
 - **Ветка**: task/task-012-realizovat-persistence-timeline-aider-devstral
 
 ### TASK-014: Реализация параллельного выполнения задач
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/runner.py
@@ -170,7 +170,7 @@
 - **Агент**: aider-qwen
 - **Ветка**: task/task-014-realizatsiya-parallelnogo-vypolneniya-za-aider-qwen
 ### TASK-015: Реализация отчётности и визуализации
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/reporting/reporter.py
@@ -198,7 +198,7 @@
 - **Агент**: aider-devstral
 - **Ветка**: task/task-016-realizatsiya-obrabotki-oshibok-i-vosstan-aider-devstral
 ### TASK-017: Реализация валидации формата задач
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/tasks/validator.py
@@ -212,7 +212,7 @@
 - **Агент**: aider-qwen
 - **Ветка**: task/task-017-realizatsiya-validatsii-formata-zadach-aider-qwen
 ### TASK-018: Реализация тестирования ошибочных путей
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/test_error_paths.py
