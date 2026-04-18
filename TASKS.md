@@ -1,7 +1,7 @@
  TASKS — forgerace
 
 ### TASK-001: Реализация команды `stats`
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -17,7 +17,7 @@
 - **Ветка**: task/task-001-realizatsiya-komandy-stats-aider-devstral
 
 ### TASK-003: Реализация Checkpoints
-- **Статус**: in_progress:aider-devstral
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -33,7 +33,7 @@
 - **Ветка**: task/task-003-realizatsiya-checkpoints-aider-devstral
 
 ### TASK-004: Реализация LiteLLM Watchdog
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -49,7 +49,7 @@
 - **Ветка**: — 
 
 ### TASK-005: Реализация Stale Task Cleaner
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -65,7 +65,7 @@
 - **Ветка**: — 
 
 ### TASK-006: Реализация Flat Dependencies
-- **Статус**: in_progress:aider-devstral
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -81,7 +81,7 @@
 - **Ветка**: task/task-006-realizatsiya-flat-dependencies-aider-devstral
 
 ### TASK-008: Реализовать WebServer с SSE
-- **Статус**: in_progress:aider-gptoss
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: TASK-007
@@ -93,8 +93,8 @@
 - **Проверка**: curl -N http://localhost:8080/events
 - **Критерий готовности**: WebServer должен корректно отправлять события через SSE
 - **Дискуссия**: observability-v1
-- **Агент**: aider-gptoss
-- **Ветка**: task/task-008-realizovat-webserver-s-sse-aider-gptoss
+- **Агент**: aider-devstral
+- **Ветка**: task/task-008-realizovat-webserver-s-sse-aider-devstral
 
 ### TASK-009: Реализовать DashboardRenderer
 - **Статус**: open
@@ -191,7 +191,7 @@
 - **Агент**: —
 - **Ветка**: —
 ### TASK-016: Реализация обработки ошибок и восстановления
-- **Статус**: in_progress:aider-qwen
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: TASK-013
@@ -203,8 +203,8 @@
 - **Проверка**: make check
 - **Критерий готовности**: успешный запуск бенчмарка с обработкой ошибок и восстановлением
 - **Дискуссия**: benchmark-public
-- **Агент**: aider-qwen
-- **Ветка**: task/task-016-realizatsiya-obrabotki-oshibok-i-vosstan-aider-qwen
+- **Агент**: aider-devstral
+- **Ветка**: task/task-016-realizatsiya-obrabotki-oshibok-i-vosstan-aider-devstral
 ### TASK-017: Реализация валидации формата задач
 - **Статус**: blocked
 - **Приоритет**: P1
@@ -221,7 +221,7 @@
 - **Агент**: —
 - **Ветка**: —
 ### TASK-018: Реализация тестирования ошибочных путей
-- **Статус**: in_progress:aider-qwen
+- **Статус**: in_progress:aider-gptoss
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: TASK-013
@@ -233,5 +233,5 @@
 - **Проверка**: make check
 - **Критерий готовности**: успешный запуск бенчмарка с тестированием ошибочных путей
 - **Дискуссия**: benchmark-public
-- **Агент**: aider-qwen
-- **Ветка**: task/task-018-realizatsiya-testirovaniya-oshibochnyh-p-aider-qwen
+- **Агент**: aider-gptoss
+- **Ветка**: task/task-018-realizatsiya-testirovaniya-oshibochnyh-p-aider-gptoss
