@@ -126,7 +126,7 @@
 - **Ветка**: task/task-010-realizovat-notifier-aider-devstral
 
 ### TASK-011: Реализовать синхронизацию доступа к состоянию
-- **Статус**: blocked
+- **Статус**: skip
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: —
@@ -141,7 +141,7 @@
 - **Ветка**: task/task-011-realizovat-sinhronizatsiyu-dostupa-k-sos-aider-devstral
 
 ### TASK-012: Реализовать persistence timeline
-- **Статус**: blocked
+- **Статус**: skip
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/timeline.py
@@ -156,7 +156,7 @@
 - **Ветка**: task/task-012-realizovat-persistence-timeline-aider-devstral
 
 ### TASK-014: Реализация параллельного выполнения задач
-- **Статус**: blocked
+- **Статус**: skip
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/runner.py
@@ -198,7 +198,7 @@
 - **Агент**: pre-check
 - **Ветка**: task/task-016-realizatsiya-obrabotki-oshibok-i-vosstan-aider-devstral
 ### TASK-017: Реализация валидации формата задач
-- **Статус**: blocked
+- **Статус**: skip
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/tasks/validator.py
