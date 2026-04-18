@@ -212,7 +212,7 @@
 - **Агент**: aider-qwen
 - **Ветка**: task/task-017-realizatsiya-validatsii-formata-zadach-aider-qwen
 ### TASK-018: Реализация тестирования ошибочных путей
-- **Статус**: done
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/test_error_paths.py
