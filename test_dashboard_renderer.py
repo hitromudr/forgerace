@@ -1,5 +1,6 @@
 """Тесты для DashboardRenderer."""
 
+import json
 import unittest
 from src.dashboard_renderer import DashboardRenderer
 
