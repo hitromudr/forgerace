@@ -49,7 +49,7 @@
 - **Ветка**: task/task-004-realizatsiya-litellm-watchdog-aider-gptoss
 
 ### TASK-005: Реализация Stale Task Cleaner
-- **Статус**: in_progress:aider-devstral
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -126,7 +126,7 @@
 - **Ветка**: task/task-010-realizovat-notifier-aider-devstral
 
 ### TASK-011: Реализовать синхронизацию доступа к состоянию
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: —
@@ -156,7 +156,7 @@
 - **Ветка**: task/task-012-realizovat-persistence-timeline-aider-devstral
 
 ### TASK-014: Реализация параллельного выполнения задач
-- **Статус**: in_progress:aider-qwen
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/runner.py
@@ -170,7 +170,7 @@
 - **Агент**: aider-qwen
 - **Ветка**: task/task-014-realizatsiya-parallelnogo-vypolneniya-za-aider-qwen
 ### TASK-015: Реализация отчётности и визуализации
-- **Статус**: blocked
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/reporting/reporter.py
