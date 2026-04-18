@@ -17,7 +17,7 @@
 - **Ветка**: task/task-001-realizatsiya-komandy-stats-aider-devstral
 
 ### TASK-003: Реализация Checkpoints
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -33,7 +33,7 @@
 - **Ветка**: task/task-003-realizatsiya-checkpoints-aider-devstral
 
 ### TASK-004: Реализация LiteLLM Watchdog
-- **Статус**: in_progress:aider-qwen
+- **Статус**: in_progress:aider-gptoss
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -49,7 +49,7 @@
 - **Ветка**: — 
 
 ### TASK-005: Реализация Stale Task Cleaner
-- **Статус**: open
+- **Статус**: in_progress:aider-qwen
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -176,7 +176,7 @@
 - **Агент**: —
 - **Ветка**: —
 ### TASK-015: Реализация отчётности и визуализации
-- **Статус**: in_progress:aider-qwen,aider-devstral,aider-gptoss
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: TASK-013
@@ -191,7 +191,7 @@
 - **Агент**: —
 - **Ветка**: —
 ### TASK-016: Реализация обработки ошибок и восстановления
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: TASK-013
