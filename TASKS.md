@@ -126,7 +126,7 @@
 - **Ветка**: task/task-010-realizovat-notifier-aider-devstral
 
 ### TASK-011: Реализовать синхронизацию доступа к состоянию
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: —
@@ -170,7 +170,7 @@
 - **Агент**: aider-qwen
 - **Ветка**: task/task-014-realizatsiya-parallelnogo-vypolneniya-za-aider-qwen
 ### TASK-015: Реализация отчётности и визуализации
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/reporting/reporter.py
@@ -184,7 +184,7 @@
 - **Агент**: aider-devstral
 - **Ветка**: task/task-015-realizatsiya-otchyotnosti-i-vizualizatsi-aider-devstral
 ### TASK-016: Реализация обработки ошибок и восстановления
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/error_handler.py
