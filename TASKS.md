@@ -17,7 +17,7 @@
 - **Ветка**: task/task-001-realizatsiya-komandy-stats-aider-devstral
 
 ### TASK-003: Реализация Checkpoints
-- **Статус**: in_progress:aider-qwen
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -29,11 +29,11 @@
 - **Проверка**: `python -m unittest test_checkpoint.py`
 - **Критерий готовности**: успешный запуск `./fr rollback {task_id}` без ошибок
 - **Дискуссия**: stability-v1
-- **Агент**: aider-qwen
-- **Ветка**: task/task-003-realizatsiya-checkpoints-aider-qwen
+- **Агент**: aider-devstral
+- **Ветка**: task/task-003-realizatsiya-checkpoints-aider-devstral
 
 ### TASK-004: Реализация LiteLLM Watchdog
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -65,7 +65,7 @@
 - **Ветка**: — 
 
 ### TASK-006: Реализация Flat Dependencies
-- **Статус**: in_progress:aider-qwen
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -77,11 +77,11 @@
 - **Проверка**: `python -m unittest test_flat_dependencies.py`
 - **Критерий готовности**: успешный запуск `fr generate --flatten` без ошибок
 - **Дискуссия**: stability-v1
-- **Агент**: aider-qwen
-- **Ветка**: task/task-006-realizatsiya-flat-dependencies-aider-qwen
+- **Агент**: aider-devstral
+- **Ветка**: task/task-006-realizatsiya-flat-dependencies-aider-devstral
 
 ### TASK-008: Реализовать WebServer с SSE
-- **Статус**: in_progress:aider-qwen
+- **Статус**: in_progress:aider-gptoss
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: TASK-007
@@ -93,8 +93,8 @@
 - **Проверка**: curl -N http://localhost:8080/events
 - **Критерий готовности**: WebServer должен корректно отправлять события через SSE
 - **Дискуссия**: observability-v1
-- **Агент**: aider-qwen
-- **Ветка**: task/task-008-realizovat-webserver-s-sse-aider-qwen
+- **Агент**: aider-gptoss
+- **Ветка**: task/task-008-realizovat-webserver-s-sse-aider-gptoss
 
 ### TASK-009: Реализовать DashboardRenderer
 - **Статус**: open
