@@ -17,7 +17,7 @@
 - **Ветка**: task/task-001-realizatsiya-komandy-stats-aider-devstral
 
 ### TASK-003: Реализация Checkpoints
-- **Статус**: in_progress:aider-devstral
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -33,7 +33,7 @@
 - **Ветка**: task/task-003-realizatsiya-checkpoints-aider-devstral
 
 ### TASK-004: Реализация LiteLLM Watchdog
-- **Статус**: in_progress:aider-qwen
+- **Статус**: stuck
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -45,8 +45,8 @@
 - **Проверка**: `python -m unittest test_health_monitor.py`
 - **Критерий готовности**: успешный запуск `agent.py` с watchdog без ошибок
 - **Дискуссия**: stability-v1
-- **Агент**: aider-qwen
-- **Ветка**: task/task-004-realizatsiya-litellm-watchdog-aider-qwen
+- **Агент**: aider-gptoss
+- **Ветка**: task/task-004-realizatsiya-litellm-watchdog-aider-gptoss
 
 ### TASK-005: Реализация Stale Task Cleaner
 - **Статус**: open
@@ -65,7 +65,7 @@
 - **Ветка**: — 
 
 ### TASK-006: Реализация Flat Dependencies
-- **Статус**: in_progress:aider-devstral
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -96,7 +96,7 @@
 - **Ветка**: task/task-008-realizovat-webserver-s-sse-aider-devstral
 
 ### TASK-009: Реализовать DashboardRenderer
-- **Статус**: in_progress:aider-qwen
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/dashboard_renderer.py
@@ -107,8 +107,8 @@
 - **Проверка**: python -m unittest test_dashboard_renderer.py
 - **Критерий готовности**: DashboardRenderer должен корректно формировать HTML/JSON для эндпоинтов
 - **Дискуссия**: observability-v1
-- **Агент**: aider-qwen
-- **Ветка**: task/task-009-realizovat-dashboardrenderer-aider-qwen
+- **Агент**: aider-devstral
+- **Ветка**: task/task-009-realizovat-dashboardrenderer-aider-devstral
 
 ### TASK-010: Реализовать Notifier
 - **Статус**: open
@@ -126,7 +126,7 @@
 - **Ветка**: — 
 
 ### TASK-011: Реализовать синхронизацию доступа к состоянию
-- **Статус**: in_progress:aider-qwen
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: —
@@ -137,8 +137,8 @@
 - **Проверка**: python -m unittest test_diagnose_engine.py
 - **Критерий готовности**: DiagnoseEngine должен корректно собирать снимок состояния системы без race conditions
 - **Дискуссия**: observability-v1
-- **Агент**: aider-qwen
-- **Ветка**: task/task-011-realizovat-sinhronizatsiyu-dostupa-k-sos-aider-qwen
+- **Агент**: aider-devstral
+- **Ветка**: task/task-011-realizovat-sinhronizatsiyu-dostupa-k-sos-aider-devstral
 
 ### TASK-012: Реализовать persistence timeline
 - **Статус**: open
@@ -170,7 +170,7 @@
 - **Агент**: —
 - **Ветка**: —
 ### TASK-015: Реализация отчётности и визуализации
-- **Статус**: in_progress:aider-qwen
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/reporting/reporter.py
@@ -181,10 +181,10 @@
 - **Проверка**: make check
 - **Критерий готовности**: успешный запуск бенчмарка с отчётностью и визуализацией
 - **Дискуссия**: benchmark-public
-- **Агент**: aider-qwen
-- **Ветка**: task/task-015-realizatsiya-otchyotnosti-i-vizualizatsi-aider-qwen
+- **Агент**: aider-devstral
+- **Ветка**: task/task-015-realizatsiya-otchyotnosti-i-vizualizatsi-aider-devstral
 ### TASK-016: Реализация обработки ошибок и восстановления
-- **Статус**: in_progress:aider-devstral
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/error_handler.py
@@ -212,7 +212,7 @@
 - **Агент**: —
 - **Ветка**: —
 ### TASK-018: Реализация тестирования ошибочных путей
-- **Статус**: in_progress:aider-gptoss
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/test_error_paths.py

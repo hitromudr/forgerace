@@ -494,7 +494,8 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                                      capture_output=True, text=True).stdout.strip() or "0")
             except Exception:
                 procs = 0
-            print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}  {procs} processes  (Ctrl+C){R}")
+            litellm_status = f"{C['green']}LiteLLM ✓{R}" if _litellm_ok else f"{C['red']}LiteLLM ✗{R}"
+            print(f"  {C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}  {procs} processes  {litellm_status}  {C['dim']}(Ctrl+C){R}")
             print(f"  {C['green']}✓{R}done  {C['magenta']}⚡{R}coding  {C['red']}✗{R}blocked  {C['yellow']}…{R}pending\n")
 
             # Teams table
@@ -504,9 +505,21 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             active_tasks = []
 
             # Detect actually-coding tasks from fresh logs (not stale TASKS.md)
+            # Also check LiteLLM proxy health
+            _litellm_ok = True
+            try:
+                import urllib.request as _ur
+                _opener = _ur.build_opener(_ur.ProxyHandler({}))
+                _req = _ur.Request("http://127.0.0.1:4000/health")
+                _req.add_header("Authorization", "Bearer fr-local-dev")
+                with _opener.open(_req, timeout=2):
+                    pass
+            except Exception:
+                _litellm_ok = False
+
             import re as _re
             _coding_now = set()  # task IDs that are actively being coded
-            for logf in list(cfg.log_dir.glob("ch3-*.log")) + [cfg.log_dir / "orchestrator.log"]:
+            for logf in list(cfg.log_dir.glob("*.log")):
                 try:
                     if not logf.exists() or _time.time() - logf.stat().st_mtime > 600:
                         continue
@@ -568,7 +581,7 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             import re as _re
             agent_activity = {}
             now_ts = _time.time()
-            log_files = list(cfg.log_dir.glob("championship-v2-*.log"))
+            log_files = list(cfg.log_dir.glob("*.log"))
             orch = cfg.log_dir / "orchestrator.log"
             if orch.exists():
                 log_files.append(orch)
