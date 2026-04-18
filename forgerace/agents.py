@@ -688,11 +688,16 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
             task_files = _extract_task_files(task)
             for fpath in task_files:
                 final_cmd.extend(["--file", fpath])
+            # Fix: write prompt to temp file instead of /dev/stdin
+            # (aider --message-file /dev/stdin breaks when stdin=PIPE)
+            import tempfile
+            prompt_file = Path(tempfile.mktemp(suffix=".md", dir=str(workdir)))
+            prompt_file.write_text(prompt, encoding="utf-8")
+            final_cmd = [a if a != "/dev/stdin" else str(prompt_file) for a in final_cmd]
         return _run_agent_text(
             final_cmd, workdir, tag, acfg.inactivity_timeout,
             cancel_event=cancel_event,
             env=acfg.env if acfg.env else None,
-            prompt_stdin=prompt if acfg.prompt_stdin else "",
         )
 
     if agent_name == "claude":
