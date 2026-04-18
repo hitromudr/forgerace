@@ -1,7 +1,7 @@
  TASKS — forgerace
 
 ### TASK-001: Реализация команды `stats`
-- **Статус**: blocked
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -17,7 +17,7 @@
 - **Ветка**: task/task-001-realizatsiya-komandy-stats-aider-devstral
 
 ### TASK-003: Реализация Checkpoints
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -33,7 +33,7 @@
 - **Ветка**: task/task-003-realizatsiya-checkpoints-aider-devstral
 
 ### TASK-004: Реализация LiteLLM Watchdog
-- **Статус**: blocked
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -45,7 +45,7 @@
 - **Проверка**: `python -m unittest test_health_monitor.py`
 - **Критерий готовности**: успешный запуск `agent.py` с watchdog без ошибок
 - **Дискуссия**: stability-v1
-- **Агент**: aider-gptoss
+- **Агент**: pre-check
 - **Ветка**: task/task-004-realizatsiya-litellm-watchdog-aider-gptoss
 
 ### TASK-005: Реализация Stale Task Cleaner
@@ -65,7 +65,7 @@
 - **Ветка**: task/task-005-realizatsiya-stale-task-cleaner-aider-devstral
 
 ### TASK-006: Реализация Flat Dependencies
-- **Статус**: blocked
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -77,11 +77,11 @@
 - **Проверка**: `python -m unittest test_flat_dependencies.py`
 - **Критерий готовности**: успешный запуск `fr generate --flatten` без ошибок
 - **Дискуссия**: stability-v1
-- **Агент**: aider-devstral
+- **Агент**: pre-check
 - **Ветка**: task/task-006-realizatsiya-flat-dependencies-aider-devstral
 
 ### TASK-008: Реализовать WebServer с SSE
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/web_server.py
@@ -96,7 +96,7 @@
 - **Ветка**: task/task-008-realizovat-webserver-s-sse-aider-devstral
 
 ### TASK-009: Реализовать DashboardRenderer
-- **Статус**: blocked
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/dashboard_renderer.py
@@ -107,11 +107,11 @@
 - **Проверка**: python -m unittest test_dashboard_renderer.py
 - **Критерий готовности**: DashboardRenderer должен корректно формировать HTML/JSON для эндпоинтов
 - **Дискуссия**: observability-v1
-- **Агент**: aider-devstral
+- **Агент**: pre-check
 - **Ветка**: task/task-009-realizovat-dashboardrenderer-aider-devstral
 
 ### TASK-010: Реализовать Notifier
-- **Статус**: blocked
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/notifier.py
@@ -122,11 +122,11 @@
 - **Проверка**: python -m unittest test_notifier.py
 - **Критерий готовности**: Notifier должен корректно отправлять уведомления
 - **Дискуссия**: observability-v1
-- **Агент**: aider-devstral
+- **Агент**: pre-check
 - **Ветка**: task/task-010-realizovat-notifier-aider-devstral
 
 ### TASK-011: Реализовать синхронизацию доступа к состоянию
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: —
@@ -141,7 +141,7 @@
 - **Ветка**: task/task-011-realizovat-sinhronizatsiyu-dostupa-k-sos-aider-devstral
 
 ### TASK-012: Реализовать persistence timeline
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/timeline.py
@@ -184,7 +184,7 @@
 - **Агент**: aider-devstral
 - **Ветка**: task/task-015-realizatsiya-otchyotnosti-i-vizualizatsi-aider-devstral
 ### TASK-016: Реализация обработки ошибок и восстановления
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/error_handler.py
@@ -198,7 +198,7 @@
 - **Агент**: aider-devstral
 - **Ветка**: task/task-016-realizatsiya-obrabotki-oshibok-i-vosstan-aider-devstral
 ### TASK-017: Реализация валидации формата задач
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/tasks/validator.py
