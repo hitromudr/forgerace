@@ -951,6 +951,9 @@ def _print_full_help():
   ./fr status                            Статус задач + граф зависимостей
   ./fr merge-pending                     Промержить review-задачи в develop
 
+{Y}СТАТИСТИКА:{R}
+  ./fr stats                             Вывести статистику задач
+
 {Y}ОПЦИИ:{R}
   --config PATH                          Путь к forgerace.toml
   --root PATH                            Корневая директория проекта
