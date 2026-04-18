@@ -306,41 +306,25 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def _api_litellm_start(self):
-        """Start LiteLLM proxy."""
+        """Start LiteLLM proxy (non-blocking)."""
         from pathlib import Path
+        import subprocess
         litellm_bin = Path.home() / ".local/share/pipx/venvs/litellm/bin/litellm"
         config_file = cfg.root_dir / "litellm_config.yaml"
         if not litellm_bin.exists() or not config_file.exists():
             self._json_response({"ok": False, "error": "LiteLLM not installed"})
             return
-        # Check if already running
-        import subprocess
-        hc = subprocess.run(["curl", "-s", "--connect-timeout", "1", "-o", "/dev/null",
-                             "-w", "%{http_code}", "http://127.0.0.1:4000/health"],
-                            capture_output=True, text=True, timeout=3,
-                            env={k: v for k, v in os.environ.items()
-                                 if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")})
-        if hc.stdout.strip() in ("200", "401"):
-            self._json_response({"ok": True, "status": "already running"})
-            return
-        env = {**os.environ, "no_proxy": "127.0.0.1,localhost", "NO_PROXY": "127.0.0.1,localhost"}
+        clean_env = {k: v for k, v in os.environ.items()
+                     if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")}
+        clean_env["no_proxy"] = "127.0.0.1,localhost"
+        clean_env["NO_PROXY"] = "127.0.0.1,localhost"
+        cfg.log_dir.mkdir(parents=True, exist_ok=True)
         subprocess.Popen(
             [str(litellm_bin), "--config", str(config_file), "--port", "4000", "--host", "127.0.0.1"],
             stdout=open(cfg.log_dir / "litellm.log", "w"),
-            stderr=subprocess.STDOUT, env=env,
+            stderr=subprocess.STDOUT, env=clean_env,
         )
-        # Wait for startup
-        for _ in range(10):
-            time.sleep(1)
-            hc2 = subprocess.run(["curl", "-s", "--connect-timeout", "1", "-o", "/dev/null",
-                                  "-w", "%{http_code}", "http://127.0.0.1:4000/health"],
-                                 capture_output=True, text=True, timeout=3,
-                                 env={k: v for k, v in os.environ.items()
-                                      if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")})
-            if hc2.stdout.strip() in ("200", "401"):
-                self._json_response({"ok": True, "status": "started"})
-                return
-        self._json_response({"ok": False, "error": "timeout"})
+        self._json_response({"ok": True, "status": "starting (check in 10s)"})
 
     def _api_litellm_stop(self):
         """Stop LiteLLM proxy."""
