@@ -15,9 +15,13 @@ from .tasks import parse_tasks
 def _detect_litellm() -> bool:
     """Check if litellm proxy is reachable on localhost:4000."""
     try:
-        import urllib.request
-        urllib.request.urlopen("http://localhost:4000/health", timeout=2)
-        return True
+        import subprocess
+        clean_env = {k: v for k, v in os.environ.items()
+                     if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")}
+        r = subprocess.run(["curl", "-s", "--connect-timeout", "1", "-o", "/dev/null",
+                            "-w", "%{http_code}", "http://127.0.0.1:4000/health"],
+                           capture_output=True, text=True, timeout=3, env=clean_env)
+        return r.stdout.strip() in ("200", "401")
     except Exception:
         return False
 
