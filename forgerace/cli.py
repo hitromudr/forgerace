@@ -1264,6 +1264,11 @@ def main():
     web_p.add_argument("--host", default="0.0.0.0", help="Хост для запуска сервера")
     web_p.add_argument("--port", type=int, default=8080, help="Порт для запуска сервера")
 
+    # dashboard (lightweight web dashboard)
+    dash_p = sub.add_parser("dashboard", aliases=["web"], help="Web dashboard с SSE (lightweight)")
+    dash_p.add_argument("--host", default="localhost", help="Хост (default: localhost)")
+    dash_p.add_argument("--port", type=int, default=8080, help="Порт (default: 8080)")
+
     args = parser.parse_args()
 
     if args.command == "help" or args.command is None:
@@ -1391,6 +1396,15 @@ def main():
         engine = DiagnoseEngine()
         server = create_web_server(engine)
         asyncio.run(server.start())
+        return
+
+    if args.command in ("dashboard", "web"):
+        try:
+            from .web_dashboard import start_dashboard
+        except ImportError as e:
+            print(f"  {C['red']}Не удалось загрузить web_dashboard: {e}{R}")
+            return
+        start_dashboard(host=args.host, port=args.port)
         return
 
     # run
