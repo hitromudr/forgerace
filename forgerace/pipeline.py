@@ -198,8 +198,11 @@ def _log_test_results(result: subprocess.CompletedProcess | MergeResult, task: T
 
 def check_already_done(task: Task) -> bool:
     """Проверяет, выполнен ли критерий готовности задачи уже в develop.
-    Проверяет: наличие файлов, сборку, и наличие кода в git log."""
-    has_files_requirement = (task.files_new and task.files_new.strip() != "—")
+    Only for tasks with NEW files — modify-only tasks always need work."""
+    has_files_requirement = (task.files_new and task.files_new.strip() not in ("—", "")
+                             and task.files_new.strip() != "forgerace/cli.py")  # generic modify
+    if not has_files_requirement:
+        return False  # modify-only tasks can't be pre-checked
 
     if has_files_requirement:
         all_exist = True
@@ -760,7 +763,10 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             repeat_count = 0
         prev_summary = cur_summary
 
-        comments_combined = rv.get("comments", rv.get("summary", "")).strip()
+        _raw_comments = rv.get("comments", rv.get("summary", ""))
+        if isinstance(_raw_comments, list):
+            _raw_comments = "\n".join(str(c) for c in _raw_comments)
+        comments_combined = str(_raw_comments).strip()
         if rv.get("verdict") == "error" or not comments_combined:
             log.warning(f"[{task.id}] ⚠ Ревью ошибка/без замечаний — пропускаю раунд")
             continue

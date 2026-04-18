@@ -20,6 +20,7 @@ command = "gemini"
 args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
 review_args = ["-p", "-"]
 inactivity_timeout = 180
+enabled = false
 
 [agents.qwen]
 command = "qwen"
