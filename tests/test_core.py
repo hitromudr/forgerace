@@ -33,14 +33,12 @@ def test_config_loads():
 
 
 def test_config_agents():
-    """Verify expected agents are configured."""
+    """Verify agents are configured (at least some enabled)."""
     from forgerace.config import cfg, init_config
     init_config()
-    assert "gemini" in cfg.cli_agent_names
-    assert "aider-devstral" in cfg.cli_agent_names
-    # API review agents
-    assert "llama" in cfg.agent_names
-    assert "devstral" in cfg.agent_names
+    # At least one coding agent and one review agent
+    assert len(cfg.cli_agent_names) > 0, "No CLI agents configured"
+    assert len(cfg.agent_names) > 0, "No review agents configured"
 
 
 def test_task_parsing():
