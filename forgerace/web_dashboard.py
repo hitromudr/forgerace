@@ -2,6 +2,7 @@
 
 import json, os, subprocess, threading, time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from pathlib import Path
 
 from .config import cfg
@@ -359,7 +360,9 @@ class _Handler(BaseHTTPRequestHandler):
 
 def start_dashboard(host: str = "localhost", port: int = 8080):
     """Start the dashboard HTTP server (blocking)."""
-    server = HTTPServer((host, port), _Handler)
+    class _ThreadedServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+    server = _ThreadedServer((host, port), _Handler)
     print(f"ForgeRace Dashboard: http://{host}:{port}")
     try:
         server.serve_forever()
