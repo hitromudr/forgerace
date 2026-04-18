@@ -27,6 +27,7 @@ from .decompose import create_checkpoint_task
 from .utils import log, run_cmd, setup_logging
 from typing import Optional
 from .benchmark import BenchmarkStore
+from .web_server import create_web_server
 
 
 _AGENT_CONFIGS = {
@@ -1234,6 +1235,11 @@ def main():
     rollback_p = sub.add_parser("rollback", help="Восстановить состояние после задачи")
     rollback_p.add_argument("task_id", help="ID задачи (TASK-001)")
 
+    # web-server
+    web_p = sub.add_parser("web-server", help="Запустить WebServer с SSE")
+    web_p.add_argument("--host", default="0.0.0.0", help="Хост для запуска сервера")
+    web_p.add_argument("--port", type=int, default=8080, help="Порт для запуска сервера")
+
     args = parser.parse_args()
 
     if args.command == "help" or args.command is None:
@@ -1345,6 +1351,13 @@ def main():
             print(f"    Метрики: {checkpoint.metrics}")
         else:
             print(f"  ✗ Не удалось восстановить {task_id}")
+        return
+
+    if args.command == "web-server":
+        from .diagnose_engine import DiagnoseEngine
+        engine = DiagnoseEngine()
+        server = create_web_server(engine)
+        asyncio.run(server.start())
         return
 
     # run
