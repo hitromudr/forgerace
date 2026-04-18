@@ -1204,12 +1204,12 @@ def _ensure_litellm_proxy():
     import time as _time
     for _ in range(15):
         _time.sleep(1)
+        _sv = {k: os.environ.pop(k, None) for k in
+               ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy")}
         try:
-            no_proxy_handler = urllib.request.ProxyHandler({})
-            opener = urllib.request.build_opener(no_proxy_handler)
             req = urllib.request.Request(f"{proxy_url}/health")
             req.add_header("Authorization", "Bearer fr-local-dev")
-            with opener.open(req, timeout=2) as resp:
+            with urllib.request.urlopen(req, timeout=2) as resp:
                 if resp.status == 200:
                     log.info("LiteLLM proxy запущен")
                     return
