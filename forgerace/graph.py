@@ -2,12 +2,13 @@
 
 from typing import List, Dict, Set
 from .tasks import Task
+from .flat_dependencies import flatten_deps
 
 class DependencyGraph:
     """Граф зависимостей задач."""
 
     def __init__(self, tasks: List[Task]):
-        self.tasks = tasks
+        self.tasks = flatten_deps(tasks)  # Применяем выравнивание при инициализации
         self.graph = self._build_graph()
 
     def _build_graph(self) -> Dict[str, Set[str]]:
@@ -17,11 +18,6 @@ class DependencyGraph:
             graph[task.id] = set(task.deps)
         return graph
 
-    def flatten_deps(self) -> List[Task]:
-        """Выравнивает цепочки зависимостей."""
-        from .flat_dependencies import flatten_deps
-        return flatten_deps(self.tasks)
-
     def get_flattened_tasks(self) -> List[Task]:
         """Возвращает задачи с выровненными зависимостями."""
-        return self.flatten_deps()
+        return self.tasks

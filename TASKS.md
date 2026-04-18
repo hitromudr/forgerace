@@ -17,7 +17,7 @@
 - **Ветка**: task/task-001-realizatsiya-komandy-stats-aider-devstral
 
 ### TASK-003: Реализация Checkpoints
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -33,7 +33,7 @@
 - **Ветка**: task/task-003-realizatsiya-checkpoints-aider-devstral
 
 ### TASK-004: Реализация LiteLLM Watchdog
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
