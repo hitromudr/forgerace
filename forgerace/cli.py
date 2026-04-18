@@ -557,7 +557,13 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 short = team_name.replace("championship-v2-", "")[:15]
                 filled = int(BAR_LEN * done / total) if total else 0
                 bar = f"{C['green']}{'█' * filled}{C['dim']}{'░' * (BAR_LEN - filled)}{R}"
-                print(f"  {C['bold']}{short}{R}  {pct}  {bar}")
+                if ip > 0:
+                    status_str = f"  {C['magenta']}coding ({ip}){R}"
+                elif blocked > 0:
+                    status_str = f"  {C['red']}blocked ({blocked}){R}"
+                else:
+                    status_str = ""
+                print(f"  {C['bold']}{short}{R}  {pct}  {bar}{status_str}")
 
                 # Show each task in this team
                 for t in sorted(tt, key=lambda x: x.id):
@@ -594,12 +600,14 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             orch = cfg.log_dir / "orchestrator.log"
             if orch.exists():
                 log_files.append(orch)
+            _ansi_re = _re.compile(r'\x1b\[[0-9;]*m')
             for logf in log_files:
                 try:
                     if now_ts - logf.stat().st_mtime > 300:
                         continue  # skip logs inactive > 5min
                     lines = logf.read_text(errors="replace").splitlines()[-100:]
                     for line in reversed(lines):
+                        line = _ansi_re.sub('', line)  # strip ANSI codes
                         m = _re.search(r"\[(TASK-\d+)/([\w,-]+)\].*?(⏳ \S+\s*—\s*(.+)|Applied edit to (.+)|📖 Read (.+)|✏️\s+\w+ (.+)|💻 Bash: (.+)|🔍 (?:Grep|Glob): (.+)|📝 Прогресс: (.+)|replace (.+)|write_file (.+))", line)
                         if m:
                             agent = m.group(2).split(",")[0]
