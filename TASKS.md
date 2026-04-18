@@ -1,7 +1,7 @@
  TASKS — forgerace
 
 ### TASK-001: Реализация команды `stats`
-- **Статус**: blocked
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -184,7 +184,7 @@
 - **Агент**: aider-devstral
 - **Ветка**: task/task-015-realizatsiya-otchyotnosti-i-vizualizatsi-aider-devstral
 ### TASK-016: Реализация обработки ошибок и восстановления
-- **Статус**: in_progress:aider-devstral
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/error_handler.py
