@@ -185,7 +185,7 @@ function renderSummary(d){
   const pct=d.total_all?Math.round(d.total_done/d.total_all*100):0;
   let h=`<span class="pill">${d.total_done}/${d.total_all} tasks (${pct}%)</span>`;
   h+=`<span class="pill">${d.processes} proc</span>`;
-  h+=`<span class="pill ${d.litellm?'on':'off'}">LiteLLM ${d.litellm?'ON':'OFF'}</span>`;
+  h+=`<span class="pill ${d.litellm?'on':'off'}" style="cursor:pointer" onclick="toggleLitellm(${d.litellm})" title="Click to ${d.litellm?'stop':'start'}">LiteLLM ${d.litellm?'ON':'OFF'}</span>`;
   document.getElementById("summary").innerHTML=h;
 }
 
@@ -197,6 +197,13 @@ function renderActivity(agents){
     h+=`<span class="agent-card"><span class="dot"></span><b>${a.agent}</b> → ${a.task}</span>`;
   }
   el.innerHTML=h;
+}
+
+function toggleLitellm(isOn){
+  const action=isOn?'stop':'start';
+  fetch('/api/litellm/'+action).then(r=>r.json()).then(d=>{
+    console.log('LiteLLM',action,d);
+  }).catch(e=>console.error(e));
 }
 
 function renderTeams(teams){
@@ -291,8 +298,64 @@ class _Handler(BaseHTTPRequestHandler):
                     time.sleep(5)
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
+        elif self.path == "/api/litellm/start":
+            self._api_litellm_start()
+        elif self.path == "/api/litellm/stop":
+            self._api_litellm_stop()
         else:
             self.send_error(404)
+
+    def _api_litellm_start(self):
+        """Start LiteLLM proxy."""
+        from pathlib import Path
+        litellm_bin = Path.home() / ".local/share/pipx/venvs/litellm/bin/litellm"
+        config_file = cfg.root_dir / "litellm_config.yaml"
+        if not litellm_bin.exists() or not config_file.exists():
+            self._json_response({"ok": False, "error": "LiteLLM not installed"})
+            return
+        # Check if already running
+        import subprocess
+        hc = subprocess.run(["curl", "-s", "--connect-timeout", "1", "-o", "/dev/null",
+                             "-w", "%{http_code}", "http://127.0.0.1:4000/health"],
+                            capture_output=True, text=True, timeout=3,
+                            env={k: v for k, v in os.environ.items()
+                                 if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")})
+        if hc.stdout.strip() in ("200", "401"):
+            self._json_response({"ok": True, "status": "already running"})
+            return
+        env = {**os.environ, "no_proxy": "127.0.0.1,localhost", "NO_PROXY": "127.0.0.1,localhost"}
+        subprocess.Popen(
+            [str(litellm_bin), "--config", str(config_file), "--port", "4000", "--host", "127.0.0.1"],
+            stdout=open(cfg.log_dir / "litellm.log", "w"),
+            stderr=subprocess.STDOUT, env=env,
+        )
+        # Wait for startup
+        for _ in range(10):
+            time.sleep(1)
+            hc2 = subprocess.run(["curl", "-s", "--connect-timeout", "1", "-o", "/dev/null",
+                                  "-w", "%{http_code}", "http://127.0.0.1:4000/health"],
+                                 capture_output=True, text=True, timeout=3,
+                                 env={k: v for k, v in os.environ.items()
+                                      if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")})
+            if hc2.stdout.strip() in ("200", "401"):
+                self._json_response({"ok": True, "status": "started"})
+                return
+        self._json_response({"ok": False, "error": "timeout"})
+
+    def _api_litellm_stop(self):
+        """Stop LiteLLM proxy."""
+        import subprocess
+        subprocess.run(["pkill", "-f", "litellm.*--port.*4000"], capture_output=True)
+        time.sleep(1)
+        self._json_response({"ok": True, "status": "stopped"})
+
+    def _json_response(self, data):
+        body = json.dumps(data).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_message(self, fmt, *args):
         pass  # silence request logs
