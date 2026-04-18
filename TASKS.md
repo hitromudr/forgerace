@@ -65,7 +65,7 @@
 - **Ветка**: task/task-005-realizatsiya-stale-task-cleaner-aider-devstral
 
 ### TASK-006: Реализация Flat Dependencies
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
