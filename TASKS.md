@@ -17,7 +17,7 @@
 - **Ветка**: task/task-001-realizatsiya-komandy-stats-aider-devstral
 
 ### TASK-003: Реализация Checkpoints
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -81,7 +81,7 @@
 - **Ветка**: task/task-006-realizatsiya-flat-dependencies-aider-devstral
 
 ### TASK-008: Реализовать WebServer с SSE
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/web_server.py
@@ -111,7 +111,7 @@
 - **Ветка**: task/task-009-realizovat-dashboardrenderer-aider-devstral
 
 ### TASK-010: Реализовать Notifier
-- **Статус**: in_progress:aider-qwen
+- **Статус**: in_progress:aider-gptoss
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/notifier.py
@@ -122,11 +122,11 @@
 - **Проверка**: python -m unittest test_notifier.py
 - **Критерий готовности**: Notifier должен корректно отправлять уведомления
 - **Дискуссия**: observability-v1
-- **Агент**: aider-qwen
-- **Ветка**: task/task-010-realizovat-notifier-aider-qwen
+- **Агент**: aider-gptoss
+- **Ветка**: task/task-010-realizovat-notifier-aider-gptoss
 
 ### TASK-011: Реализовать синхронизацию доступа к состоянию
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: —
