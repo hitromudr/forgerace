@@ -33,7 +33,7 @@
 - **Ветка**: task/task-003-realizatsiya-checkpoints-aider-devstral
 
 ### TASK-004: Реализация LiteLLM Watchdog
-- **Статус**: open
+- **Статус**: in_progress:aider-qwen
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -65,7 +65,7 @@
 - **Ветка**: — 
 
 ### TASK-006: Реализация Flat Dependencies
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -97,7 +97,7 @@
 - **Ветка**: task/task-008-realizovat-webserver-s-sse-aider-devstral
 
 ### TASK-009: Реализовать DashboardRenderer
-- **Статус**: open
+- **Статус**: in_progress:aider-qwen,aider-devstral,aider-gptoss
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: TASK-007
@@ -176,7 +176,7 @@
 - **Агент**: —
 - **Ветка**: —
 ### TASK-015: Реализация отчётности и визуализации
-- **Статус**: open
+- **Статус**: in_progress:aider-qwen,aider-devstral,aider-gptoss
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: TASK-013
