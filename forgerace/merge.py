@@ -78,6 +78,32 @@ def merge_to_develop(branch: str, task_id: str) -> MergeResult:
                     )
                 log.info(f"  ✅ Тесты пройдены для {task_id}")
 
+            # 2.5. Revert agent changes to orchestrator core files
+            _MERGE_PROTECTED = (
+                "TASKS.md", "forgerace.toml", "litellm_config.yaml",
+                "CLAUDE.md", ".gitignore",
+                # Orchestrator core — agents must not modify the tool that runs them
+                "forgerace/cli.py", "forgerace/pipeline.py", "forgerace/agents.py",
+                "forgerace/config.py", "forgerace/merge.py", "forgerace/worktree.py",
+                "forgerace/tasks.py", "forgerace/decompose.py", "forgerace/discuss.py",
+                "forgerace/utils.py", "forgerace/cost.py",
+            )
+            changed = run_cmd(
+                ["git", "diff", "--name-only", dev_sha, "HEAD"],
+                cwd=merge_dir, check=False,
+            )
+            reverted = []
+            for fname in (changed.stdout or "").strip().split("\n"):
+                fname = fname.strip()
+                if fname in _MERGE_PROTECTED:
+                    run_cmd(["git", "checkout", dev_sha, "--", fname],
+                            cwd=merge_dir, check=False)
+                    reverted.append(fname)
+            if reverted:
+                run_cmd(["git", "commit", "--amend", "--no-edit", "-a"],
+                        cwd=merge_dir, check=False)
+                log.info(f"  🛡 Reverted {len(reverted)} protected files: {', '.join(reverted)}")
+
             # 3. Обновляем ветку develop на новый merge-коммит
             merge_sha = run_cmd(
                 ["git", "rev-parse", "HEAD"], cwd=merge_dir, check=False,
