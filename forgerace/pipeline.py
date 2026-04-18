@@ -1164,13 +1164,13 @@ def _ensure_litellm_proxy():
     if not proxy_url:
         return  # no agents need proxy
 
-    # Check if proxy is already running (use curl to bypass system proxy)
+    # Check if proxy is already running (clean env to bypass system proxy)
     try:
         import subprocess as _sp2
-        hc = _sp2.run(["curl", "-s", "--noproxy", "*", "-o", "/dev/null", "-w", "%{http_code}",
-                        "-H", "Authorization: Bearer fr-local-dev",
+        _clean = {k: v for k, v in os.environ.items() if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")}
+        hc = _sp2.run(["curl", "-s", "--connect-timeout", "2", "-o", "/dev/null", "-w", "%{http_code}",
                         f"{proxy_url}/health"],
-                       capture_output=True, text=True, timeout=3)
+                       capture_output=True, text=True, timeout=5, env=_clean)
         if hc.stdout.strip() in ("200", "401"):
             return  # proxy is running
     except Exception:
@@ -1201,10 +1201,9 @@ def _ensure_litellm_proxy():
     for _ in range(15):
         _time.sleep(1)
         try:
-            hc = _sp2.run(["curl", "-s", "--noproxy", "*", "-o", "/dev/null", "-w", "%{http_code}",
-                            "-H", "Authorization: Bearer fr-local-dev",
+            hc = _sp2.run(["curl", "-s", "--connect-timeout", "2", "-o", "/dev/null", "-w", "%{http_code}",
                             f"{proxy_url}/health"],
-                           capture_output=True, text=True, timeout=3)
+                           capture_output=True, text=True, timeout=5, env=_clean)
             if hc.stdout.strip() in ("200", "401"):
                 if resp.status == 200:
                     log.info("LiteLLM proxy запущен")
