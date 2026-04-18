@@ -33,7 +33,7 @@
 - **Ветка**: task/task-003-realizatsiya-checkpoints-aider-devstral
 
 ### TASK-004: Реализация LiteLLM Watchdog
-- **Статус**: blocked
+- **Статус**: in_progress:aider-gptoss
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -96,7 +96,7 @@
 - **Ветка**: task/task-008-realizovat-webserver-s-sse-aider-devstral
 
 ### TASK-009: Реализовать DashboardRenderer
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/dashboard_renderer.py
@@ -126,7 +126,7 @@
 - **Ветка**: — 
 
 ### TASK-011: Реализовать синхронизацию доступа к состоянию
-- **Статус**: blocked
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: —
@@ -170,7 +170,7 @@
 - **Агент**: aider-qwen
 - **Ветка**: task/task-014-realizatsiya-parallelnogo-vypolneniya-za-aider-qwen
 ### TASK-015: Реализация отчётности и визуализации
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/reporting/reporter.py
@@ -198,7 +198,7 @@
 - **Агент**: aider-devstral
 - **Ветка**: task/task-016-realizatsiya-obrabotki-oshibok-i-vosstan-aider-devstral
 ### TASK-017: Реализация валидации формата задач
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/tasks/validator.py
@@ -212,7 +212,7 @@
 - **Агент**: aider-qwen
 - **Ветка**: task/task-017-realizatsiya-validatsii-formata-zadach-aider-qwen
 ### TASK-018: Реализация тестирования ошибочных путей
-- **Статус**: in_progress:aider-gptoss
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/test_error_paths.py
