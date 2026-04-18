@@ -111,7 +111,7 @@
 - **Ветка**: task/task-009-realizovat-dashboardrenderer-aider-devstral
 
 ### TASK-010: Реализовать Notifier
-- **Статус**: in_progress:aider-qwen
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/notifier.py
