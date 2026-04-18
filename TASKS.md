@@ -65,7 +65,7 @@
 - **Ветка**: task/task-005-realizatsiya-stale-task-cleaner-aider-devstral
 
 ### TASK-006: Реализация Flat Dependencies
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -184,7 +184,7 @@
 - **Агент**: aider-devstral
 - **Ветка**: task/task-015-realizatsiya-otchyotnosti-i-vizualizatsi-aider-devstral
 ### TASK-016: Реализация обработки ошибок и восстановления
-- **Статус**: in_progress:aider-devstral
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/benchmark/core/error_handler.py
