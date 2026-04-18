@@ -1,7 +1,7 @@
  TASKS — forgerace
 
 ### TASK-001: Реализация команды `stats`
-- **Статус**: blocked
+- **Статус**: open
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -81,7 +81,7 @@
 - **Ветка**: task/task-006-realizatsiya-flat-dependencies-aider-devstral
 
 ### TASK-008: Реализовать WebServer с SSE
-- **Статус**: open
+- **Статус**: in_progress:aider-devstral
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: - **Файлы (новые)**: src/web_server.py
