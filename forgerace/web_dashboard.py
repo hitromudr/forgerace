@@ -147,7 +147,7 @@ def _build_snapshot() -> dict:
         "total_all": total_all,
         "teams": teams,
         "team_names": _list_teams(),
-        "history": _read_history(20),
+        "history": _read_history(50),
         "mode": cfg.mode,
         "agent_count": len(cfg.agent_names),
     }
@@ -382,7 +382,7 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
 .btn-primary:hover{background:#22c55e}.btn-danger{border-color:var(--red);color:var(--red)}.btn-danger:hover{background:rgba(239,68,68,.15)}
 .empty{color:var(--gray);padding:2em;text-align:center}
 /* Toast */
-.toast{position:fixed;top:1em;right:1em;background:var(--card);border:1px solid var(--green);border-radius:8px;padding:.5em 1em;font-size:.82em;color:var(--green);opacity:0;transition:opacity .3s;z-index:200;pointer-events:none;max-width:350px}
+.toast{position:fixed;top:5em;right:1em;background:var(--card);border:1px solid var(--green);border-radius:8px;padding:.5em 1em;font-size:.82em;color:var(--green);opacity:0;transition:opacity .3s;z-index:200;pointer-events:none;max-width:350px}
 .toast.err{border-color:var(--red);color:var(--red)}.toast.show{opacity:1}
 /* Responsive */
 @media(max-width:640px){.header{flex-direction:column;gap:.5em;padding:.8em}.summary{margin-left:0;width:100%}.tabs{overflow-x:auto;padding:0 .5em}
@@ -392,7 +392,6 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
 <div class="header">
   <h1>Forge<span>Race</span></h1>
   <div class="summary" id="summary"></div>
-  <div class="ts" id="ts">connecting...</div>
 </div>
 <div class="status-bar" id="statusBar"></div>
 <div class="tabs" id="tabBar">
@@ -460,6 +459,7 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
   <div class="history-panel" id="fullHistory" style="max-height:calc(100vh - 280px)">
     <div id="fullHistoryBody"></div>
   </div>
+  <div style="text-align:center;margin-top:.8em"><span class="btn" id="loadMoreBtn" onclick="loadMoreHistory()">Load More</span></div>
 </div>
 
 <!-- Tab: Settings -->
@@ -569,10 +569,11 @@ tip.style.cssText='position:absolute;top:110%;left:0;background:var(--card);bord
 tip.innerHTML=d.active_agents.map(a=>`<div>${esc(a.agent)} \u2192 ${esc(a.task)} <span style="color:var(--gray)">${a.since}</span></div>`).join('');
 el.appendChild(tip);setTimeout(()=>{if(tip.parentNode)tip.remove()},5000)}
 
-function renderStatusBar(d){
-$("statusBar").innerHTML=`<span>Mode: <b style="color:var(--purple)">${d.mode||'competitive'}</b></span>`+
-`<span>Active agents: <b>${d.agent_count||0}</b></span>`+
-`<span>Updated: ${d.timestamp}</span>`}
+function renderStatusBar(d){const modeColor=(d.mode||'competitive')==='competitive'?'cyan':'magenta';
+const ac=d.agent_count||0;const acStyle=ac>0?'color:#4ade80;font-weight:700':'';
+$("statusBar").innerHTML=`<span>Mode: <b style="color:${modeColor}">${d.mode||'competitive'}</b></span>`+
+`<span style="border-left:1px solid var(--border);padding-left:1em">Active agents: <b style="${acStyle}">${ac}</b></span>`+
+`<span style="border-left:1px solid var(--border);padding-left:1em;color:#6b7280">Updated: ${d.timestamp}</span>`}
 
 function renderActivity(a){if(!a||!a.length){$("activity").innerHTML="";return}
 $("activity").innerHTML='<div class="activity-title">Agent Activity</div>'+a.map(x=>`<span class="agent-card"><span class="dot"></span><b>${x.agent}</b> &rarr; ${x.task}</span>`).join('')}
@@ -586,7 +587,7 @@ h+=`</div></div>`}r.innerHTML=h}
 function renderMiniHistory(ev){const p=$("miniHistory"),b=$("miniHistoryBody");if(!ev||!ev.length){p.style.display="none";return}
 p.style.display="block";b.innerHTML=ev.slice(0,10).map(e=>`<div class="history-line hk-${e.kind}">${esc(e.text)}</div>`).join('')}
 
-function render(d){$("ts").textContent="";
+function render(d){
 if(JSON.stringify(_teamNames)!==JSON.stringify(d.team_names||[])){_teamNames=d.team_names||[];renderControls()}
 renderSummary(d);renderStatusBar(d);renderActivity(d.active_agents);renderTeams(d.teams);renderMiniHistory(d.history);
 _allHistory=d.history||[];_lastSnapshot=d}
@@ -670,6 +671,7 @@ function setMode(mode){apiPost("/api/mode",{mode})}
 
 /* History */
 function loadFullHistory(){apiGet("/api/history").then(d=>{if(!d)return;_allHistory=d.events||[];filterHistory()})}
+function loadMoreHistory(){apiGet("/api/history?limit=200").then(d=>{if(!d)return;_allHistory=d.events||[];filterHistory();toast("Loaded "+_allHistory.length+" events")})}
 function filterHistory(){const search=($("histSearch").value||'').toLowerCase(),kind=$("histKind").value;
 const filtered=_allHistory.filter(e=>{if(kind&&e.kind!==kind)return false;if(search&&!e.text.toLowerCase().includes(search))return false;return true});
 $("fullHistoryBody").innerHTML=filtered.length?filtered.map(e=>`<div class="history-line hk-${e.kind}">${esc(e.text)}</div>`).join(''):'<div class="empty">No matching events.</div>'}
@@ -720,8 +722,16 @@ if(bl.check_command)h+=`<div class="sys-card"><label>Check Command</label><span 
 h+='</div></div>'}
 $("parsedConfigView").innerHTML=h}
 
+function highlightToml(raw){let h=esc(raw);
+h=h.replace(/^(#.*)$/gm,'<span style="color:#6b7280">$1</span>');
+h=h.replace(/^(\[[\w.\-]+\])$/gm,'<span style="color:#a855f7;font-weight:600">$1</span>');
+h=h.replace(/^(\s*)([\w\-]+)(\s*=\s*)("(?:[^"\\]|\\.)*")/gm,'$1<span style="color:#fff;font-weight:600">$2</span>$3<span style="color:#4ade80">$4</span>');
+h=h.replace(/^(\s*)([\w\-]+)(\s*=\s*)(true|false)$/gm,'$1<span style="color:#fff;font-weight:600">$2</span>$3<span style="color:#ef4444">$4</span>');
+h=h.replace(/^(\s*)([\w\-]+)(\s*=\s*)(\d+(?:\.\d+)?)$/gm,'$1<span style="color:#fff;font-weight:600">$2</span>$3<span style="color:#eab308">$4</span>');
+h=h.replace(/^(\s*)([\w\-]+)(\s*=)(?!.*<span)/gm,'$1<span style="color:#fff;font-weight:600">$2</span>$3');
+return h}
 function loadSettings(){apiGet("/api/config").then(d=>{if(!d)return;
-$("configView").textContent=d.config||"";
+$("configView").innerHTML=highlightToml(d.config||"");
 renderParsedConfig(d.parsed||null);
 const s=d.system||{};
 $("sysInfo").innerHTML=`<div class="sys-card"><label>Python</label><span>${esc(s.python||'?')}</span></div>`+
@@ -793,8 +803,16 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_litellm_stop()
         elif self.path == "/api/teams":
             self._json_response({"ok": True, "teams": _list_teams()})
-        elif self.path == "/api/history":
-            self._json_response({"ok": True, "events": _read_history(100)})
+        elif self.path.startswith("/api/history"):
+            limit = 100
+            if "?" in self.path:
+                from urllib.parse import parse_qs, urlparse
+                qs = parse_qs(urlparse(self.path).query)
+                try:
+                    limit = int(qs.get("limit", [100])[0])
+                except (ValueError, IndexError):
+                    pass
+            self._json_response({"ok": True, "events": _read_history(limit)})
         elif self.path == "/api/discuss/list":
             self._json_response({"ok": True, "discussions": _list_discussions()})
         elif self.path.startswith("/api/discuss/show/"):
