@@ -346,6 +346,7 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
 /* Discussions */
 .disc-list{display:grid;gap:.6em}.disc-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.8em 1em;cursor:pointer;transition:all .2s}
 .disc-item:hover{border-color:var(--green);background:var(--hover)}
+.disc-expand{background:var(--card);border:1px solid var(--purple);border-radius:0 0 10px 10px;margin-top:-0.6em;margin-bottom:.6em;animation:fadeIn .2s}
 .disc-topic{font-weight:600;color:var(--yellow);font-size:.95em}.disc-meta{font-size:.78em;color:var(--gray);margin-top:.2em}
 .disc-status{display:inline-block;padding:.1em .5em;border-radius:10px;font-size:.72em;font-weight:600}
 .disc-status.open{background:rgba(234,179,8,.15);color:var(--yellow)}.disc-status.resolved{background:rgba(74,222,128,.15);color:var(--green)}
@@ -594,7 +595,7 @@ _allHistory=d.history||[];_lastSnapshot=d}
 function loadDiscussions(){apiGet("/api/discuss/list").then(d=>{if(!d)return;
 const list=d.discussions||[];
 if(!list.length){$("discList").innerHTML='<div class="empty">No discussions yet.</div>';return}
-$("discList").innerHTML=list.map(x=>`<div class="disc-item" onclick="viewDiscussion('${esc(x.topic)}')">`+
+$("discList").innerHTML=list.map(x=>`<div class="disc-item" data-topic="${esc(x.topic)}" onclick="viewDiscussion('${esc(x.topic)}')">`+
 `<div style="display:flex;justify-content:space-between;align-items:center"><span class="disc-topic">${esc(x.display_name||x.topic)}</span><div><span style="font-size:.75em;color:var(--gray);margin-right:.5em">${x.msg_count||0} msg</span><span class="disc-status ${x.status}">${x.status}</span></div></div>`+
 `<div class="disc-meta">${x.participants} participants: ${(x.participant_names||[]).join(', ')}</div></div>`).join('')})}
 
@@ -611,10 +612,25 @@ h=h.replace(/(CONFIDENCE:\s*\d+%)/g,'<span style="color:var(--yellow);font-weigh
 h=h.replace(/(--- RESOLVED ---)/g,'<div style="color:var(--green);text-align:center;margin:1em 0;font-weight:700">$1</div>');
 return h}
 
-function viewDiscussion(topic){_currentDisc=topic;$("discViewTitle").textContent=topic.replace(/-/g,' ').replace(/^\w/,c=>c.toUpperCase());
-apiGet("/api/discuss/show/"+encodeURIComponent(topic)).then(d=>{if(!d)return;
-$("discContent").innerHTML=formatDiscContent(d.content);$("discViewer").style.display="block"})}
-function hideDiscViewer(){$("discViewer").style.display="none";_currentDisc=""}
+function viewDiscussion(topic){
+  _currentDisc=topic;
+  // Close any open viewer
+  document.querySelectorAll('.disc-expand').forEach(e=>e.remove());
+  // Find the clicked card
+  const items=document.querySelectorAll('.disc-item');
+  let target=null;
+  items.forEach(el=>{if(el.getAttribute('data-topic')===topic)target=el});
+  if(!target)return;
+  // Create expand panel after the card
+  const panel=document.createElement('div');
+  panel.className='disc-expand';
+  panel.innerHTML='<div style="padding:1em;color:var(--gray)">Loading...</div>';
+  target.after(panel);
+  apiGet("/api/discuss/show/"+encodeURIComponent(topic)).then(d=>{if(!d)return;
+    panel.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;padding:.8em 1em;border-bottom:1px solid var(--border)"><b style="color:var(--purple)">${topic.replace(/-/g,' ')}</b><div><button class="pill action" onclick="showModal('replyModal')">Reply</button> <button class="pill" style="border-color:var(--green);color:var(--green)" onclick="showModal('resolveModal')">Resolve</button> <button class="pill" onclick="this.closest('.disc-expand').remove()">Close</button></div></div><div style="padding:1em;max-height:60vh;overflow-y:auto;white-space:pre-wrap;font-size:.85em;line-height:1.5">${formatDiscContent(d.content)}</div>`;
+  })
+}
+function hideDiscViewer(){document.querySelectorAll('.disc-expand').forEach(e=>e.remove());_currentDisc=""}
 
 function populateAgentChecks(){apiGet("/api/agents").then(d=>{if(!d)return;
 _agentNames=(d.agents||[]).filter(a=>a.enabled).map(a=>a.name);
