@@ -159,11 +159,18 @@ def _list_discussions() -> list[dict]:
     if not ddir.exists():
         return result
     for f in sorted(ddir.glob("*.md")):
+        # Exclude task copies (e.g. my-feature-tasks.md)
+        if f.name.endswith("-tasks.md"):
+            continue
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
-            status = "resolved" if "--- RESOLVED ---" in text else "open"
+            status = "resolved" if ("РЕЗОЛЮЦИЯ" in text or "--- RESOLVED ---" in text) else "open"
             participants = set(re.findall(r"^## @(\S+)", text, re.MULTILINE))
-            result.append({"topic": f.stem, "status": status,
+            msg_count = len(re.findall(r"^## @", text, re.MULTILINE))
+            # Display name: remove hyphens, capitalize first letter
+            display_name = f.stem.replace("-", " ").capitalize()
+            result.append({"topic": f.stem, "display_name": display_name,
+                           "status": status, "msg_count": msg_count,
                            "participants": len(participants),
                            "participant_names": sorted(participants)})
         except OSError:
@@ -216,6 +223,48 @@ def _read_config_file() -> str:
             except OSError:
                 pass
     return "# No forgerace.toml found"
+
+
+def _get_parsed_config() -> dict:
+    """Return structured config parsed from cfg object (not from file)."""
+    project = {
+        "name": getattr(cfg, "project_context", "")[:80] or "(not set)",
+        "root": str(cfg.root_dir),
+        "mode": cfg.mode,
+        "dev_branch": cfg.dev_branch,
+    }
+    agents = []
+    for name, acfg in cfg.agents.items():
+        agents.append({
+            "name": name,
+            "command": acfg.command,
+            "protocol": acfg.protocol,
+            "enabled": acfg.enabled,
+            "model": acfg.model if acfg.protocol == "openai" else "",
+        })
+    limits = {
+        "max_parallel_tasks": cfg.max_parallel_tasks,
+        "agent_timeout": cfg.agent_timeout,
+        "max_review_rounds": cfg.max_review_rounds,
+        "max_task_complexity": cfg.max_task_complexity,
+        "progress_timeout": cfg.progress_timeout,
+        "max_concurrent": cfg.max_concurrent,
+        "review_consensus": cfg.review_consensus,
+        "min_reviewers": cfg.min_reviewers,
+        "preflight": cfg.preflight,
+    }
+    if cfg.budget_per_task_usd is not None:
+        limits["budget_per_task_usd"] = cfg.budget_per_task_usd
+    frames = []
+    for name, fcfg in cfg.frames.items():
+        frames.append({"name": name, "description": fcfg.description})
+    build = {
+        "commands": cfg.build_commands,
+        "lint_fix": cfg.lint_commands,
+        "check_command": cfg.check_command,
+    }
+    return {"project": project, "agents": agents, "limits": limits,
+            "frames": frames, "build": build}
 
 
 def _get_system_info() -> dict:
@@ -299,7 +348,7 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
 .disc-item:hover{border-color:var(--green);background:var(--hover)}
 .disc-topic{font-weight:600;color:var(--yellow);font-size:.95em}.disc-meta{font-size:.78em;color:var(--gray);margin-top:.2em}
 .disc-status{display:inline-block;padding:.1em .5em;border-radius:10px;font-size:.72em;font-weight:600}
-.disc-status.open{background:rgba(74,222,128,.15);color:var(--green)}.disc-status.resolved{background:rgba(107,114,128,.15);color:var(--gray)}
+.disc-status.open{background:rgba(234,179,8,.15);color:var(--yellow)}.disc-status.resolved{background:rgba(74,222,128,.15);color:var(--green)}
 .disc-viewer{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:1em;max-height:500px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:.82em;white-space:pre-wrap;line-height:1.5}
 /* Agents table */
 .agents-table{width:100%;border-collapse:collapse;font-size:.85em}
@@ -414,8 +463,12 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
 
 <!-- Tab: Settings -->
 <div class="tab-content" id="tab-settings">
-  <h3 style="color:var(--text-dim);margin-bottom:.8em">Configuration</h3>
-  <div class="config-view" id="configView">Loading...</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.8em">
+    <h3 style="color:var(--text-dim)">Configuration</h3>
+    <span class="btn" id="rawToggleBtn" onclick="toggleRawConfig()">Show Raw</span>
+  </div>
+  <div id="parsedConfigView"></div>
+  <div class="config-view" id="configView" style="display:none">Loading...</div>
   <h3 style="color:var(--text-dim);margin-top:1.5em;margin-bottom:.8em">System Info</h3>
   <div class="sys-info" id="sysInfo"></div>
 </div>
@@ -463,7 +516,7 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
 
 <script>
 const ICONS={done:"\u2713",skip:"\u2298",in_progress:"\u26a1",review:"\u23f3",blocked:"\u2717",open:"\u25cb",failed:"\u274c",claimed:"\u26a1"};
-const collapsed=new Set();let _teamNames=[],_litellmPending=false,_currentDisc="",_allHistory=[],_agentNames=[];
+const collapsed=new Set();let _teamNames=[],_litellmPending=false,_currentDisc="",_allHistory=[],_agentNames=[],_lastSnapshot=null;
 const $=id=>document.getElementById(id);
 function esc(s){const d=document.createElement("div");d.textContent=s;return d.innerHTML}
 function toast(msg,err){const t=$("toast");t.textContent=msg;t.className=err?"toast err show":"toast show";setTimeout(()=>t.className="toast",3500)}
@@ -503,10 +556,17 @@ $("controls").innerHTML=`<select id="teamSel"><option value="">-- team --</optio
 `<span class="pill action" onclick="showModal('newDiscModal')">New Discussion</span>`}
 
 function renderSummary(d){const p=d.total_all?Math.round(d.total_done/d.total_all*100):0;
-let h=`<span class="pill">${d.total_done}/${d.total_all} (${p}%)</span><span class="pill">${d.processes} proc</span>`;
+const agentTip=d.active_agents&&d.active_agents.length?d.active_agents.map(a=>a.agent+' \u2192 '+a.task).join('\n'):'No active processes';
+let h=`<span class="pill">${d.total_done}/${d.total_all} (${p}%)</span><span class="pill proc-pill" onclick="toggleProcTooltip(this)" title="${esc(agentTip)}" style="position:relative">${d.processes} proc</span>`;
 if(_litellmPending&&!d.litellm)h+=`<span class="pill starting">starting...</span>`;
 else{_litellmPending=false;h+=`<span class="pill ${d.litellm?'on':'off'}" onclick="toggleLitellm(${d.litellm})">LiteLLM ${d.litellm?'ON':'OFF'}</span>`}
 $("summary").innerHTML=h}
+function toggleProcTooltip(el){const existing=el.querySelector('.proc-tip');if(existing){existing.remove();return}
+const d=_lastSnapshot;if(!d||!d.active_agents||!d.active_agents.length)return;
+const tip=document.createElement('div');tip.className='proc-tip';
+tip.style.cssText='position:absolute;top:110%;left:0;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.5em .7em;font-size:.8em;white-space:nowrap;z-index:50;min-width:180px';
+tip.innerHTML=d.active_agents.map(a=>`<div>${esc(a.agent)} \u2192 ${esc(a.task)} <span style="color:var(--gray)">${a.since}</span></div>`).join('');
+el.appendChild(tip);setTimeout(()=>{if(tip.parentNode)tip.remove()},5000)}
 
 function renderStatusBar(d){
 $("statusBar").innerHTML=`<span>Mode: <b style="color:var(--purple)">${d.mode||'competitive'}</b></span>`+
@@ -525,22 +585,35 @@ h+=`</div></div>`}r.innerHTML=h}
 function renderMiniHistory(ev){const p=$("miniHistory"),b=$("miniHistoryBody");if(!ev||!ev.length){p.style.display="none";return}
 p.style.display="block";b.innerHTML=ev.slice(0,10).map(e=>`<div class="history-line hk-${e.kind}">${esc(e.text)}</div>`).join('')}
 
-function render(d){$("ts").textContent="Updated: "+d.timestamp;
+function render(d){$("ts").textContent="";
 if(JSON.stringify(_teamNames)!==JSON.stringify(d.team_names||[])){_teamNames=d.team_names||[];renderControls()}
 renderSummary(d);renderStatusBar(d);renderActivity(d.active_agents);renderTeams(d.teams);renderMiniHistory(d.history);
-_allHistory=d.history||[]}
+_allHistory=d.history||[];_lastSnapshot=d}
 
 /* Discussions */
 function loadDiscussions(){apiGet("/api/discuss/list").then(d=>{if(!d)return;
 const list=d.discussions||[];
 if(!list.length){$("discList").innerHTML='<div class="empty">No discussions yet.</div>';return}
 $("discList").innerHTML=list.map(x=>`<div class="disc-item" onclick="viewDiscussion('${esc(x.topic)}')">`+
-`<div style="display:flex;justify-content:space-between;align-items:center"><span class="disc-topic">${esc(x.topic)}</span><span class="disc-status ${x.status}">${x.status}</span></div>`+
+`<div style="display:flex;justify-content:space-between;align-items:center"><span class="disc-topic">${esc(x.display_name||x.topic)}</span><div><span style="font-size:.75em;color:var(--gray);margin-right:.5em">${x.msg_count||0} msg</span><span class="disc-status ${x.status}">${x.status}</span></div></div>`+
 `<div class="disc-meta">${x.participants} participants: ${(x.participant_names||[]).join(', ')}</div></div>`).join('')})}
 
-function viewDiscussion(topic){_currentDisc=topic;$("discViewTitle").textContent=topic;
+function formatDiscContent(raw){
+if(!raw)return '(empty)';
+let h=esc(raw);
+// Section headers: ## @agent (date)
+h=h.replace(/^(## @\S+.*)/gm,'<div style="color:var(--purple);font-weight:700;margin-top:1em;border-bottom:1px solid var(--border);padding-bottom:.3em">$1</div>');
+// РЕЗОЛЮЦИЯ line
+h=h.replace(/(РЕЗОЛЮЦИЯ:.*)/g,'<span style="color:var(--green);font-weight:700">$1</span>');
+// CONFIDENCE line
+h=h.replace(/(CONFIDENCE:\s*\d+%)/g,'<span style="color:var(--yellow);font-weight:600">$1</span>');
+// --- RESOLVED ---
+h=h.replace(/(--- RESOLVED ---)/g,'<div style="color:var(--green);text-align:center;margin:1em 0;font-weight:700">$1</div>');
+return h}
+
+function viewDiscussion(topic){_currentDisc=topic;$("discViewTitle").textContent=topic.replace(/-/g,' ').replace(/^\w/,c=>c.toUpperCase());
 apiGet("/api/discuss/show/"+encodeURIComponent(topic)).then(d=>{if(!d)return;
-$("discContent").textContent=d.content||"(empty)";$("discViewer").style.display="block"})}
+$("discContent").innerHTML=formatDiscContent(d.content);$("discViewer").style.display="block"})}
 function hideDiscViewer(){$("discViewer").style.display="none";_currentDisc=""}
 
 function populateAgentChecks(){apiGet("/api/agents").then(d=>{if(!d)return;
@@ -586,8 +659,54 @@ const filtered=_allHistory.filter(e=>{if(kind&&e.kind!==kind)return false;if(sea
 $("fullHistoryBody").innerHTML=filtered.length?filtered.map(e=>`<div class="history-line hk-${e.kind}">${esc(e.text)}</div>`).join(''):'<div class="empty">No matching events.</div>'}
 
 /* Settings */
+let _rawConfigVisible=false;
+function toggleRawConfig(){_rawConfigVisible=!_rawConfigVisible;
+$("configView").style.display=_rawConfigVisible?'block':'none';
+$("parsedConfigView").style.display=_rawConfigVisible?'none':'block';
+$("rawToggleBtn").textContent=_rawConfigVisible?'Show Parsed':'Show Raw'}
+
+function renderParsedConfig(p){if(!p){$("parsedConfigView").innerHTML='';return}
+let h='';
+// Project section
+const pr=p.project||{};
+h+='<div style="margin-bottom:1em"><div style="color:var(--purple);font-weight:600;margin-bottom:.4em;font-size:.95em">Project</div>';
+h+='<div class="sys-info" style="margin:0">';
+for(const [k,v] of [['Name',pr.name],['Root',pr.root],['Mode',pr.mode],['Dev Branch',pr.dev_branch]]){
+h+=`<div class="sys-card"><label>${k}</label><span>${esc(String(v||'-'))}</span></div>`}
+h+='</div></div>';
+// Agents section
+const ag=p.agents||[];
+if(ag.length){h+='<div style="margin-bottom:1em"><div style="color:var(--purple);font-weight:600;margin-bottom:.4em;font-size:.95em">Agents</div>';
+h+='<table class="agents-table"><thead><tr><th>Name</th><th>Command</th><th>Protocol</th><th>Enabled</th><th>Model</th></tr></thead><tbody>';
+for(const a of ag){h+=`<tr><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.command)}</td><td>${esc(a.protocol)}</td>`+
+`<td style="color:${a.enabled?'var(--green)':'var(--red)'}">` +(a.enabled?'yes':'no')+`</td><td class="mono">${esc(a.model||'-')}</td></tr>`}
+h+='</tbody></table></div>'}
+// Limits section
+const lm=p.limits||{};
+if(Object.keys(lm).length){h+='<div style="margin-bottom:1em"><div style="color:var(--purple);font-weight:600;margin-bottom:.4em;font-size:.95em">Limits</div>';
+h+='<div class="sys-info" style="margin:0">';
+for(const [k,v] of Object.entries(lm)){h+=`<div class="sys-card"><label>${esc(k)}</label><span>${esc(String(v))}</span></div>`}
+h+='</div></div>'}
+// Frames section
+const fr=p.frames||[];
+if(fr.length){h+='<div style="margin-bottom:1em"><div style="color:var(--purple);font-weight:600;margin-bottom:.4em;font-size:.95em">Frames</div>';
+h+='<div style="display:flex;flex-wrap:wrap;gap:.5em">';
+for(const f of fr){h+=`<span class="pill" title="${esc(f.description)}">${esc(f.name)}${f.description?' — '+esc(f.description):''}</span>`}
+h+='</div></div>'}
+// Build section
+const bl=p.build||{};
+if(bl.commands&&bl.commands.length||bl.check_command||bl.lint_fix&&bl.lint_fix.length){
+h+='<div style="margin-bottom:1em"><div style="color:var(--purple);font-weight:600;margin-bottom:.4em;font-size:.95em">Build</div>';
+h+='<div class="sys-info" style="margin:0">';
+if(bl.commands&&bl.commands.length)h+=`<div class="sys-card"><label>Commands</label><span class="mono">${esc(JSON.stringify(bl.commands))}</span></div>`;
+if(bl.lint_fix&&bl.lint_fix.length)h+=`<div class="sys-card"><label>Lint Fix</label><span class="mono">${esc(JSON.stringify(bl.lint_fix))}</span></div>`;
+if(bl.check_command)h+=`<div class="sys-card"><label>Check Command</label><span class="mono">${esc(bl.check_command)}</span></div>`;
+h+='</div></div>'}
+$("parsedConfigView").innerHTML=h}
+
 function loadSettings(){apiGet("/api/config").then(d=>{if(!d)return;
 $("configView").textContent=d.config||"";
+renderParsedConfig(d.parsed||null);
 const s=d.system||{};
 $("sysInfo").innerHTML=`<div class="sys-card"><label>Python</label><span>${esc(s.python||'?')}</span></div>`+
 `<div class="sys-card"><label>Git Branch</label><span>${esc(s.branch||'?')}</span></div>`+
@@ -672,7 +791,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/agents":
             self._json_response({"ok": True, "agents": _list_agents_info(), "mode": cfg.mode})
         elif self.path == "/api/config":
-            self._json_response({"ok": True, "config": _read_config_file(), "system": _get_system_info()})
+            self._json_response({"ok": True, "config": _read_config_file(),
+                                 "parsed": _get_parsed_config(), "system": _get_system_info()})
         else:
             self.send_error(404)
 
