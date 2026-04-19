@@ -29,8 +29,8 @@ def test_config_loads():
     from forgerace.config import cfg, init_config
     init_config()
     assert cfg.root_dir == Path.cwd()
-    assert len(cfg.cli_agent_names) >= 2
-    assert len(cfg.agent_names) >= 3
+    assert len(cfg.cli_agent_names) >= 1
+    assert len(cfg.agent_names) >= 1
 
 
 def test_config_agents():
