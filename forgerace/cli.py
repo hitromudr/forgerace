@@ -1270,6 +1270,18 @@ def main():
     # doctor
     sub.add_parser("doctor", help="Диагностика и автолечение среды")
 
+    # logs
+    logs_p = sub.add_parser("logs", help="Просмотр логов задач")
+    logs_sub = logs_p.add_subparsers(dest="logs_cmd")
+    logs_sub.add_parser("list", help="Список логов")
+    logs_show = logs_sub.add_parser("show", help="Показать лог задачи")
+    logs_show.add_argument("task_id", help="ID задачи (TASK-032 или 032)")
+    logs_show.add_argument("--agent", help="Фильтр по агенту")
+    logs_show.add_argument("--tail", type=int, default=50, help="Кол-во строк (default: 50)")
+    logs_follow = logs_sub.add_parser("follow", help="Live-tail логов")
+    logs_follow.add_argument("task_id", nargs="?", help="ID задачи")
+    logs_follow.add_argument("--agent", help="Фильтр по агенту")
+
     # stats
     stats_p = sub.add_parser("stats", help="Вывести статистику задач")
     stats_p.add_argument("--format", choices=["text", "json"], default="text", help="Формат вывода")
@@ -1397,6 +1409,19 @@ def main():
         from .doctor import doctor
         ok = doctor()
         sys.exit(0 if ok else 1)
+
+    if args.command == "logs":
+        from .logs_cmd import list_logs, show_log, follow_log
+        cmd = getattr(args, "logs_cmd", None)
+        if cmd == "show":
+            show_log(args.task_id, agent=getattr(args, "agent", None),
+                     tail=getattr(args, "tail", 50))
+        elif cmd == "follow":
+            follow_log(task_id=getattr(args, "task_id", None),
+                       agent=getattr(args, "agent", None))
+        else:
+            list_logs()
+        return
 
     if args.command == "rollback":
         try:

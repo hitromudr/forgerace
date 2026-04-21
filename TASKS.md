@@ -243,7 +243,7 @@
 - **Ветка**: task/task-032-realizatsiya-komandy-fr-doctor-aider-devstral
 
 ### TASK-033: Реализация команды ./fr logs
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -255,5 +255,5 @@
 - **Проверка**: python3 -c "from forgerace.logs_cmd import list_logs, show_log, follow_log; print('OK')"
 - **Критерий готовности**: list_logs() выводит таблицу файлов, show_log("032") показывает последние 50 строк лога TASK-032
 - **Дискуссия**: logs-cmd
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: aider-qwen
+- **Ветка**: task/task-033-realizatsiya-komandy-fr-logs-aider-qwen
