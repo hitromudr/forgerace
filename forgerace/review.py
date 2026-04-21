@@ -409,6 +409,10 @@ def send_to_rework(result: AgentResult, task: Task, comments: str) -> bool:
     from .utils import C, R
     log.info(f"[{tag_rework}] {C['yellow']}правки по замечаниям ревью{R}")
 
+    if not result.workdir or not result.workdir.exists():
+        log.error(f"[{tag_rework}] workdir не существует: {result.workdir}")
+        return False
+
     review_file = result.workdir / "REVIEW_COMMENTS.md"
     review_file.write_text(comments, encoding="utf-8")
 
