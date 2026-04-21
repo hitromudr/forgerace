@@ -1288,6 +1288,12 @@ def main():
     # help
     sub.add_parser("help", help="Полная справка с примерами")
 
+    # retry
+    retry_p = sub.add_parser("retry", help="Умный перезапуск задачи")
+    retry_p.add_argument("task_id", nargs="?", help="ID задачи (TASK-037) или --all")
+    retry_p.add_argument("--all", action="store_true", help="Перезапустить все blocked")
+    retry_p.add_argument("--agent", help="Принудительно указать агента")
+
     # doctor
     sub.add_parser("doctor", help="Диагностика и автолечение среды")
 
@@ -1424,6 +1430,17 @@ def main():
     # stats
     if args.command == "stats":
         _cmd_stats()
+        return
+
+    if args.command == "retry":
+        from .retry_cmd import retry_task, retry_all_tasks
+        if getattr(args, "all", False):
+            count = retry_all_tasks()
+            print(f"  Перезапущено {count} задач")
+        elif args.task_id:
+            retry_task(args.task_id)
+        else:
+            print(f"  {C['dim']}Укажите TASK-ID или --all{R}")
         return
 
     if args.command == "task":
