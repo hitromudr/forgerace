@@ -27,6 +27,7 @@ from .decompose import create_checkpoint_task
 from .utils import log, run_cmd, setup_logging
 from typing import Optional
 from .benchmark import BenchmarkStore
+from .doctor import doctor
 # web_server, checkpoint, diagnose_engine — created by agents, not yet merged
 # from .web_server import create_web_server
 
@@ -341,6 +342,7 @@ def _cmd_init():
         print(f"    {C['yellow']}  /{agent}+wild{R}              — сломай: дикие стратегии")
         print(f"    {C['yellow']}  /{agent}+price{R}             — оцени: цена выбора")
     print(f"    {C['bold']}./fr run{R}                  — запусти задачи")
+    print(f"    {C['bold']}./fr doctor{R}               — диагностика среды")
     print(f"    {C['bold']}./fr help{R}                 — все команды")
 
 
@@ -1251,6 +1253,9 @@ def main():
     rollback_p = sub.add_parser("rollback", help="Восстановить состояние после задачи")
     rollback_p.add_argument("task_id", help="ID задачи (TASK-001)")
 
+    # doctor
+    sub.add_parser("doctor", help="Диагностика и автолечение среды")
+
     # web-server
     web_p = sub.add_parser("web-server", help="Запустить WebServer с SSE")
     web_p.add_argument("--host", default="0.0.0.0", help="Хост для запуска сервера")
@@ -1357,6 +1362,10 @@ def main():
         _cmd_stats()
         return
 
+    if args.command == "doctor":
+        doctor()
+        return
+
     if args.command == "rollback":
         try:
             from .checkpoint import store
@@ -1381,7 +1390,7 @@ def main():
     if args.command == "web-server":
         try:
             import asyncio
-            from .diagnose_engine import DiagnoseEngine
+            from .diagnose_engine import DiagnoseEngine, create_web_server
         except ImportError:
             print(f"  {C['red']}Модуль web_server/diagnose_engine не найден — функция ещё не реализована{R}")
             return

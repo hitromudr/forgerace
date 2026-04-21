@@ -33,6 +33,7 @@ from .tasks import (
 from .types import MergeResult
 from .utils import log, run_cmd, is_valid_path, C, R, agent_color, parse_pytest_output
 from .worktree import cleanup_worktrees, create_worktree
+from .doctor import doctor
 
 
 # --- Heartbeat ---
