@@ -21,6 +21,7 @@ from .discuss import discuss_chat, discuss_create, discuss_list, discuss_reply, 
 from .merge import merge_to_develop
 from .utils import C, R, agent_color
 from .pipeline import run_pipeline
+from .task_cmd import list_tasks
 from .tasks import parse_tasks, update_task_status
 from .types import MergeResult
 from .decompose import create_checkpoint_task
@@ -28,7 +29,7 @@ from .utils import log, run_cmd, setup_logging
 from typing import Optional
 from .benchmark import BenchmarkStore
 # web_server, checkpoint, diagnose_engine — created by agents, not yet merged
-# from .web_server import create_web_server
+from .web_server import create_web_server
 
 
 _AGENT_CONFIGS = {
@@ -1299,6 +1300,10 @@ def main():
     dash_p = sub.add_parser("dashboard", aliases=["web"], help="Web dashboard с SSE (lightweight)")
     dash_p.add_argument("--host", default="localhost", help="Хост (default: localhost)")
     dash_p.add_argument("--port", type=int, default=8080, help="Порт (default: 8080)")
+    # task command
+    task_p = sub.add_parser("task", help="Task utilities")
+    task_sub = task_p.add_subparsers(dest="task_cmd")
+    task_sub.add_parser("list", help="List tasks compactly")
 
     args = parser.parse_args()
 
