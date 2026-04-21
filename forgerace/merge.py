@@ -100,7 +100,9 @@ def merge_to_develop(branch: str, task_id: str) -> MergeResult:
                             cwd=merge_dir, check=False)
                     reverted.append(fname)
             if reverted:
-                run_cmd(["git", "commit", "--amend", "--no-edit", "-a"],
+                # Stage only the reverted files, not everything in the worktree
+                run_cmd(["git", "add", "--"] + reverted, cwd=merge_dir, check=False)
+                run_cmd(["git", "commit", "--amend", "--no-edit"],
                         cwd=merge_dir, check=False)
                 log.info(f"  🛡 Reverted {len(reverted)} protected files: {', '.join(reverted)}")
 

@@ -425,9 +425,12 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
                     cwd=workdir, check=False)
             run_cmd(["git", "checkout", cfg.dev_branch, "--", pf],
                     cwd=workdir, check=False)
-        # Коммит — добавляем ВСЕ изменения, не только task_paths
-        # (агент мог создать файлы вне указанных путей)
+        # Коммит — добавляем ВСЕ изменения, но исключаем мусор агентов
         run_cmd(["git", "add", "-A"], cwd=workdir, check=False)
+        # Unstage aider tmp files, prompt dumps from index
+        for pattern in ["tmp*.md", "tmp*.txt", ".aider*"]:
+            run_cmd(["git", "rm", "--cached", "--ignore-unmatch", "-rq", pattern],
+                    cwd=workdir, check=False)
         diff_stat = run_cmd(["git", "diff", "--cached", "--stat"], cwd=workdir, check=False)
         if diff_stat.stdout.strip():
             run_cmd(

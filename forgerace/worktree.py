@@ -104,10 +104,17 @@ def remove_worktree(agent_num: int):
     run_cmd(["git", "worktree", "prune"], cwd=cfg.root_dir, check=False)
 
 
-def cleanup_worktrees(results: list) -> None:
-    """Удаляет worktree всех агентов из списка результатов."""
+def cleanup_worktrees(results: list, keep_failed: bool = True) -> None:
+    """Удаляет worktree всех агентов из списка результатов.
+
+    If keep_failed=True (default), worktrees of agents that failed
+    (success=False or blocked) are preserved for debugging.
+    """
     for r in results:
         try:
+            if keep_failed and hasattr(r, "success") and r.success is False:
+                log.info(f"  Worktree сохранён для дебага: {r.workdir}")
+                continue
             agent_num = int(r.workdir.name.split("-")[-1])
             remove_worktree(agent_num)
         except (ValueError, AttributeError) as exc:

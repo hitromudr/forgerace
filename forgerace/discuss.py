@@ -707,12 +707,10 @@ def _post_resolve(filepath: Path):
     fixed_lines = [_fix_oneline_task(line) for line in clean_block.split("\n")]
     clean_block = "\n".join(fixed_lines)
 
-    # Validate generated tasks (phantom deps, duplicates, suspicious paths)
-    from .decompose import validate_generated_tasks
-    clean_block = validate_generated_tasks(clean_block, parse_tasks(tasks_file))
-
-    # Renumber tasks to avoid duplicates, then insert — all under file lock
+    # Renumber FIRST (before validation — so internal deps stay consistent),
+    # then validate (phantom deps checked against final IDs)
     from .tasks import tasks_file_lock, _atomic_write
+    from .decompose import validate_generated_tasks
     with tasks_file_lock():
         # Re-read current max task number (another process may have written)
         current_tasks = parse_tasks(tasks_file)
@@ -728,6 +726,9 @@ def _post_resolve(filepath: Path):
                 new_full = f"TASK-{new_start + i:03d}"
                 clean_block = clean_block.replace(old_full, new_full)
             log.info(f"Перенумерованы задачи: {old_ids[0]}..{old_ids[-1]} → {new_start}..{new_start + len(old_ids) - 1}")
+
+        # Validate AFTER renumbering — internal deps between generated tasks are now valid
+        clean_block = validate_generated_tasks(clean_block, current_tasks)
 
         # Insert directly (no nested lock — we already hold the file lock)
         content = tasks_file.read_text(encoding="utf-8")
