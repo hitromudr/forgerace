@@ -963,7 +963,20 @@ def _print_full_help():
   Сценарий:  /agent+audit → /agent+wild → /agent+price  {DIM}(проверь → сломай → оцени){R}
 
   {DIM}Фреймы настраиваются в forgerace.toml секция [frames.*]{R}
-  {DIM}Встроенные фреймы: audit, wild, price, theory, evidence, optimizer, meta, vectors{R}
+
+  {Y}Встроенные фреймы:{R}
+    {B}reviewer{R}    — строгий код-ревьюер: соответствие задаче, корректность, безопасность
+    {B}audit{R}       — 8 осей выживаемости решения
+    {B}wild{R}        — дикие стратегии, инверсия, слом шаблонов
+    {B}price{R}       — цена выбора, trade-off матрицы, арбитраж
+    {B}theory{R}      — от принципов к реализации
+    {B}evidence{R}    — от фактов к обобщению
+    {B}optimizer{R}   — 4-фазный разбор: grounding → divergence → red-teaming
+    {B}meta{R}        — 13 фреймворков: диалектика, теория игр, стоицизм...
+    {B}vectors{R}     — 10 когнитивных векторов: дедукция, инверсия, парадокс...
+    {B}adversarial{R} — red-team: баги, race conditions, edge cases
+    {B}architect{R}   — структура: coupling, cohesion, data flow
+    {B}user{R}        — UX: что путает, бесит, вводит в заблуждение
 
 {Y}АГЕНТЫ И РЕЖИМ:{R}
   ./fr agents                            Список агентов и статус (ON/OFF)
