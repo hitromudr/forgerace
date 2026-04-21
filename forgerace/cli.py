@@ -1459,7 +1459,10 @@ def main_with_signal_handling():
     # setpgrp + custom SIGINT только для run (discuss нужен нормальный Ctrl+C)
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "run":
-        os.setpgrp()
+        try:
+            os.setpgrp()
+        except (PermissionError, OSError):
+            pass  # already session leader (e.g. launched via start_new_session)
         signal.signal(signal.SIGINT, _force_exit)
         signal.signal(signal.SIGTERM, _force_exit)
     try:

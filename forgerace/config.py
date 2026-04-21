@@ -140,6 +140,7 @@ class Config:
     hook_on_complete: str = ""
 
     # --- Текстовые контексты ---
+    project_name: str = ""
     project_context: str = ""
     discuss_context: str = ""
     agent_rules: str = ""
@@ -333,7 +334,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
         root_path = Path(proj["root"])
         cfg.root_dir = (toml_dir / root_path).resolve() if not root_path.is_absolute() else root_path.resolve()
     if "name" in proj:
-        pass  # informational only
+        cfg.project_name = proj["name"]
     if "context" in proj:
         cfg.project_context = proj["context"]
     if "discuss_context" in proj:

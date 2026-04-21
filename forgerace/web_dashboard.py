@@ -79,7 +79,41 @@ def _list_teams() -> list[str]:
     return sorted(teams)
 
 
+def _list_disc_topics() -> list[str]:
+    """All discussion topic names (open + archived)."""
+    topics = []
+    ddir = cfg.discuss_dir
+    if ddir.exists():
+        for f in ddir.glob("*.md"):
+            if not f.name.endswith("-tasks.md"):
+                topics.append(f.stem)
+        adir = ddir / "archive"
+        if adir.exists():
+            for f in adir.glob("*.md"):
+                if not f.name.endswith("-tasks.md"):
+                    topics.append(f.stem)
+    return topics
+
+
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _tail_run_log(n: int = 30) -> list[str]:
+    """Read last N lines of web_run.log, strip ANSI codes."""
+    logfile = cfg.log_dir / "web_run.log"
+    if not logfile.exists():
+        return []
+    try:
+        text = logfile.read_text(encoding="utf-8", errors="replace")
+        lines = text.strip().split("\n")
+        result = []
+        for line in lines[-n:]:
+            clean = _ANSI_RE.sub("", line).strip()
+            if clean:
+                result.append(clean)
+        return result
+    except OSError:
+        return []
 
 def _read_history(limit: int = 20) -> list[dict]:
     events = []
@@ -113,7 +147,21 @@ def _read_history(limit: int = 20) -> list[dict]:
     return events
 
 
+_snapshot_cache: dict = {}
+_snapshot_ts: float = 0
+
+
 def _build_snapshot() -> dict:
+    global _snapshot_cache, _snapshot_ts
+    now = time.time()
+    if now - _snapshot_ts < 3 and _snapshot_cache:
+        return _snapshot_cache
+    _snapshot_ts = now
+    _snapshot_cache = _build_snapshot_impl()
+    return _snapshot_cache
+
+
+def _build_snapshot_impl() -> dict:
     try:
         tasks = parse_tasks()
     except Exception:
@@ -135,6 +183,21 @@ def _build_snapshot() -> dict:
         grp["tasks"].append({"id": t.id, "name": t.name, "status": status_base,
             "agent": t.agent if t.agent and t.agent != "\u2014" else ""})
 
+    # Add open discussions that don't have tasks yet (planning phase)
+    for topic in _list_disc_topics():
+        if topic not in teams:
+            fp = cfg.discuss_dir / f"{topic}.md"
+            if fp.exists():
+                try:
+                    text = fp.read_text(encoding="utf-8", errors="replace")
+                    participants = sorted(set(re.findall(r"^## @(\S+)", text, re.MULTILINE)))
+                    msg_count = len(re.findall(r"^## @", text, re.MULTILINE))
+                except Exception:
+                    participants, msg_count = [], 0
+                teams[topic] = {"done": 0, "total": 0, "skip": 0, "tasks": [],
+                                "status": "planning", "participants": participants,
+                                "msg_count": msg_count}
+
     total_done = sum(g["done"] + g["skip"] for g in teams.values())
     total_all = sum(g["total"] for g in teams.values())
 
@@ -148,9 +211,37 @@ def _build_snapshot() -> dict:
         "teams": teams,
         "team_names": _list_teams(),
         "history": _read_history(50),
+        "run_log": _tail_run_log(30),
         "mode": cfg.mode,
-        "agent_count": len(cfg.agent_names),
+        "agent_count": sum(1 for a in cfg.agents.values() if a.enabled),
+        "disc_topics": _list_disc_topics(),
     }
+
+
+def _parse_disc_file(f: Path, archived: bool = False) -> dict | None:
+    """Parse a single discussion file into a dict."""
+    if f.name.endswith("-tasks.md"):
+        return None
+    try:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        resolved = "РЕЗОЛЮЦИЯ" in text or "--- RESOLVED ---" in text
+        # Check for reopen after last resolve
+        if resolved:
+            reopened = "ДИСКУССИЯ ПЕРЕОТКРЫТА" in text
+            if reopened:
+                last_resolve = max(text.rfind("РЕЗОЛЮЦИЯ"), text.rfind("--- RESOLVED ---"))
+                last_reopen = text.rfind("ДИСКУССИЯ ПЕРЕОТКРЫТА")
+                resolved = last_resolve > last_reopen
+        status = "archived" if archived else ("resolved" if resolved else "open")
+        participants = set(re.findall(r"^## @(\S+)", text, re.MULTILINE))
+        msg_count = len(re.findall(r"^## @", text, re.MULTILINE))
+        display_name = f.stem.replace("-", " ").capitalize()
+        return {"topic": f.stem, "display_name": display_name,
+                "status": status, "msg_count": msg_count,
+                "participants": len(participants),
+                "participant_names": sorted(participants)}
+    except OSError:
+        return None
 
 
 def _list_discussions() -> list[dict]:
@@ -158,28 +249,65 @@ def _list_discussions() -> list[dict]:
     ddir = cfg.discuss_dir
     if not ddir.exists():
         return result
+    # Build task stats by discussion topic
+    task_stats = {}
+    try:
+        for t in parse_tasks():
+            d = t.discussion or ""
+            if d and d != "\u2014":
+                s = task_stats.setdefault(d, {"done": 0, "total": 0})
+                s["total"] += 1
+                st = (t.status or "").split(":")[0]
+                if st in ("done", "skip"):
+                    s["done"] += 1
+    except Exception:
+        pass
+    # Active discussions
     for f in sorted(ddir.glob("*.md")):
-        # Exclude task copies (e.g. my-feature-tasks.md)
-        if f.name.endswith("-tasks.md"):
-            continue
-        try:
-            text = f.read_text(encoding="utf-8", errors="replace")
-            status = "resolved" if ("РЕЗОЛЮЦИЯ" in text or "--- RESOLVED ---" in text) else "open"
-            participants = set(re.findall(r"^## @(\S+)", text, re.MULTILINE))
-            msg_count = len(re.findall(r"^## @", text, re.MULTILINE))
-            # Display name: remove hyphens, capitalize first letter
-            display_name = f.stem.replace("-", " ").capitalize()
-            result.append({"topic": f.stem, "display_name": display_name,
-                           "status": status, "msg_count": msg_count,
-                           "participants": len(participants),
-                           "participant_names": sorted(participants)})
-        except OSError:
-            continue
+        entry = _parse_disc_file(f)
+        if entry:
+            ts = task_stats.get(entry["topic"], {})
+            entry["task_done"] = ts.get("done", 0)
+            entry["task_total"] = ts.get("total", 0)
+            result.append(entry)
+    # Archived discussions
+    archive_dir = ddir / "archive"
+    if archive_dir.exists():
+        for f in sorted(archive_dir.glob("*.md")):
+            entry = _parse_disc_file(f, archived=True)
+            if entry:
+                ts = task_stats.get(entry["topic"], {})
+                entry["task_done"] = ts.get("done", 0)
+                entry["task_total"] = ts.get("total", 0)
+                result.append(entry)
     return result
+
+
+def _archive_discussion(topic: str):
+    """Move resolved discussion + tasks file to archive/."""
+    ddir = cfg.discuss_dir
+    archive = ddir / "archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    for suffix in (f"{topic}.md", f"{topic}-tasks.md"):
+        src = ddir / suffix
+        if src.exists():
+            src.rename(archive / suffix)
+
+
+def _unarchive_discussion(topic: str):
+    """Move discussion back from archive/ to main dir."""
+    ddir = cfg.discuss_dir
+    archive = ddir / "archive"
+    for suffix in (f"{topic}.md", f"{topic}-tasks.md"):
+        src = archive / suffix
+        if src.exists():
+            src.rename(ddir / suffix)
 
 
 def _show_discussion(topic: str) -> str:
     fp = cfg.discuss_dir / f"{topic}.md"
+    if not fp.exists():
+        fp = cfg.discuss_dir / "archive" / f"{topic}.md"
     if fp.exists():
         return fp.read_text(encoding="utf-8", errors="replace")
     return ""
@@ -228,7 +356,7 @@ def _read_config_file() -> str:
 def _get_parsed_config() -> dict:
     """Return structured config parsed from cfg object (not from file)."""
     project = {
-        "name": getattr(cfg, "project_context", "")[:80] or "(not set)",
+        "name": cfg.project_name or cfg.root_dir.name,
         "root": str(cfg.root_dir),
         "mode": cfg.mode,
         "dev_branch": cfg.dev_branch,
@@ -321,8 +449,10 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 /* Teams */
 .team{background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:.8em;overflow:hidden;transition:border-color .2s}
+.team-done{opacity:.5}.team-done:hover{opacity:.8}
+.team-planning{border-style:dashed;border-color:var(--yellow)}.team-planning .team-name{color:var(--yellow)}
 .team:hover{border-color:var(--green)}.team-header{display:flex;align-items:center;gap:.8em;padding:.7em 1em;cursor:pointer;user-select:none}
-.team-header:hover{background:var(--hover)}.team-name{font-weight:600;color:var(--yellow);flex:1}.team-stats{font-size:.82em;color:var(--gray)}
+.team-header:hover{background:var(--hover)}.team-name{font-weight:600;color:var(--yellow);flex:1}.disc-link{font-size:.85em;opacity:.5;cursor:pointer;margin-left:.5em;transition:opacity .2s}.disc-link:hover{opacity:1}.team-stats{font-size:.82em;color:var(--gray)}
 .team-chevron{color:var(--gray);transition:transform .3s;font-size:.75em}.team.collapsed .team-chevron{transform:rotate(-90deg)}
 .team.collapsed .team-body{max-height:0;padding:0;opacity:0;overflow:hidden}
 .bar-wrap{width:120px;height:8px;background:var(--border);border-radius:5px;overflow:hidden;flex-shrink:0}
@@ -346,16 +476,21 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
 /* Discussions */
 .disc-list{display:grid;gap:.6em}.disc-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.8em 1em;cursor:pointer;transition:all .2s}
 .disc-item:hover{border-color:var(--green);background:var(--hover)}
+.disc-resolved{opacity:.6}.disc-resolved:hover{opacity:1}.disc-resolved .disc-topic{color:var(--text-dim)}
+.disc-highlight{border-color:var(--green)!important;box-shadow:0 0 8px rgba(74,222,128,.3)}
 .disc-expand{background:var(--card);border:1px solid var(--purple);border-radius:0 0 10px 10px;margin-top:-0.6em;margin-bottom:.6em;animation:fadeIn .2s}
+.ac-item{padding:.4em .8em;cursor:pointer;border-bottom:1px solid rgba(42,42,78,.3)}.ac-item:hover,.ac-sel{background:var(--hover)}
 .disc-topic{font-weight:600;color:var(--yellow);font-size:.95em}.disc-meta{font-size:.78em;color:var(--gray);margin-top:.2em}
 .disc-status{display:inline-block;padding:.1em .5em;border-radius:10px;font-size:.72em;font-weight:600}
-.disc-status.open{background:rgba(234,179,8,.15);color:var(--yellow)}.disc-status.resolved{background:rgba(74,222,128,.15);color:var(--green)}
+.disc-status.open{background:rgba(234,179,8,.15);color:var(--yellow)}.disc-status.resolved{background:rgba(74,222,128,.15);color:var(--green)}.disc-status.archived{background:rgba(107,114,128,.15);color:var(--gray)}
 .disc-viewer{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:1em;max-height:500px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:.82em;white-space:pre-wrap;line-height:1.5}
 /* Agents table */
-.agents-table{width:100%;border-collapse:collapse;font-size:.85em}
-.agents-table th{text-align:left;color:var(--text-dim);font-weight:500;padding:.5em .8em;border-bottom:1px solid var(--border)}
-.agents-table td{padding:.5em .8em;border-bottom:1px solid rgba(42,42,78,.3)}
+.agents-table{width:100%;border-collapse:collapse;font-size:.82em}
+.agents-table th{text-align:left;color:var(--text-dim);font-weight:500;padding:.4em .7em;border-bottom:1px solid var(--border)}
+.agents-table td{padding:.35em .7em;border-bottom:1px solid rgba(42,42,78,.2)}
+.agents-table tr:nth-child(even) td{background:rgba(42,42,78,.15)}
 .agents-table tr:hover td{background:var(--hover)}
+.agents-table tr.agent-off td{opacity:.45}
 /* Toggle switch */
 .toggle{position:relative;display:inline-block;width:36px;height:20px;cursor:pointer}
 .toggle input{display:none}.toggle .slider{position:absolute;inset:0;background:var(--border);border-radius:20px;transition:.3s}
@@ -383,7 +518,7 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
 .empty{color:var(--gray);padding:2em;text-align:center}
 /* Toast */
 .toast{position:fixed;top:5em;right:1em;background:var(--card);border:1px solid var(--green);border-radius:8px;padding:.5em 1em;font-size:.82em;color:var(--green);opacity:0;transition:opacity .3s;z-index:200;pointer-events:none;max-width:350px}
-.toast.err{border-color:var(--red);color:var(--red)}.toast.show{opacity:1}
+.toast.show{opacity:1}
 /* Responsive */
 @media(max-width:640px){.header{flex-direction:column;gap:.5em;padding:.8em}.summary{margin-left:0;width:100%}.tabs{overflow-x:auto;padding:0 .5em}
 .tab{padding:.5em .8em;font-size:.8em}.tab-content{padding:.8em}.bar-wrap{width:80px}.task-name{max-width:40vw}.modal{width:95vw;padding:1em}}
@@ -407,6 +542,10 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
   <div class="controls" id="controls"></div>
   <div class="activity" id="activity"></div>
   <div id="root"></div>
+  <div class="history-panel" id="runLogPanel" style="margin-top:1em;display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center"><span class="history-title" style="color:var(--green)">Live Agent Log</span><span id="runLogStatus" style="font-size:.75em;color:var(--gray)"></span></div>
+    <div id="runLogBody" style="max-height:300px;overflow-y:auto;font-family:monospace;font-size:.78em;line-height:1.4"></div>
+  </div>
   <div class="history-panel" id="miniHistory" style="margin-top:1em;display:none">
     <div class="history-title">Recent Events</div>
     <div id="miniHistoryBody"></div>
@@ -469,7 +608,17 @@ a{color:var(--green);text-decoration:none}.mono{font-family:'JetBrains Mono',mon
     <span class="btn" id="rawToggleBtn" onclick="toggleRawConfig()">Show Raw</span>
   </div>
   <div id="parsedConfigView"></div>
-  <div class="config-view" id="configView" style="display:none">Loading...</div>
+  <div id="rawConfigWrap" style="display:none">
+    <div class="config-view" id="configView"></div>
+    <div id="configEditWrap" style="display:none">
+      <textarea id="configEditor" spellcheck="false" style="width:100%;min-height:500px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:1em;font-family:'JetBrains Mono',monospace;font-size:.8em;line-height:1.4;resize:vertical;outline:none"></textarea>
+    </div>
+    <div style="margin-top:.6em;display:flex;gap:.5em;justify-content:flex-end">
+      <button class="pill action" id="editConfigBtn" onclick="toggleEditConfig()">Edit</button>
+      <button class="pill" id="saveConfigBtn" style="display:none;border-color:var(--green);color:var(--green)" onclick="saveConfig()">Save</button>
+      <button class="pill" id="cancelConfigBtn" style="display:none;border-color:var(--red);color:var(--red)" onclick="cancelEditConfig()">Cancel</button>
+    </div>
+  </div>
   <h3 style="color:var(--text-dim);margin-top:1.5em;margin-bottom:.8em">System Info</h3>
   <div class="sys-info" id="sysInfo"></div>
 </div>
@@ -520,20 +669,26 @@ const ICONS={done:"\u2713",skip:"\u2298",in_progress:"\u26a1",review:"\u23f3",bl
 const collapsed=new Set();let _teamNames=[],_litellmPending=false,_currentDisc="",_allHistory=[],_agentNames=[],_lastSnapshot=null;
 const $=id=>document.getElementById(id);
 function esc(s){const d=document.createElement("div");d.textContent=s;return d.innerHTML}
-function toast(msg,err){const t=$("toast");t.textContent=msg;t.className=err?"toast err show":"toast show";setTimeout(()=>t.className="toast",3500)}
-function apiPost(u,b){return fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})}).then(r=>r.json()).then(d=>{toast(d.msg||d.status||"OK",!d.ok);return d}).catch(e=>{toast("Error: "+e,true)})}
-function apiGet(u){return fetch(u).then(r=>r.json()).catch(e=>{toast("Error: "+e,true)})}
+function toast(msg,color){const t=$("toast");t.textContent=msg;t.style.borderColor=color||'var(--green)';t.style.color=color||'var(--green)';t.className="toast show";setTimeout(()=>t.className="toast",3500)}
+function apiPost(u,b){return fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})}).then(r=>r.json()).then(d=>{toast(d.msg||d.status||"OK",d.ok?null:'var(--red)');return d}).catch(e=>{toast("Error: "+e,'var(--red)')})}
+function apiGet(u){return fetch(u).then(r=>r.json()).catch(e=>{toast("Error: "+e,'var(--red)')})}
 
 /* Tabs */
-document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+function activateTab(name){
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(x=>x.classList.remove('active'));
-  t.classList.add('active');$('tab-'+t.dataset.tab).classList.add('active');
-  if(t.dataset.tab==='discussions')loadDiscussions();
-  if(t.dataset.tab==='agents')loadAgents();
-  if(t.dataset.tab==='history')loadFullHistory();
-  if(t.dataset.tab==='settings')loadSettings();
-}));
+  const tab=document.querySelector(`.tab[data-tab="${name}"]`);
+  if(tab)tab.classList.add('active');
+  const panel=$('tab-'+name);if(panel)panel.classList.add('active');
+  if(name==='discussions')loadDiscussions();
+  if(name==='agents')loadAgents();
+  if(name==='history')loadFullHistory();
+  if(name==='settings')loadSettings();
+  location.hash=name;
+}
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>activateTab(t.dataset.tab)));
+// Restore tab from URL hash on load
+{const h=location.hash.replace('#','');if(h&&$('tab-'+h))activateTab(h)}
 
 /* Modals */
 function showModal(id){$(id).classList.add('show');if(id==='newDiscModal')populateAgentChecks();if(id==='replyModal')populateReplyAgent()}
@@ -541,9 +696,9 @@ function hideModal(id){$(id).classList.remove('show')}
 document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('show')}));
 
 /* Dashboard */
-function doRun(){const t=$("teamSel").value;t?apiPost("/api/run",{team:t}):toast("Select a team first",true)}
+function doRun(){const t=$("teamSel").value;t?apiPost("/api/run",{team:t}):toast("Select a team first",'var(--red)')}
 function doStop(){apiPost("/api/stop")}
-function doRetry(){const t=$("teamSel").value;t?apiPost("/api/retry",{team:t}):toast("Select a team first",true)}
+function doRetry(){const t=$("teamSel").value;t?apiPost("/api/retry",{team:t}):toast("Select a team first",'var(--red)')}
 function doRunAll(){apiPost("/api/run/all")}
 function toggleLitellm(on){if(_litellmPending)return;_litellmPending=true;fetch('/api/litellm/'+(on?'stop':'start')).then(r=>r.json()).then(()=>{if(on)_litellmPending=false}).catch(()=>_litellmPending=false)}
 function toggleTeam(n){collapsed.has(n)?collapsed.delete(n):collapsed.add(n);const e=document.querySelector(`[data-team="${CSS.escape(n)}"]`);if(e)e.classList.toggle("collapsed")}
@@ -558,7 +713,7 @@ $("controls").innerHTML=`<select id="teamSel"><option value="">-- team --</optio
 
 function renderSummary(d){const p=d.total_all?Math.round(d.total_done/d.total_all*100):0;
 const agentTip=d.active_agents&&d.active_agents.length?d.active_agents.map(a=>a.agent+' \u2192 '+a.task).join('\n'):'No active processes';
-let h=`<span class="pill">${d.total_done}/${d.total_all} (${p}%)</span><span class="pill proc-pill" onclick="toggleProcTooltip(this)" title="${esc(agentTip)}" style="position:relative">${d.processes} proc</span>`;
+let h=`<span class="pill" title="Tasks completed / total">${d.total_done}/${d.total_all} (${p}%)</span><span class="pill proc-pill" onclick="toggleProcTooltip(this)" title="${esc(agentTip)}" style="position:relative">${d.processes} proc</span>`;
 if(_litellmPending&&!d.litellm)h+=`<span class="pill starting">starting...</span>`;
 else{_litellmPending=false;h+=`<span class="pill ${d.litellm?'on':'off'}" onclick="toggleLitellm(${d.litellm})">LiteLLM ${d.litellm?'ON':'OFF'}</span>`}
 $("summary").innerHTML=h}
@@ -572,50 +727,128 @@ el.appendChild(tip);setTimeout(()=>{if(tip.parentNode)tip.remove()},5000)}
 function renderStatusBar(d){const modeColor=(d.mode||'competitive')==='competitive'?'cyan':'magenta';
 const ac=d.agent_count||0;const acStyle=ac>0?'color:#4ade80;font-weight:700':'';
 $("statusBar").innerHTML=`<span>Mode: <b style="color:${modeColor}">${d.mode||'competitive'}</b></span>`+
-`<span style="border-left:1px solid var(--border);padding-left:1em">Active agents: <b style="${acStyle}">${ac}</b></span>`+
+`<span style="border-left:1px solid var(--border);padding-left:1em">Enabled: <b style="${acStyle}">${ac}</b></span>`+
 `<span style="border-left:1px solid var(--border);padding-left:1em;color:#6b7280">Updated: ${d.timestamp}</span>`}
 
 function renderActivity(a){if(!a||!a.length){$("activity").innerHTML="";return}
 $("activity").innerHTML='<div class="activity-title">Agent Activity</div>'+a.map(x=>`<span class="agent-card"><span class="dot"></span><b>${x.agent}</b> &rarr; ${x.task}</span>`).join('')}
 
-function renderTeams(teams){const r=$("root");if(!Object.keys(teams).length){r.innerHTML='<div class="empty">No tasks found.</div>';return}let h="";
-for(const n of Object.keys(teams)){const t=teams[n],p=t.total?Math.round((t.done+t.skip)/t.total*100):0,c=collapsed.has(n);
-h+=`<div class="team${c?' collapsed':''}" data-team="${n}"><div class="team-header" onclick="toggleTeam('${n.replace(/'/g,"\\'")}')"><span class="team-chevron">&#9660;</span><span class="team-name">${esc(n)}</span><span class="team-stats">${t.done+t.skip}/${t.total}</span><div class="bar-wrap"><div class="bar-fill" style="width:${p}%"></div></div></div><div class="team-body">`;
+let _discTopics=new Set();
+function _renderTeamCard(n,t,isCompleted){
+const isPlanning=t.status==='planning';
+const p=t.total?Math.round((t.done+t.skip)/t.total*100):0,c=collapsed.has(n);
+const hasDisc=_discTopics.has(n);
+const discBtn=hasDisc?`<span class="disc-link" title="Open discussion" onclick="event.stopPropagation();goToDiscussion('${n.replace(/'/g,"\\'")}')">💬</span>`:'';
+const statusBadge=isPlanning?`<span class="disc-status open" style="margin-left:.5em;font-size:.7em">planning</span>`:'';
+const stats=isPlanning?`<span class="team-stats" style="color:var(--gray)">0 tasks</span>`:`<span class="team-stats">${t.done+t.skip}/${t.total}</span><div class="bar-wrap"><div class="bar-fill" style="width:${p}%"></div></div>`;
+let h=`<div class="team${c?' collapsed':''}${isCompleted?' team-done':''}${isPlanning?' team-planning':''}" data-team="${n}"><div class="team-header" onclick="toggleTeam('${n.replace(/'/g,"\\'")}')"><span class="team-chevron">&#9660;</span><span class="team-name">${esc(n)}</span>${statusBadge}${discBtn}${stats}</div><div class="team-body">`;
+if(isPlanning){const parts=t.participants||[];const mc=t.msg_count||0;
+h+=`<div style="padding:.4em 0;font-size:.82em;color:var(--gray)">${parts.length} participants: ${parts.join(', ')}${mc?' \u00b7 '+mc+' msg':''}</div>`}
 for(const tk of t.tasks){h+=`<div class="task st-${tk.status}"><span class="task-icon">${ICONS[tk.status]||"\u25cb"}</span><span class="task-id mono">${tk.id}</span><span class="task-name">${esc(tk.name)}</span>${tk.agent?`<span class="task-agent">${esc(tk.agent)}</span>`:''}</div>`}
-h+=`</div></div>`}r.innerHTML=h}
+h+=`</div></div>`;return h}
+function renderTeams(teams){const r=$("root");if(!Object.keys(teams).length){r.innerHTML='<div class="empty">No tasks found.</div>';return}
+const active=[],completed=[];
+for(const n of Object.keys(teams)){const t=teams[n];const done=t.done+t.skip;
+if(t.total>0&&done>=t.total)completed.push(n);else active.push(n)}
+let h=active.map(n=>_renderTeamCard(n,teams[n],false)).join('');
+if(completed.length){h+=`<div style="margin-top:1.2em;cursor:pointer;color:var(--text-dim);font-size:.85em;user-select:none" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('span').textContent=this.nextElementSibling.style.display==='none'?'\u25b8':'\u25be'"><span>\u25b8</span> Completed (${completed.length})</div><div style="display:none">${completed.map(n=>_renderTeamCard(n,teams[n],true)).join('')}</div>`}
+r.innerHTML=h}
+
+function renderRunLog(lines){const p=$("runLogPanel"),b=$("runLogBody"),st=$("runLogStatus");
+if(!lines||!lines.length){p.style.display="none";return}
+p.style.display="block";
+const wasAtBottom=b.scrollHeight-b.scrollTop-b.clientHeight<30;
+b.innerHTML=lines.map(l=>{
+let cls='';const ll=l.toLowerCase();
+if(ll.includes('error')||ll.includes('failed')||ll.includes('blocked'))cls='color:var(--red)';
+else if(ll.includes('✓')||ll.includes('approved')||ll.includes('done')||ll.includes('merged'))cls='color:var(--green)';
+else if(ll.includes('ревью')||ll.includes('review'))cls='color:var(--blue)';
+else if(ll.includes('⏳')||ll.includes('читает')||ll.includes('думает'))cls='color:var(--gray)';
+else if(ll.includes('═══'))cls='color:var(--yellow);font-weight:600';
+return `<div style="${cls}">${esc(l)}</div>`}).join('');
+st.textContent=lines.length+' lines';
+if(wasAtBottom)b.scrollTop=b.scrollHeight}
 
 function renderMiniHistory(ev){const p=$("miniHistory"),b=$("miniHistoryBody");if(!ev||!ev.length){p.style.display="none";return}
 p.style.display="block";b.innerHTML=ev.slice(0,10).map(e=>`<div class="history-line hk-${e.kind}">${esc(e.text)}</div>`).join('')}
 
 function render(d){
 if(JSON.stringify(_teamNames)!==JSON.stringify(d.team_names||[])){_teamNames=d.team_names||[];renderControls()}
-renderSummary(d);renderStatusBar(d);renderActivity(d.active_agents);renderTeams(d.teams);renderMiniHistory(d.history);
+_discTopics=new Set(d.disc_topics||[]);
+renderSummary(d);renderStatusBar(d);renderActivity(d.active_agents);renderTeams(d.teams);renderRunLog(d.run_log);renderMiniHistory(d.history);
 _allHistory=d.history||[];_lastSnapshot=d}
 
 /* Discussions */
+function _discCard(x){const tt=x.task_total||0,td=x.task_done||0;
+const taskBadge=tt?`<span style="font-size:.72em;color:${td>=tt?'var(--green)':'var(--text-dim)'};margin-right:.5em">${td}/${tt} tasks</span>`:'';
+return `<div class="disc-item${x.status!=='open'?' disc-resolved':''}" data-topic="${esc(x.topic)}" onclick="viewDiscussion('${esc(x.topic)}')">`+
+`<div style="display:flex;justify-content:space-between;align-items:center"><span class="disc-topic">${esc(x.display_name||x.topic)}</span><div>${taskBadge}<span style="font-size:.75em;color:var(--gray);margin-right:.5em">${x.msg_count||0} msg</span><span class="disc-status ${x.status}">${x.status}</span></div></div>`+
+`<div class="disc-meta">${x.participants} participants: ${(x.participant_names||[]).join(', ')}</div></div>`}
 function loadDiscussions(){apiGet("/api/discuss/list").then(d=>{if(!d)return;
 const list=d.discussions||[];
 if(!list.length){$("discList").innerHTML='<div class="empty">No discussions yet.</div>';return}
-$("discList").innerHTML=list.map(x=>`<div class="disc-item" data-topic="${esc(x.topic)}" onclick="viewDiscussion('${esc(x.topic)}')">`+
-`<div style="display:flex;justify-content:space-between;align-items:center"><span class="disc-topic">${esc(x.display_name||x.topic)}</span><div><span style="font-size:.75em;color:var(--gray);margin-right:.5em">${x.msg_count||0} msg</span><span class="disc-status ${x.status}">${x.status}</span></div></div>`+
-`<div class="disc-meta">${x.participants} participants: ${(x.participant_names||[]).join(', ')}</div></div>`).join('')})}
+const open=list.filter(x=>x.status==='open'),closed=list.filter(x=>x.status!=='open');
+let h=open.map(_discCard).join('');
+if(!open.length&&!closed.length){h='<div class="empty">No discussions yet.</div>'}
+else if(!open.length){h='<div style="color:var(--text-dim);font-size:.85em;margin-bottom:.8em">No open discussions</div>'}
+if(closed.length){h+=`<div style="margin-top:1.2em;cursor:pointer;color:var(--text-dim);font-size:.85em;user-select:none" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('span').textContent=this.nextElementSibling.style.display==='none'?'▸':'▾'"><span>▸</span> Archived (${closed.length})</div><div style="display:none">${closed.map(_discCard).join('')}</div>`}
+$("discList").innerHTML=h})}
 
+const AGENT_COLORS={claude:'#22d3ee',gemini:'#60a5fa',qwen:'#a855f7','qwen-api':'#e879f9',llama:'#eab308',devstral:'#4ade80','gpt-oss':'#22d3ee',techlead:'#4ade80','aider-llama':'#eab308','aider-devstral':'#4ade80','aider-qwen':'#a855f7','aider-gptoss':'#22d3ee','goose-llama':'#ef4444','goose-devstral':'#e2e8f0'};
+function _agentCss(name){const base=name.split('+')[0];return AGENT_COLORS[base]||'#a855f7'}
 function formatDiscContent(raw){
 if(!raw)return '(empty)';
 let h=esc(raw);
-// Section headers: ## @agent (date)
-h=h.replace(/^(## @\S+.*)/gm,'<div style="color:var(--purple);font-weight:700;margin-top:1em;border-bottom:1px solid var(--border);padding-bottom:.3em">$1</div>');
+// First line (topic header)
+h=h.replace(/^# (.+)$/m,'<div style="color:var(--yellow);font-weight:700;text-align:center;margin:.5em 0;padding:.3em;border-top:2px solid var(--yellow);border-bottom:2px solid var(--yellow)">$1</div>');
+// Section headers: ## @agent (date) — styled with agent-specific colors
+h=h.replace(/^## @(\S+)\s*(\(.*?\))?$/gm,function(m,agent,date){
+const c=_agentCss(agent);const isTl=agent==='techlead';
+return `</div><div style="background:rgba(42,42,78,.4);border-left:3px solid ${c};padding:.5em .8em;margin:1.2em 0 .6em;border-radius:0 6px 6px 0"><span style="color:${c};font-weight:700">${isTl?'TechLead':'@'+agent}</span> <span style="color:var(--gray);font-size:.85em">${date||''}</span></div><div style="padding-left:1em">`});
 // РЕЗОЛЮЦИЯ line
-h=h.replace(/(РЕЗОЛЮЦИЯ:.*)/g,'<span style="color:var(--green);font-weight:700">$1</span>');
+h=h.replace(/(РЕЗОЛЮЦИЯ:.*)/g,'<div style="background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);border-radius:6px;padding:.5em .8em;margin:.5em 0;color:var(--green);font-weight:600">$1</div>');
 // CONFIDENCE line
-h=h.replace(/(CONFIDENCE:\s*\d+%)/g,'<span style="color:var(--yellow);font-weight:600">$1</span>');
+h=h.replace(/(CONFIDENCE:\s*\d+%)/g,'<span style="background:rgba(234,179,8,.15);padding:.1em .5em;border-radius:4px;color:var(--yellow);font-weight:600">$1</span>');
 // --- RESOLVED ---
-h=h.replace(/(--- RESOLVED ---)/g,'<div style="color:var(--green);text-align:center;margin:1em 0;font-weight:700">$1</div>');
+h=h.replace(/(--- RESOLVED ---)/g,'<div style="color:var(--green);text-align:center;margin:1em 0;font-weight:700;border-top:1px solid rgba(74,222,128,.3);border-bottom:1px solid rgba(74,222,128,.3);padding:.4em">$1</div>');
+// ДИСКУССИЯ ПЕРЕОТКРЫТА
+h=h.replace(/(ДИСКУССИЯ ПЕРЕОТКРЫТА)/g,'<div style="color:var(--yellow);text-align:center;margin:1em 0;font-weight:700;border-top:1px solid rgba(234,179,8,.3);border-bottom:1px solid rgba(234,179,8,.3);padding:.4em">$1</div>');
+// Markdown rendering
+// Bold: **text**
+h=h.replace(/\*\*([^*]+)\*\*/g,'<b style="color:var(--text)">$1</b>');
+// Italic: *text*
+h=h.replace(/\*([^*]+)\*/g,'<i>$1</i>');
+// Inline code: `text`
+h=h.replace(/`([^`]+)`/g,'<code style="background:rgba(42,42,78,.6);padding:.1em .3em;border-radius:3px;font-family:monospace;color:#e2e8f0">$1</code>');
+// Headers: ### text
+h=h.replace(/^### (.+)$/gm,'<div style="color:var(--text);font-weight:600;margin:.8em 0 .3em">$1</div>');
+// List items: - text or * text (with nesting via indentation)
+h=h.replace(/^(\s*)[-*] (.+)$/gm,function(m,indent,text){
+const level=Math.floor(indent.length/2);const ml=level*1.2;
+return `<div style="margin-left:${ml}em;padding:.1em 0"><span style="color:var(--gray);margin-right:.4em">\u2022</span>${text}</div>`});
+// Numbered lists: 1. text
+h=h.replace(/^(\s*)\d+\.\s+(.+)$/gm,function(m,indent,text){
+const level=Math.floor(indent.length/2);const ml=level*1.2;
+return `<div style="margin-left:${ml}em;padding:.1em 0">${text}</div>`});
+// Horizontal rules
+h=h.replace(/^---$/gm,'<hr style="border:none;border-top:1px solid var(--border);margin:.8em 0">');
+// Tables: | col | col |
+h=h.replace(/^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)+)/gm,function(m,header,sep,body){
+const ths=header.split('|').filter(s=>s.trim()).map(s=>'<th style="padding:.3em .6em;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:.85em">'+s.trim()+'</th>').join('');
+const rows=body.trim().split('\n').map(r=>'<tr>'+r.split('|').filter(s=>s.trim()).map(s=>'<td style="padding:.2em .6em;font-size:.85em">'+s.trim()+'</td>').join('')+'</tr>').join('');
+return '<table style="border-collapse:collapse;margin:.5em 0;width:100%"><thead><tr>'+ths+'</tr></thead><tbody>'+rows+'</tbody></table>'});
+// Paragraphs: double newline → margin
+h=h.replace(/\n\n/g,'</p><p style="margin:.6em 0">');
+// Clean up empty leading div
+h=h.replace(/^<\/div>/,'');
 return h}
 
 function viewDiscussion(topic){
+  // Toggle: clicking the same discussion again closes it
+  if(_currentDisc===topic){hideDiscViewer();return}
   _currentDisc=topic;
-  // Close any open viewer
+  // Clear previous highlights and close any open viewer
+  document.querySelectorAll('.disc-item').forEach(e=>e.classList.remove('disc-highlight'));
   document.querySelectorAll('.disc-expand').forEach(e=>e.remove());
   // Find the clicked card
   const items=document.querySelectorAll('.disc-item');
@@ -628,10 +861,44 @@ function viewDiscussion(topic){
   panel.innerHTML='<div style="padding:1em;color:var(--gray)">Loading...</div>';
   target.after(panel);
   apiGet("/api/discuss/show/"+encodeURIComponent(topic)).then(d=>{if(!d)return;
-    panel.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;padding:.8em 1em;border-bottom:1px solid var(--border)"><b style="color:var(--purple)">${topic.replace(/-/g,' ')}</b><div><button class="pill action" onclick="showModal('replyModal')">Reply</button> <button class="pill" style="border-color:var(--green);color:var(--green)" onclick="showModal('resolveModal')">Resolve</button> <button class="pill" onclick="this.closest('.disc-expand').remove()">Close</button></div></div><div style="padding:1em;max-height:60vh;overflow-y:auto;white-space:pre-wrap;font-size:.85em;line-height:1.5">${formatDiscContent(d.content)}</div>`;
+    const isResolved=d.content&&(d.content.includes('РЕЗОЛЮЦИЯ')||d.content.includes('--- RESOLVED ---'));
+    let taskHtml='';
+    if(d.tasks&&d.tasks.length){taskHtml='<div style="border-bottom:1px solid var(--border);padding:.5em 1em;font-size:.82em"><b style="color:var(--text-dim)">Tasks</b> ';
+    for(const tk of d.tasks){const ic=ICONS[tk.status]||'\u25cb';const col=tk.status==='done'?'var(--green)':tk.status==='skip'?'var(--gray)':'var(--text)';
+    taskHtml+=`<span style="color:${col};margin-right:.8em">${ic} <span class="mono">${tk.id}</span></span>`}
+    taskHtml+='</div>'}
+    const navBtns=`<button class="pill" style="border-color:var(--purple);color:var(--purple)" onclick="hideDiscViewer();activateTab('dashboard')">\u2190 Dashboard</button> <button class="pill" style="border-color:var(--text-dim);color:var(--text-dim)" onclick="hideDiscViewer()">Collapse</button>`;
+    const resolveBtn=isResolved?`<button class="pill" style="border-color:var(--yellow);color:var(--yellow)" onclick="reopenDiscussion()">Reopen</button>`
+      :`<button class="pill" style="border-color:var(--green);color:var(--green)" onclick="showModal('resolveModal')">Resolve</button>`;
+    // Header
+    const hdr=`<div style="display:flex;justify-content:space-between;align-items:center;padding:.6em 1em;border-bottom:1px solid var(--border)"><b style="color:var(--yellow)">${topic.replace(/-/g,' ')}</b><div>${navBtns}</div></div>`;
+    // Content (scrollable, fixed font size)
+    const content=`<div id="discContent" style="padding:1em 1.2em;max-height:50vh;overflow-y:auto;font-size:.88em;line-height:1.6;color:var(--text)">${formatDiscContent(d.content)}</div>`;
+    // Bottom bar: textarea row, then buttons row
+    const bottomBar=`<div style="border-top:1px solid var(--border);padding:.6em 1em">
+<textarea id="discInput" placeholder="Message or /command..." style="width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:.5em .7em;font-size:.85em;font-family:inherit;resize:none;min-height:2.2em;max-height:6em;outline:none;margin-bottom:.5em" onkeydown="discInputKey(event)" oninput="discInputChanged(this)"></textarea>
+<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;gap:.4em">${navBtns}</div><div style="display:flex;gap:.4em"><button class="pill" style="border-color:var(--green);color:var(--green)" onclick="sendDiscInput()">Send</button><button class="pill action" onclick="showModal('replyModal')">Agent</button>${resolveBtn}<button class="pill" style="border-color:var(--gray);color:var(--gray)" onclick="toggleDiscHelp()">?</button></div></div></div>`;
+    panel.innerHTML=hdr+taskHtml+content+bottomBar;
+    // Auto-scroll to bottom after render
+    setTimeout(()=>{const ce=_getDiscContent();if(ce)ce.scrollTop=ce.scrollHeight},100);
   })
 }
-function hideDiscViewer(){document.querySelectorAll('.disc-expand').forEach(e=>e.remove());_currentDisc=""}
+let _discFromDashboard=false;
+function hideDiscViewer(){document.querySelectorAll('.disc-expand').forEach(e=>e.remove());document.querySelectorAll('.disc-item').forEach(e=>e.classList.remove('disc-highlight'));_currentDisc="";_discFromDashboard=false;_hideAc();const hp=document.getElementById('discHelpPopup');if(hp)hp.remove()}
+function goToDiscussion(topic){
+  hideDiscViewer();
+  activateTab('discussions');
+  let tries=0;
+  const tryOpen=()=>{
+    const el=document.querySelector(`.disc-item[data-topic="${topic}"]`);
+    if(el){
+      // Expand archived section if element is inside it
+      const hidden=el.closest('div[style*="display: none"],div[style*="display:none"]');
+      if(hidden){hidden.style.display='block';const tog=hidden.previousElementSibling;if(tog){const sp=tog.querySelector('span');if(sp)sp.textContent='\u25be'}}
+      _discFromDashboard=true;el.classList.add('disc-highlight');el.scrollIntoView({behavior:'smooth',block:'center'});viewDiscussion(topic)
+    } else if(++tries<15){setTimeout(tryOpen,200)}
+    else{toast('Discussion not found','var(--red)')}};
+  setTimeout(tryOpen,100)}
 
 function populateAgentChecks(){apiGet("/api/agents").then(d=>{if(!d)return;
 _agentNames=(d.agents||[]).filter(a=>a.enabled).map(a=>a.name);
@@ -642,16 +909,95 @@ const agents=(d.agents||[]).filter(a=>a.enabled);
 $("replyAgent").innerHTML=agents.map(a=>`<option value="${a.name}">${a.name}</option>`).join('')})}
 
 function createDiscussion(){const topic=$("ndTopic").value.trim(),q=$("ndQuestion").value.trim();
-if(!topic||!q){toast("Fill topic and question",true);return}
+if(!topic||!q){toast("Fill topic and question",'var(--red)');return}
 const agents=Array.from(document.querySelectorAll('#ndAgents input:checked')).map(i=>i.value);
 apiPost("/api/discuss/new",{topic,question:q,agents}).then(d=>{if(d&&d.ok){hideModal('newDiscModal');$("ndTopic").value='';$("ndQuestion").value='';loadDiscussions()}})}
 
-function sendReply(){if(!_currentDisc){toast("No discussion selected",true);return}
+function sendReply(){if(!_currentDisc){toast("No discussion selected",'var(--red)');return}
 const agent=$("replyAgent").value;
 apiPost("/api/discuss/reply",{topic:_currentDisc,agent}).then(d=>{if(d&&d.ok){hideModal('replyModal');setTimeout(()=>viewDiscussion(_currentDisc),2000)}})}
 
-function resolveDiscussion(){if(!_currentDisc){toast("No discussion selected",true);return}
-const text=$("resolveText").value.trim();if(!text){toast("Enter resolution text",true);return}
+const DISC_CMDS=[
+{cmd:'/ok',args:'[comment]',desc:'Final round: all agents → auto-resolve → generate tasks'},
+{cmd:'/resolve',args:'[text]',desc:'Manual resolve with your text'},
+{cmd:'/reopen',args:'[reason]',desc:'Reopen resolved discussion'},
+{cmd:'/agent',args:'<name>',desc:'Send agent reply (opens selector)'},
+{cmd:'/show',args:'',desc:'Scroll to top of discussion'},
+{cmd:'/tasks',args:'',desc:'Show linked tasks'},
+];
+let _acSel=0;
+function _showAc(items){const el=$("discInput");if(!el||!items.length){_hideAc();return}
+let ac=document.getElementById('discAcPopup');
+if(!ac){ac=document.createElement('div');ac.id='discAcPopup';
+ac.style.cssText='position:fixed;background:var(--card);border:1px solid var(--border);border-radius:8px;max-height:200px;overflow-y:auto;font-size:.82em;z-index:200;box-shadow:0 -4px 12px rgba(0,0,0,.4)';
+document.body.appendChild(ac)}
+const r=el.getBoundingClientRect();ac.style.left=r.left+'px';ac.style.width=r.width+'px';ac.style.bottom=(window.innerHeight-r.top+4)+'px';
+ac.style.display='block';_acSel=0;
+ac.innerHTML=items.map((c,i)=>`<div class="ac-item${i===0?' ac-sel':''}" data-i="${i}" onmousedown="insertCmd('${c.cmd}','${c.args}')" onmouseover="_acHover(${i})"><span style="color:var(--green);font-weight:600">${c.cmd}</span> <span style="color:var(--gray)">${c.args}</span> <span style="color:var(--text-dim)">\u2014 ${c.desc}</span></div>`).join('')}
+function _hideAc(){const ac=document.getElementById('discAcPopup');if(ac)ac.style.display='none'}
+function _acHover(i){_acSel=i;document.querySelectorAll('.ac-item').forEach((el,j)=>el.classList.toggle('ac-sel',j===i))}
+function insertCmd(cmd,args){const el=$("discInput");if(el){el.value=cmd+(args?' '+args:'');el.focus();
+if(args){const start=cmd.length+1;el.setSelectionRange(start,start+args.length)}}_hideAc()}
+function toggleDiscHelp(){
+let m=document.getElementById('discHelpPopup');
+if(m){m.remove();return}
+m=document.createElement('div');m.id='discHelpPopup';
+m.style.cssText='position:fixed;top:20%;right:2em;background:var(--card);border:1px solid var(--border);border-radius:12px;z-index:300;box-shadow:0 8px 32px rgba(0,0,0,.5);width:340px;max-height:70vh;display:flex;flex-direction:column';
+const hdr=document.createElement('div');
+hdr.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:.8em 1em;border-bottom:1px solid var(--border);cursor:move;user-select:none';
+hdr.innerHTML=`<b style="color:var(--yellow)">Commands</b><span style="cursor:pointer;color:var(--text-dim);font-size:1.1em" onclick="this.closest('#discHelpPopup').remove()">\u2715</span>`;
+// Drag
+let dx=0,dy=0,sx=0,sy=0;
+hdr.onmousedown=function(e){sx=e.clientX;sy=e.clientY;
+document.onmousemove=function(e2){dx=sx-e2.clientX;dy=sy-e2.clientY;sx=e2.clientX;sy=e2.clientY;
+m.style.top=(m.offsetTop-dy)+'px';m.style.left=(m.offsetLeft-dx)+'px';m.style.right='auto'};
+document.onmouseup=function(){document.onmousemove=null;document.onmouseup=null}};
+const body=document.createElement('div');
+body.style.cssText='padding:.6em 1em;overflow-y:auto;flex:1';
+body.innerHTML=DISC_CMDS.map(c=>`<div style="padding:.5em .4em;border-bottom:1px solid rgba(42,42,78,.3);cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--hover)'" onmouseout="this.style.background=''" onclick="insertCmd('${c.cmd}','${c.args}')"><span style="color:var(--green);font-weight:600">${c.cmd}</span> <span style="color:var(--gray)">${c.args}</span><div style="color:var(--text-dim);font-size:.85em;margin-top:.15em">${c.desc}</div></div>`).join('')+
+`<div style="padding:.6em .4em;font-size:.82em;color:var(--text-dim)">Plain text \u2192 TechLead message<br>Enter \u2192 send, Shift+Enter \u2192 newline</div>`;
+m.appendChild(hdr);m.appendChild(body);document.body.appendChild(m)}
+function discInputChanged(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,96)+'px';
+const v=el.value;
+if(v.startsWith('/')&&!v.includes(' ')&&v.length>1){
+const matches=DISC_CMDS.filter(c=>c.cmd.startsWith(v));
+if(matches.length){_showAc(matches)}else{_hideAc()}}else{_hideAc()}}
+function discInputKey(e){const ac=document.getElementById('discAcPopup');const visible=ac&&ac.style.display==='block';
+if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(visible){const items=ac.querySelectorAll('.ac-item');if(items[_acSel])items[_acSel].dispatchEvent(new Event('mousedown'))}else{sendDiscInput()};return}
+if(e.key==='Tab'&&visible){e.preventDefault();const items=ac.querySelectorAll('.ac-item');if(items[_acSel])items[_acSel].dispatchEvent(new Event('mousedown'));return}
+if(e.key==='ArrowDown'&&visible){e.preventDefault();const items=ac.querySelectorAll('.ac-item');_acSel=Math.min(_acSel+1,items.length-1);items.forEach((el,j)=>el.classList.toggle('ac-sel',j===_acSel));return}
+if(e.key==='ArrowUp'&&visible){e.preventDefault();const items=ac.querySelectorAll('.ac-item');_acSel=Math.max(_acSel-1,0);items.forEach((el,j)=>el.classList.toggle('ac-sel',j===_acSel));return}
+if(e.key==='Escape'){_hideAc();return}}
+let _okPollTimer=null;
+function _getDiscContent(){return document.querySelector('.disc-expand #discContent')||$('discContent')}
+function _pollDiscOk(){
+if(_okPollTimer)clearInterval(_okPollTimer);
+_okPollTimer=setInterval(()=>{
+if(!_currentDisc){clearInterval(_okPollTimer);_okPollTimer=null;return}
+apiGet("/api/discuss/show/"+encodeURIComponent(_currentDisc)).then(d=>{if(!d||!d.content)return;
+const ce=_getDiscContent();if(ce){ce.innerHTML=formatDiscContent(d.content);setTimeout(()=>ce.scrollTop=ce.scrollHeight,50)}
+if(d.content.includes('РЕЗОЛЮЦИЯ')||d.content.includes('--- RESOLVED ---')){
+clearInterval(_okPollTimer);_okPollTimer=null;toast('Discussion resolved and tasks generated','var(--green)');loadDiscussions()}
+})},5000)}
+function _reloadDiscContent(){apiGet("/api/discuss/show/"+encodeURIComponent(_currentDisc)).then(d2=>{if(!d2)return;
+const ce=_getDiscContent();if(ce){ce.innerHTML=formatDiscContent(d2.content);setTimeout(()=>ce.scrollTop=ce.scrollHeight,50)}})}
+function sendDiscInput(){if(!_currentDisc)return;
+const el=$("discInput");if(!el)return;const text=el.value.trim();if(!text)return;
+el.value='';el.style.height='auto';
+// Handle slash commands
+if(text.startsWith('/')){const parts=text.split(/\s+/);const cmd=parts[0];const arg=parts.slice(1).join(' ');
+if(cmd==='/ok'){toast('Running /ok — final round + auto-resolve...');apiPost("/api/discuss/ok",{topic:_currentDisc,comment:arg}).then(d=>{if(d&&d.ok){toast('Final round started. Agents replying...');_pollDiscOk()}});return}
+if(cmd==='/resolve'){if(arg){apiPost("/api/discuss/resolve",{topic:_currentDisc,resolution:arg}).then(d=>{if(d&&d.ok){loadDiscussions();hideDiscViewer()}})}else{showModal('resolveModal')};return}
+if(cmd==='/reopen'){apiPost("/api/discuss/reopen",{topic:_currentDisc}).then(d=>{if(d&&d.ok){hideDiscViewer();viewDiscussion(_currentDisc);loadDiscussions()}});return}
+if(cmd==='/agent'){showModal('replyModal');return}
+if(cmd==='/show'){const ce=$('discContent');if(ce)ce.scrollTop=0;return}
+if(cmd==='/tasks'){const ce=$('discContent');if(ce){const tl=panel.querySelector('[style*="Tasks"]');if(tl)tl.scrollIntoView()};return}
+toast('Unknown command: '+cmd,'var(--red)');return}
+apiPost("/api/discuss/write",{topic:_currentDisc,text}).then(d=>{if(d&&d.ok)_reloadDiscContent()})}
+function reopenDiscussion(){if(!_currentDisc){toast("No discussion selected",'var(--red)');return}
+apiPost("/api/discuss/reopen",{topic:_currentDisc}).then(d=>{if(d&&d.ok){hideDiscViewer();viewDiscussion(_currentDisc);loadDiscussions()}})}
+function resolveDiscussion(){if(!_currentDisc){toast("No discussion selected",'var(--red)');return}
+const text=$("resolveText").value.trim();if(!text){toast("Enter resolution text",'var(--red)');return}
 apiPost("/api/discuss/resolve",{topic:_currentDisc,resolution:text}).then(d=>{if(d&&d.ok){hideModal('resolveModal');$("resolveText").value='';viewDiscussion(_currentDisc);loadDiscussions()}})}
 
 /* Agents */
@@ -666,8 +1012,9 @@ return `<tr><td><b>${esc(a.name)}</b></td><td>${a.type}</td><td><span class="mon
 const modeRadios=document.querySelectorAll('input[name="modeRadio"]');
 modeRadios.forEach(r=>{r.checked=r.value===(d.mode||'competitive')})})}
 
-function toggleAgent(name,enabled){apiPost("/api/agents/toggle",{name,enabled})}
-function setMode(mode){apiPost("/api/mode",{mode})}
+function toggleAgent(name,enabled){fetch("/api/agents/toggle",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,enabled})}).then(r=>r.json()).then(d=>{
+toast(d.msg||"OK",enabled?'var(--green)':'var(--red)');if(d.ok){loadAgents();apiGet("/api/snapshot").then(s=>{if(s)renderStatusBar(s)})}}).catch(e=>toast("Error: "+e,'var(--red)'))}
+function setMode(mode){apiPost("/api/mode",{mode}).then(()=>apiGet("/api/snapshot").then(s=>{if(s)renderStatusBar(s)}))}
 
 /* History */
 function loadFullHistory(){apiGet("/api/history").then(d=>{if(!d)return;_allHistory=d.events||[];filterHistory()})}
@@ -677,61 +1024,85 @@ const filtered=_allHistory.filter(e=>{if(kind&&e.kind!==kind)return false;if(sea
 $("fullHistoryBody").innerHTML=filtered.length?filtered.map(e=>`<div class="history-line hk-${e.kind}">${esc(e.text)}</div>`).join(''):'<div class="empty">No matching events.</div>'}
 
 /* Settings */
-let _rawConfigVisible=false;
+let _rawConfigVisible=false,_rawConfigText='',_editMode=false;
 function toggleRawConfig(){_rawConfigVisible=!_rawConfigVisible;
-$("configView").style.display=_rawConfigVisible?'block':'none';
+$("rawConfigWrap").style.display=_rawConfigVisible?'block':'none';
 $("parsedConfigView").style.display=_rawConfigVisible?'none':'block';
-$("rawToggleBtn").textContent=_rawConfigVisible?'Show Parsed':'Show Raw'}
+$("rawToggleBtn").textContent=_rawConfigVisible?'Show Parsed':'Show Raw';
+if(!_rawConfigVisible)cancelEditConfig()}
+function toggleEditConfig(){_editMode=true;
+$("configEditor").value=_rawConfigText;
+$("configView").style.display='none';$("configEditWrap").style.display='block';
+$("editConfigBtn").style.display='none';$("saveConfigBtn").style.display='';$("cancelConfigBtn").style.display=''}
+function cancelEditConfig(){_editMode=false;
+$("configView").style.display='block';$("configEditWrap").style.display='none';
+$("editConfigBtn").style.display='';$("saveConfigBtn").style.display='none';$("cancelConfigBtn").style.display='none'}
+function saveConfig(){const body=JSON.stringify({content:$("configEditor").value});
+fetch("/api/config/save",{method:"POST",headers:{"Content-Type":"application/json"},body}).then(r=>r.json()).then(d=>{
+if(d.ok){toast("Config saved");cancelEditConfig();loadSettings()}else{toast("Save failed: "+(d.error||"unknown"),'var(--red)')}
+}).catch(e=>toast("Save error: "+e,'var(--red)'))}
 
+function _humanLabel(k){return k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}
+function _fmtCmd(arr){if(!Array.isArray(arr))return esc(String(arr));
+if(arr.length&&Array.isArray(arr[0]))return arr.map(a=>a.join(' ')).join('<br>');
+return arr.join(' ')}
 function renderParsedConfig(p){if(!p){$("parsedConfigView").innerHTML='';return}
 let h='';
 // Project section
 const pr=p.project||{};
-h+='<div style="margin-bottom:1em"><div style="color:var(--purple);font-weight:600;margin-bottom:.4em;font-size:.95em">Project</div>';
+h+='<div style="margin-bottom:1.2em"><div style="color:var(--purple);font-weight:600;margin-bottom:.5em;font-size:.95em">Project</div>';
 h+='<div class="sys-info" style="margin:0">';
 for(const [k,v] of [['Name',pr.name],['Root',pr.root],['Mode',pr.mode],['Dev Branch',pr.dev_branch]]){
-h+=`<div class="sys-card"><label>${k}</label><span>${esc(String(v||'-'))}</span></div>`}
+const val=v||'-';const color=k==='Mode'?'color:var(--purple);font-weight:600':'';
+h+=`<div class="sys-card"><label>${k}</label><span style="${color}">${esc(String(val))}</span></div>`}
 h+='</div></div>';
 // Agents section
 const ag=p.agents||[];
-if(ag.length){h+='<div style="margin-bottom:1em"><div style="color:var(--purple);font-weight:600;margin-bottom:.4em;font-size:.95em">Agents</div>';
-h+='<table class="agents-table"><thead><tr><th>Name</th><th>Command</th><th>Protocol</th><th>Enabled</th><th>Model</th></tr></thead><tbody>';
-for(const a of ag){h+=`<tr><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.command)}</td><td>${esc(a.protocol)}</td>`+
-`<td style="color:${a.enabled?'var(--green)':'var(--red)'}">` +(a.enabled?'yes':'no')+`</td><td class="mono">${esc(a.model||'-')}</td></tr>`}
+if(ag.length){
+const enabled=ag.filter(a=>a.enabled),disabled=ag.filter(a=>!a.enabled);
+h+='<div style="margin-bottom:1.2em"><div style="color:var(--purple);font-weight:600;margin-bottom:.5em;font-size:.95em">Agents <span style="color:var(--text-dim);font-weight:400;font-size:.85em">('+enabled.length+' active / '+ag.length+' total)</span></div>';
+h+='<table class="agents-table"><thead><tr><th>Name</th><th>Command</th><th>Protocol</th><th>Model</th></tr></thead><tbody>';
+for(const a of enabled){h+=`<tr><td><b style="color:var(--green)">${esc(a.name)}</b></td><td class="mono">${esc(a.command)}</td><td>${esc(a.protocol)}</td><td class="mono" style="font-size:.85em">${esc(a.model||'-')}</td></tr>`}
+if(disabled.length){h+=`<tr><td colspan="4" style="padding:.6em .7em .3em;color:var(--text-dim);font-size:.8em;border:none">Disabled</td></tr>`;
+for(const a of disabled){h+=`<tr class="agent-off"><td>${esc(a.name)}</td><td class="mono">${esc(a.command)}</td><td>${esc(a.protocol)}</td><td class="mono" style="font-size:.85em">${esc(a.model||'-')}</td></tr>`}}
 h+='</tbody></table></div>'}
 // Limits section
 const lm=p.limits||{};
-if(Object.keys(lm).length){h+='<div style="margin-bottom:1em"><div style="color:var(--purple);font-weight:600;margin-bottom:.4em;font-size:.95em">Limits</div>';
+if(Object.keys(lm).length){h+='<div style="margin-bottom:1.2em"><div style="color:var(--purple);font-weight:600;margin-bottom:.5em;font-size:.95em">Limits</div>';
 h+='<div class="sys-info" style="margin:0">';
-for(const [k,v] of Object.entries(lm)){h+=`<div class="sys-card"><label>${esc(k)}</label><span>${esc(String(v))}</span></div>`}
+for(const [k,v] of Object.entries(lm)){const sv=String(v);const color=sv==='true'?'color:var(--green)':sv==='false'?'color:var(--red)':!isNaN(v)?'color:var(--yellow)':'';
+h+=`<div class="sys-card"><label>${esc(_humanLabel(k))}</label><span style="${color};font-weight:600">${esc(sv)}</span></div>`}
 h+='</div></div>'}
 // Frames section
 const fr=p.frames||[];
-if(fr.length){h+='<div style="margin-bottom:1em"><div style="color:var(--purple);font-weight:600;margin-bottom:.4em;font-size:.95em">Frames</div>';
-h+='<div style="display:flex;flex-wrap:wrap;gap:.5em">';
-for(const f of fr){h+=`<span class="pill" title="${esc(f.description)}">${esc(f.name)}${f.description?' — '+esc(f.description):''}</span>`}
+if(fr.length){h+='<div style="margin-bottom:1.2em"><div style="color:var(--purple);font-weight:600;margin-bottom:.5em;font-size:.95em">Frames <span style="color:var(--text-dim);font-weight:400;font-size:.85em">('+fr.length+')</span></div>';
+h+='<div style="display:flex;flex-wrap:wrap;gap:.4em">';
+for(const f of fr){h+=`<span class="pill" title="${esc(f.description||'')}" style="font-size:.78em">${esc(f.name)}</span>`}
 h+='</div></div>'}
 // Build section
 const bl=p.build||{};
 if(bl.commands&&bl.commands.length||bl.check_command||bl.lint_fix&&bl.lint_fix.length){
-h+='<div style="margin-bottom:1em"><div style="color:var(--purple);font-weight:600;margin-bottom:.4em;font-size:.95em">Build</div>';
+h+='<div style="margin-bottom:1.2em"><div style="color:var(--purple);font-weight:600;margin-bottom:.5em;font-size:.95em">Build</div>';
 h+='<div class="sys-info" style="margin:0">';
-if(bl.commands&&bl.commands.length)h+=`<div class="sys-card"><label>Commands</label><span class="mono">${esc(JSON.stringify(bl.commands))}</span></div>`;
-if(bl.lint_fix&&bl.lint_fix.length)h+=`<div class="sys-card"><label>Lint Fix</label><span class="mono">${esc(JSON.stringify(bl.lint_fix))}</span></div>`;
-if(bl.check_command)h+=`<div class="sys-card"><label>Check Command</label><span class="mono">${esc(bl.check_command)}</span></div>`;
+if(bl.commands&&bl.commands.length)h+=`<div class="sys-card"><label>Commands</label><span class="mono" style="font-size:.82em">${_fmtCmd(bl.commands)}</span></div>`;
+if(bl.lint_fix&&bl.lint_fix.length)h+=`<div class="sys-card"><label>Lint Fix</label><span class="mono" style="font-size:.82em">${_fmtCmd(bl.lint_fix)}</span></div>`;
+if(bl.check_command)h+=`<div class="sys-card"><label>Check Command</label><span class="mono" style="font-size:.82em">${esc(bl.check_command)}</span></div>`;
 h+='</div></div>'}
 $("parsedConfigView").innerHTML=h}
 
 function highlightToml(raw){let h=esc(raw);
 h=h.replace(/^(#.*)$/gm,'<span style="color:#6b7280">$1</span>');
-h=h.replace(/^(\[[\w.\-]+\])$/gm,'<span style="color:#a855f7;font-weight:600">$1</span>');
-h=h.replace(/^(\s*)([\w\-]+)(\s*=\s*)("(?:[^"\\]|\\.)*")/gm,'$1<span style="color:#fff;font-weight:600">$2</span>$3<span style="color:#4ade80">$4</span>');
+h=h.replace(/^\[([^\]]+)\]$/gm,'<span style="color:#a855f7;font-weight:600">[$1]</span>');
+h=h.replace(/^(\s*)([\w\-]+)(\s*=\s*)(&quot;(?:[^&]|&(?!quot;))*&quot;)/gm,'$1<span style="color:#fff;font-weight:600">$2</span>$3<span style="color:#4ade80">$4</span>');
+h=h.replace(/(\[)(&quot;(?:[^&]|&(?!quot;))*&quot;)((?:\s*,\s*&quot;(?:[^&]|&(?!quot;))*&quot;)*\])/gm,function(m,br,first,rest){
+return br+'<span style="color:#4ade80">'+first+'</span>'+rest.replace(/(&quot;(?:[^&]|&(?!quot;))*&quot;)/g,'<span style="color:#4ade80">$1</span>')});
 h=h.replace(/^(\s*)([\w\-]+)(\s*=\s*)(true|false)$/gm,'$1<span style="color:#fff;font-weight:600">$2</span>$3<span style="color:#ef4444">$4</span>');
 h=h.replace(/^(\s*)([\w\-]+)(\s*=\s*)(\d+(?:\.\d+)?)$/gm,'$1<span style="color:#fff;font-weight:600">$2</span>$3<span style="color:#eab308">$4</span>');
 h=h.replace(/^(\s*)([\w\-]+)(\s*=)(?!.*<span)/gm,'$1<span style="color:#fff;font-weight:600">$2</span>$3');
 return h}
 function loadSettings(){apiGet("/api/config").then(d=>{if(!d)return;
-$("configView").innerHTML=highlightToml(d.config||"");
+_rawConfigText=d.config||"";
+$("configView").innerHTML=highlightToml(_rawConfigText);
 renderParsedConfig(d.parsed||null);
 const s=d.system||{};
 $("sysInfo").innerHTML=`<div class="sys-card"><label>Python</label><span>${esc(s.python||'?')}</span></div>`+
@@ -741,9 +1112,9 @@ $("sysInfo").innerHTML=`<div class="sys-card"><label>Python</label><span>${esc(s
 `<div class="sys-card"><label>Frames</label><span>${(s.frames||[]).join(', ')||'none'}</span></div>`})}
 
 /* SSE */
-window.addEventListener('load',()=>{const es=new EventSource("/events");
-es.onmessage=e=>{try{render(JSON.parse(e.data))}catch(err){console.error(err)}};
-es.onerror=()=>$("ts").textContent="Connection lost, retrying..."});
+window.addEventListener('load',()=>{
+function poll(){fetch("/api/snapshot").then(r=>r.json()).then(d=>{render(d)}).catch(()=>{});setTimeout(poll,5000)}
+poll()});
 </script></body></html>"""
 
 
@@ -777,6 +1148,8 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
             self.end_headers()
             self.wfile.write(_HTML.encode("utf-8"))
         elif self.path == "/favicon.ico":
@@ -821,9 +1194,21 @@ class _Handler(BaseHTTPRequestHandler):
             from urllib.parse import unquote
             topic = unquote(topic)
             content = _show_discussion(topic)
-            self._json_response({"ok": bool(content), "content": content})
+            # Find linked tasks
+            linked_tasks = []
+            try:
+                for t in parse_tasks():
+                    if (t.discussion or "") == topic:
+                        st = (t.status or "").split(":")[0]
+                        linked_tasks.append({"id": t.id, "name": t.name, "status": st,
+                                             "agent": t.agent if t.agent and t.agent != "\u2014" else ""})
+            except Exception:
+                pass
+            self._json_response({"ok": bool(content), "content": content, "tasks": linked_tasks})
         elif self.path == "/api/agents":
             self._json_response({"ok": True, "agents": _list_agents_info(), "mode": cfg.mode})
+        elif self.path == "/api/snapshot":
+            self._json_response(_build_snapshot())
         elif self.path == "/api/config":
             self._json_response({"ok": True, "config": _read_config_file(),
                                  "parsed": _get_parsed_config(), "system": _get_system_info()})
@@ -846,10 +1231,18 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_discuss_reply(body)
         elif self.path == "/api/discuss/resolve":
             self._api_discuss_resolve(body)
+        elif self.path == "/api/discuss/ok":
+            self._api_discuss_ok(body)
+        elif self.path == "/api/discuss/write":
+            self._api_discuss_write(body)
+        elif self.path == "/api/discuss/reopen":
+            self._api_discuss_reopen(body)
         elif self.path == "/api/agents/toggle":
             self._api_agents_toggle(body)
         elif self.path == "/api/mode":
             self._api_set_mode(body)
+        elif self.path == "/api/config/save":
+            self._api_config_save(body)
         else:
             self.send_error(404)
 
@@ -933,6 +1326,88 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._json_response({"ok": False, "msg": str(e)})
 
+    def _api_discuss_ok(self, body: dict):
+        """Run /ok flow: techlead comment → final round (all agents) → auto-resolve → generate tasks."""
+        topic = body.get("topic", "").strip()
+        comment = body.get("comment", "").strip()
+        if not topic:
+            self._json_response({"ok": False, "msg": "Topic required"})
+            return
+        filepath = cfg.discuss_dir / f"{topic}.md"
+        if not filepath.exists():
+            filepath = cfg.discuss_dir / "archive" / f"{topic}.md"
+        if not filepath.exists():
+            self._json_response({"ok": False, "msg": f"Discussion '{topic}' not found"})
+            return
+
+        def _run_ok():
+            from .utils import log as _log
+            try:
+                from .discuss import _chat_append, _chat_agent_reply, _chat_auto_resolve
+                from .discuss import _post_resolve, _auto_link_discussion
+
+                if comment:
+                    _chat_append(filepath, "techlead", comment)
+
+                _chat_append(filepath, "techlead",
+                             "Я готов утвердить. Ваши финальные замечания или возражения? "
+                             "Если согласны — напишите 'согласен'. Если нет — аргументируйте.")
+
+                # Final round: all agents reply
+                for name in cfg.agent_names:
+                    try:
+                        _chat_agent_reply(filepath, name)
+                    except Exception as e:
+                        _log.warning(f"/ok: agent {name} failed: {e}")
+
+                # Auto-resolve: LLM generates summary
+                _chat_auto_resolve(filepath)
+
+                # Generate tasks
+                _post_resolve(filepath)
+                _auto_link_discussion(topic)
+
+                # Archive after a delay so UI polling can see the resolved state
+                time.sleep(15)
+                _archive_discussion(topic)
+
+                _log.info(f"/ok completed for {topic}")
+            except Exception as e:
+                _log.error(f"/ok failed for {topic}: {e}")
+                from datetime import datetime
+                now = datetime.now().strftime("%Y-%m-%d %H:%M")
+                try:
+                    with open(filepath, "a", encoding="utf-8") as f:
+                        f.write(f"\n## @system ({now})\n\n/ok failed: {e}\n")
+                except Exception:
+                    pass
+
+        threading.Thread(target=_run_ok, daemon=True).start()
+        self._json_response({"ok": True, "msg": f"/ok started for '{topic}' — agents replying..."})
+
+    def _api_discuss_write(self, body: dict):
+        """Add a techlead message to a discussion."""
+        topic = body.get("topic", "").strip()
+        text = body.get("text", "").strip()
+        if not topic or not text:
+            self._json_response({"ok": False, "msg": "Topic and text required"})
+            return
+        try:
+            # Check both main and archive dirs
+            filepath = cfg.discuss_dir / f"{topic}.md"
+            if not filepath.exists():
+                filepath = cfg.discuss_dir / "archive" / f"{topic}.md"
+            if not filepath.exists():
+                self._json_response({"ok": False, "msg": f"Discussion '{topic}' not found"})
+                return
+            from datetime import datetime
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            with open(filepath, "a", encoding="utf-8") as f:
+                f.write(f"\n## @techlead ({now})\n\n{text}\n")
+            self._json_response({"ok": True, "msg": "Message added"})
+        except Exception as e:
+            self._json_response({"ok": False, "msg": str(e)})
+
     def _api_discuss_resolve(self, body: dict):
         topic = body.get("topic", "").strip()
         resolution = body.get("resolution", "").strip()
@@ -948,7 +1423,32 @@ class _Handler(BaseHTTPRequestHandler):
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
             with open(filepath, "a", encoding="utf-8") as f:
                 f.write(f"\n## @techlead ({now})\n\n\u0420\u0415\u0417\u041e\u041b\u042e\u0426\u0418\u042f: {resolution}\n\n--- RESOLVED ---\n")
-            self._json_response({"ok": True, "msg": f"Discussion '{topic}' resolved"})
+            # Archive resolved discussion
+            _archive_discussion(topic)
+            self._json_response({"ok": True, "msg": f"Discussion '{topic}' resolved and archived"})
+        except Exception as e:
+            self._json_response({"ok": False, "msg": str(e)})
+
+    def _api_discuss_reopen(self, body: dict):
+        topic = body.get("topic", "").strip()
+        if not topic:
+            self._json_response({"ok": False, "msg": "Topic required"})
+            return
+        try:
+            # Try archive first, then main dir
+            filepath = cfg.discuss_dir / "archive" / f"{topic}.md"
+            if not filepath.exists():
+                filepath = cfg.discuss_dir / f"{topic}.md"
+            if not filepath.exists():
+                self._json_response({"ok": False, "msg": f"Discussion '{topic}' not found"})
+                return
+            from datetime import datetime
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            with open(filepath, "a", encoding="utf-8") as f:
+                f.write(f"\n## @techlead ({now})\n\n\u0414\u0418\u0421\u041a\u0423\u0421\u0421\u0418\u042f \u041f\u0415\u0420\u0415\u041e\u0422\u041a\u0420\u042b\u0422\u0410\n\n")
+            # Unarchive: move back to main dir
+            _unarchive_discussion(topic)
+            self._json_response({"ok": True, "msg": f"Discussion '{topic}' reopened"})
         except Exception as e:
             self._json_response({"ok": False, "msg": str(e)})
 
@@ -992,6 +1492,35 @@ class _Handler(BaseHTTPRequestHandler):
                 pass
         self._json_response({"ok": True, "msg": f"Mode set to {mode}"})
 
+    def _api_config_save(self, body: dict):
+        content = body.get("content", "")
+        if not content.strip():
+            self._json_response({"ok": False, "error": "Empty config"})
+            return
+        toml_path = cfg.root_dir / "forgerace.toml"
+        # Validate TOML syntax before saving
+        try:
+            try:
+                import tomllib
+            except ImportError:
+                import tomli as tomllib  # type: ignore
+            tomllib.loads(content)
+        except Exception as e:
+            self._json_response({"ok": False, "error": f"Invalid TOML: {e}"})
+            return
+        try:
+            # Backup current config
+            if toml_path.exists():
+                backup = toml_path.with_suffix(".toml.bak")
+                backup.write_text(toml_path.read_text(encoding="utf-8"), encoding="utf-8")
+            toml_path.write_text(content, encoding="utf-8")
+            # Reload config
+            from .config import init_config
+            init_config(config_path=toml_path)
+            self._json_response({"ok": True})
+        except Exception as e:
+            self._json_response({"ok": False, "error": str(e)})
+
     def _api_litellm_start(self):
         litellm_bin = Path.home() / ".local/share/pipx/venvs/litellm/bin/litellm"
         config_file = cfg.root_dir / "litellm_config.yaml"
@@ -1019,6 +1548,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
 

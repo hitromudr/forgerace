@@ -96,7 +96,7 @@ SUMMARY: краткое резюме одной строкой
         review_text = ""
         actual_reviewer = reviewer.split("+")[0]
         for _retry in range(3):
-            review_text = run_text_agent(reviewer, prompt, workdir=workdir)
+            review_text = run_text_agent(prompt, agent_name=reviewer)
             if review_text:
                 break
             if is_agent_disabled(actual_reviewer):
