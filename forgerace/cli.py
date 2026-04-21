@@ -503,7 +503,7 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             now = _time.strftime("%H:%M:%S")
             # Count live processes
             try:
-                procs = int(_sp.run(["pgrep", "-fc", "forgerace.py run"],
+                procs = int(_sp.run(["pgrep", "-fc", "forgerace.py (run|discuss)"],
                                      capture_output=True, text=True).stdout.strip() or "0")
             except Exception:
                 procs = 0
@@ -616,19 +616,20 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             pct = f"{total_done*100//total_all}%" if total_all else "—"
             print(f"\n  {C['bold']}Total: {C['green']}{total_done}{R}{C['bold']}/{total_all} ({pct}){R}  {C['dim']}Refresh: {interval}s{R}")
 
-            # Per-agent activity: parse from all logs
+            # Per-agent activity: only when processes are running
             import re as _re
             agent_activity = {}
             now_ts = _time.time()
-            log_files = list(cfg.log_dir.glob("*.log"))
-            orch = cfg.log_dir / "orchestrator.log"
-            if orch.exists():
-                log_files.append(orch)
             _ansi_re = _re.compile(r'\x1b\[[0-9;]*m')
-            for logf in log_files:
+            if procs > 0:
+              log_files = list(cfg.log_dir.glob("*.log"))
+              orch = cfg.log_dir / "orchestrator.log"
+              if orch.exists():
+                log_files.append(orch)
+              for logf in log_files:
                 try:
-                    if now_ts - logf.stat().st_mtime > 300:
-                        continue  # skip logs inactive > 5min
+                    if now_ts - logf.stat().st_mtime > 60:
+                        continue  # skip logs inactive > 1min
                     lines = logf.read_text(errors="replace").splitlines()[-100:]
                     for line in reversed(lines):
                         line = _ansi_re.sub('', line)  # strip ANSI codes
@@ -642,10 +643,10 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 except Exception:
                     pass
 
-            # Also scan for review/discuss activity
-            for logf in cfg.log_dir.glob("*.log"):
+              # Also scan for review/discuss activity
+              for logf in cfg.log_dir.glob("*.log"):
                 try:
-                    if now_ts - logf.stat().st_mtime > 120:
+                    if now_ts - logf.stat().st_mtime > 60:
                         continue
                     lines = logf.read_text(errors="replace").splitlines()[-50:]
                     for line in reversed(lines):
@@ -660,6 +661,7 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                             agent_activity[m.group(1)] = (None, "review", f"→{m.group(2)}")
                 except Exception:
                     pass
+            # end if procs > 0
 
             if agent_activity:
                 print(f"\n  {C['bold']}Agent Activity{R}")
