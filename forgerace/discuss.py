@@ -157,6 +157,65 @@ def discuss_reply(topic: str, agent_spec: str):
     log.info(f"@{display_name} ответил в {topic}")
 
 
+def discuss_round(topic: str):
+    """All enabled agents reply sequentially in optimal order (medium → weak)."""
+    filepath = cfg.discuss_dir / f"{topic}.md"
+    if not filepath.exists():
+        log.error(f"Дискуссия {topic} не найдена")
+        return
+
+    # Sort agents: medium first, then weak, then strong (optimal for discussion quality)
+    tier_order = {"medium": 0, "strong": 1, "weak": 2}
+    agents_with_tier = []
+    for name in cfg.agent_names:
+        acfg = cfg.agents.get(name)
+        if not acfg:
+            continue
+        tier = acfg.tier if acfg else "strong"
+        # Use agent+default_frame spec
+        spec = f"{name}+{acfg.default_frame}" if acfg.default_frame else name
+        agents_with_tier.append((tier_order.get(tier, 1), name, spec))
+
+    agents_with_tier.sort(key=lambda x: x[0])
+
+    log.info(f"Раунд дискуссии {topic}: {len(agents_with_tier)} агентов")
+    for i, (_, name, spec) in enumerate(agents_with_tier, 1):
+        acfg = cfg.agents.get(name)
+        tier_label = acfg.tier if acfg else "?"
+        log.info(f"  [{i}/{len(agents_with_tier)}] {spec} ({tier_label})")
+        discuss_reply(topic, spec)
+
+    log.info(f"Раунд завершён: {len(agents_with_tier)} ответов")
+
+
+def discuss_msg(topic: str, message: str, author: str = "techlead"):
+    """Add a techlead message to the discussion."""
+    filepath = cfg.discuss_dir / f"{topic}.md"
+    if not filepath.exists():
+        log.error(f"Дискуссия {topic} не найдена")
+        return
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write(f"\n## @{author} ({now})\n\n{message}\n")
+    log.info(f"@{author} добавил сообщение в {topic}")
+
+
+def discuss_resolve(topic: str, resolution: str):
+    """Close discussion with resolution and generate tasks."""
+    filepath = cfg.discuss_dir / f"{topic}.md"
+    if not filepath.exists():
+        log.error(f"Дискуссия {topic} не найдена")
+        return
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write(f"\n## @techlead ({now})\n\n**РЕЗОЛЮЦИЯ:**\n\n{resolution}\n")
+    log.info(f"Дискуссия {topic} закрыта")
+
+    _post_resolve(filepath)
+
+
 def discuss_list():
     """Показывает открытые дискуссии."""
     if not cfg.discuss_dir.exists():

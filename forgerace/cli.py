@@ -1198,6 +1198,17 @@ def main():
     disc_regen = disc_sub.add_parser("regen", help="Перегенерировать задачи из резолюции")
     disc_regen.add_argument("topic")
 
+    disc_round = disc_sub.add_parser("round", help="Все агенты отвечают последовательно (medium → weak)")
+    disc_round.add_argument("topic")
+
+    disc_msg = disc_sub.add_parser("msg", help="Добавить сообщение от techlead")
+    disc_msg.add_argument("topic")
+    disc_msg.add_argument("message", help="Текст сообщения")
+
+    disc_resolve = disc_sub.add_parser("resolve", help="Закрыть дискуссию + сгенерировать задачи")
+    disc_resolve.add_argument("topic")
+    disc_resolve.add_argument("resolution", help="Текст резолюции")
+
     # agents
     agents_p = sub.add_parser("agents", help="Агенты (вкл/выкл)",
         epilog="Примеры:\n"
@@ -1303,6 +1314,15 @@ def main():
                 log.error(f"Дискуссия {args.topic} не закрыта (нет РЕЗОЛЮЦИИ)")
             else:
                 _post_resolve(filepath)
+        elif args.disc_cmd == "round":
+            from .discuss import discuss_round
+            discuss_round(args.topic)
+        elif args.disc_cmd == "msg":
+            from .discuss import discuss_msg
+            discuss_msg(args.topic, args.message)
+        elif args.disc_cmd == "resolve":
+            from .discuss import discuss_resolve
+            discuss_resolve(args.topic, args.resolution)
         else:
             disc_p.print_help()
         return
