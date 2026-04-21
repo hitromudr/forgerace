@@ -30,26 +30,28 @@ def _next_task_id() -> str:
                 continue
         return f"TASK-{max_num + 1:03d}"
 
-def _format_task_md(task_id: str, name: str, priority: str, depends: str,
-                    files_new: str, files_modify: str, description: str,
-                    discussion: str) -> str:
-    """Create a markdown block for a new task."""
-    return f"""### {task_id}: {name}
-- **Статус**: open
-- **Приоритет**: {priority}
-- **Этап**: 1
-- **Зависимости**: {depends}
-- **Файлы (новые)**: {files_new}
-- **Файлы (modify)**: {files_modify}
-- **Интеграция**: —
-- **Описание**: {description}
-- **Запрещено**: —
-- **Проверка**: —
-- **Критерий готовности**: —
-- **Дискуссия**: {discussion}
-- **Агент**: —
-- **Ветка**: —
-"""
+def _format_task_md(task_id: str, name: str, priority: str = "P1",
+                    depends: str = "", files_new: str = "", files_modify: str = "",
+                    description: str = "", discussion: str = "", **extra) -> str:
+    """Create a markdown block for a new task. Only non-empty fields are written."""
+    lines = [f"### {task_id}: {name}", "- **Статус**: open"]
+    # Optional fields — only write if not empty/dash
+    _optional = [
+        ("Приоритет", priority),
+        ("Зависимости", depends),
+        ("Файлы (новые)", files_new),
+        ("Файлы (modify)", files_modify),
+        ("Описание", description),
+        ("Дискуссия", discussion),
+    ]
+    for field_name, value in _optional:
+        if value and value != "—":
+            lines.append(f"- **{field_name}**: {value}")
+    # Extra fields (integration, forbidden, verification, etc.)
+    for field_name, value in extra.items():
+        if value and value != "—":
+            lines.append(f"- **{field_name}**: {value}")
+    return "\n".join(lines) + "\n"
 
 def add_task(name: str, priority: str = "P1", depends: str = "—",
              files_new: str = "—", files_modify: str = "—",

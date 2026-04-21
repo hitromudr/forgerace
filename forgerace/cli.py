@@ -532,19 +532,20 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
 
             active_tasks = []
 
-            # Detect actually-coding tasks from fresh logs (not stale TASKS.md)
+            # Detect actually-coding tasks from fresh logs (only when processes running)
             import re as _re
-            _coding_now = set()  # task IDs that are actively being coded
-            for logf in list(cfg.log_dir.glob("*.log")):
-                try:
-                    if not logf.exists() or _time.time() - logf.stat().st_mtime > 600:
-                        continue
-                    for line in logf.read_text(errors="replace").splitlines()[-30:]:
-                        m = _re.search(r"\[(TASK-\d+)/", line)
-                        if m:
-                            _coding_now.add(m.group(1))
-                except Exception:
-                    pass
+            _coding_now = set()
+            if procs > 0:
+                for logf in list(cfg.log_dir.glob("*.log")):
+                    try:
+                        if not logf.exists() or _time.time() - logf.stat().st_mtime > 60:
+                            continue
+                        for line in logf.read_text(errors="replace").splitlines()[-30:]:
+                            m = _re.search(r"\[(TASK-\d+)/", line)
+                            if m:
+                                _coding_now.add(m.group(1))
+                    except Exception:
+                        pass
 
             for team_name, tt in sorted(teams.items()):
                 done = sum(1 for t in tt if t.status == "done")
