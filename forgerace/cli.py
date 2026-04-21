@@ -1243,6 +1243,9 @@ def main():
     # help
     sub.add_parser("help", help="Полная справка с примерами")
 
+    # doctor
+    sub.add_parser("doctor", help="Диагностика и автолечение среды")
+
     # stats
     stats_p = sub.add_parser("stats", help="Вывести статистику задач")
     stats_p.add_argument("--format", choices=["text", "json"], default="text", help="Формат вывода")
@@ -1356,6 +1359,11 @@ def main():
     if args.command == "stats":
         _cmd_stats()
         return
+
+    if args.command == "doctor":
+        from .doctor import doctor
+        ok = doctor()
+        sys.exit(0 if ok else 1)
 
     if args.command == "rollback":
         try:
