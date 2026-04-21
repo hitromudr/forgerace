@@ -1,3 +1,4 @@
+import re
 from .config import cfg
 from .utils import C, R
 from .tasks import tasks_file_lock, _atomic_write, parse_tasks
@@ -66,3 +67,53 @@ def add_task(name: str, priority: str = "P1", depends: str = "—",
         new_content = content.rstrip() + "\n\n" + block.rstrip() + "\n"
         _atomic_write(cfg.tasks_file, new_content)
     print(f"{C['green']}Создана задача {task_id}: {name}{R}")
+
+def edit_task(task_id: str, **fields) -> None:
+    """Edit an existing task in TASKS.md.
+
+    Args:
+        task_id: ID of the task to edit (e.g., "TASK-036")
+        **fields: field names and new values (e.g., status="done", priority="P1")
+
+    Validates priority and status values. Updates the task block under a lock.
+    """
+    # Validate inputs
+    if "priority" in fields and fields["priority"] not in ("P0", "P1", "P2", "P3"):
+        print(f"{C['red']}Ошибка: приоритет должен быть P0, P1, P2 или P3{R}")
+        return
+    if "status" in fields and fields["status"] not in ("open", "done", "blocked", "skip"):
+        print(f"{C['red']}Ошибка: статус должен быть open, done, blocked или skip{R}")
+        return
+
+    # Read the file
+    with tasks_file_lock():
+        content = cfg.tasks_file.read_text(encoding="utf-8")
+
+        # Find the task block
+        pattern = rf"(### {re.escape(task_id)}: .+?)(?=\n### TASK-|\n---|\Z)"
+        match = re.search(pattern, content, re.DOTALL)
+        if not match:
+            print(f"{C['red']}Задача {task_id} не найдена{R}")
+            return
+
+        task_block = match.group(1)
+
+        # Update fields
+        for field_name, new_value in fields.items():
+            # Build regex pattern for the field
+            field_pattern = rf"- \*\*{re.escape(field_name)}\*\*: .*"
+            # Replace the field value
+            task_block = re.sub(
+                field_pattern,
+                f"- **{field_name}**: {new_value}",
+                task_block,
+                count=1
+            )
+
+        # Replace the task block in the content
+        new_content = content[:match.start()] + task_block + content[match.end():]
+
+        # Write back
+        _atomic_write(cfg.tasks_file, new_content)
+
+    print(f"{C['green']}Задача {task_id} обновлена{R}")
