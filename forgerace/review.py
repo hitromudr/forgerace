@@ -61,22 +61,60 @@ def pick_reviewer(passed: list[AgentResult]) -> str:
     return passed[0].agent_type
 
 
-def single_review(reviewer: str, author: str, diff: str, task: Task,
-                   build_passed: bool = True, build_log: str = "",
-                   changed_files: list[str] | None = None,
-                   workdir: Path | None = None) -> dict:
-    """Один ревьюер проверяет одного автора. Запускается как полноценный агент в worktree автора."""
-    from .pipeline import run_text_agent
-    
-    files_context = f"Файлы: {', '.join(changed_files)}" if changed_files else ""
-    prompt = f"""Сделай code review для задачи {task.id}: {task.name}.
+def _build_review_prompt(reviewer: str, author: str, diff: str, task: Task,
+                         files_context: str, tier: str) -> str:
+    """Build review prompt adapted to model tier."""
+    diff_block = f"```diff\n{diff}\n```"
+
+    if tier == "weak":
+        return f"""Code review задачи {task.id}: {task.name}.
 Автор: {author}
 {files_context}
 
 ## Diff
-```diff
-{diff}
-```
+{diff_block}
+
+## Правила (СТРОГО)
+1. APPROVED — если код решает задачу и сборка проходит. Стиль и "улучшения" НЕ являются причиной для NEEDS_WORK.
+2. NEEDS_WORK — ТОЛЬКО если есть конкретный баг, код не соответствует задаче, или отсутствует ключевой функционал.
+3. НЕ придирайся к стилю, именованию, комментариям, структуре файлов.
+4. НЕ предлагай "улучшения", "рефакторинг", "расширение".
+
+## Формат ответа (строго)
+VERDICT: APPROVED | NEEDS_WORK | REJECTED
+IS_TERMINAL: TRUE | FALSE
+COMMENTS: конкретные баги или "код соответствует задаче"
+SUMMARY: одна строка
+"""
+    elif tier == "medium":
+        return f"""Code review задачи {task.id}: {task.name}.
+Автор: {author}
+{files_context}
+
+## Diff
+{diff_block}
+
+## Правила ревью
+1. Проверь соответствие описанию задачи.
+2. Проверь на баги и ошибки логики.
+3. Стиль и "улучшения" — в COMMENTS, но НЕ причина для NEEDS_WORK если код работает.
+4. NEEDS_WORK — только при конкретных багах или неполной реализации.
+
+## Формат ответа
+VERDICT: APPROVED | NEEDS_WORK | REJECTED
+IS_TERMINAL: TRUE | FALSE (TRUE если фундаментально неверно)
+COMMENTS: твои замечания
+SUMMARY: краткое резюме одной строкой
+
+Важно: в поле VERDICT пиши ТОЛЬКО одно слово.
+"""
+    else:
+        return f"""Сделай code review для задачи {task.id}: {task.name}.
+Автор: {author}
+{files_context}
+
+## Diff
+{diff_block}
 
 ## Правила ревью
 1. Проверь соответствие описанию задачи.
@@ -91,6 +129,22 @@ SUMMARY: краткое резюме одной строкой
 
 Важно: в поле VERDICT пиши ТОЛЬКО одно слово.
 """
+
+
+def single_review(reviewer: str, author: str, diff: str, task: Task,
+                   build_passed: bool = True, build_log: str = "",
+                   changed_files: list[str] | None = None,
+                   workdir: Path | None = None) -> dict:
+    """Один ревьюер проверяет одного автора. Запускается как полноценный агент в worktree автора."""
+    from .pipeline import run_text_agent
+
+    files_context = f"Файлы: {', '.join(changed_files)}" if changed_files else ""
+
+    # Determine reviewer tier
+    actual_reviewer = reviewer.split("+")[0]
+    acfg = cfg.agents.get(actual_reviewer)
+    tier = acfg.tier if acfg else "strong"
+    prompt = _build_review_prompt(reviewer, author, diff, task, files_context, tier)
     try:
         # Пытаемся запустить ревьюера (до 3 раз при пустых ответах)
         review_text = ""
