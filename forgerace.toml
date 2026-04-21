@@ -35,6 +35,7 @@ base_url = "https://integrate.api.nvidia.com/v1"
 api_key = "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"
 model = "meta/llama-3.3-70b-instruct"
 default_frame = "reviewer"
+tier = "weak"
 inactivity_timeout = 180
 enabled = true
 
@@ -44,6 +45,7 @@ base_url = "https://integrate.api.nvidia.com/v1"
 api_key = "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"
 model = "qwen/qwen2.5-coder-32b-instruct"
 default_frame = "theory"
+tier = "weak"
 inactivity_timeout = 180
 enabled = true  # switched from qwen3.5-122b (timeout) to coder-32b
 
@@ -53,6 +55,7 @@ base_url = "https://integrate.api.nvidia.com/v1"
 api_key = "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"
 model = "mistralai/devstral-2-123b-instruct-2512"
 default_frame = "architect"
+tier = "medium"
 inactivity_timeout = 180
 enabled = true
 
@@ -62,6 +65,7 @@ base_url = "https://integrate.api.nvidia.com/v1"
 api_key = "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"
 model = "openai/gpt-oss-120b"
 default_frame = "evidence"
+tier = "medium"
 inactivity_timeout = 180
 enabled = true
 

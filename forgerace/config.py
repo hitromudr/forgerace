@@ -38,6 +38,7 @@ class AgentConfig:
     default_frame: str = ""  # frame applied when agent called without explicit +frame
     env: dict[str, str] = field(default_factory=dict)  # extra env vars for subprocess
     prompt_stdin: bool = False  # send prompt via stdin (not CLI args)
+    tier: str = "strong"  # "strong", "medium", "weak" — affects prompt strategy
     # OpenAI-compatible API settings (protocol = "openai")
     base_url: str = ""
     api_key: str = ""
@@ -367,6 +368,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 base_url=acfg.get("base_url", ""),
                 api_key=acfg.get("api_key", ""),
                 model=acfg.get("model", ""),
+                tier=acfg.get("tier", "strong"),
             )
 
     # [frames.*]

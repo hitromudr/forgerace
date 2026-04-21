@@ -36,6 +36,84 @@ def discuss_create(topic: str, question: str, author: str = "techlead"):
     log.info(f"Дискуссия создана: {filepath}")
 
 
+def _build_discuss_prompt(display_name: str, frame_section: str, discussion: str,
+                          tier: str) -> str:
+    """Build discussion prompt adapted to model tier."""
+    context_hint = f" {cfg.discuss_context}" if cfg.discuss_context else ""
+
+    if tier == "weak":
+        # Weak models: strict structure, concrete questions, no room for rambling
+        return f"""Ты участник дискуссии{context_hint}. Роль: @{display_name}.
+{frame_section}
+## Правила ответа
+1. Прочитай ВСЮ дискуссию. Если другие участники уже ответили — опирайся на их ответы, не повторяй.
+2. Отвечай КОНКРЕТНО: названия файлов, функций, структуры данных. Без общих рассуждений.
+3. НЕ предлагай внешние зависимости (pip install). Используй только стандартную библиотеку Python.
+4. НЕ выдумывай код, которого нет в проекте. Если не знаешь — скажи прямо.
+5. Максимум 300 слов.
+
+## Формат ответа
+Ответь на 3 вопроса:
+1. С чем из предыдущих ответов согласен/не согласен и почему?
+2. Какое конкретное решение предлагаешь? (файлы, функции, сигнатуры)
+3. Какие риски видишь в своём решении?
+
+Пиши на русском.
+{cfg.confidence_instruction}
+
+--- ДИСКУССИЯ ---
+{discussion}
+--- КОНЕЦ ---
+"""
+    elif tier == "medium":
+        # Medium models: structured with constraints against overengineering
+        return f"""Ты участник дискуссии{context_hint}. Роль: @{display_name}.
+{frame_section}
+Прочитай ВСЮ дискуссию включая ответы других участников.
+
+## Правила
+1. Опирайся на предыдущие ответы — спорь, дополняй, развивай. НЕ повторяй чужие мысли.
+2. Конкретика: файлы, функции, сигнатуры. Абстрактные рассуждения — бесполезны.
+3. НЕ предлагай внешние зависимости (pip install). Только стандартная библиотека Python + код проекта.
+4. НЕ создавай новые пакеты/подпакеты если можно обойтись одним файлом.
+5. НЕ меняй сигнатуры существующих функций если можно обернуть вызов в try/except.
+6. НЕ ссылайся на номера строк или код, которого ещё нет в проекте.
+7. Простое решение лучше "правильного". Если задача решается в 200 строк — не делай архитектуру на 2000.
+8. Максимум 500 слов.
+
+## Структура ответа
+- **Несогласия**: с чем из предыдущих ответов не согласен и почему
+- **Решение**: конкретное предложение (файлы, функции, как вызывается)
+- **Риски**: что может пойти не так
+
+Пиши на русском.
+{cfg.confidence_instruction}
+
+--- ДИСКУССИЯ ---
+{discussion}
+--- КОНЕЦ ---
+"""
+    else:
+        # Strong models: current open prompt
+        return f"""Ты участник дискуссии{context_hint}.
+Твоя роль: @{display_name}.
+{frame_section}
+Прочитай дискуссию и напиши свой ответ.
+Уровень ответа определяй по контексту дискуссии:
+- Если обсуждаются концепции, стратегии, trade-offs — рассуждай на уровне принципов и альтернатив. НЕ прыгай к коду.
+- Если обсуждается конкретная реализация — предлагай структуры, алгоритмы, примеры.
+- Если не согласен с предыдущим участником — аргументируй.
+
+Отвечай ТОЛЬКО текстом своего сообщения (без заголовка, без форматирования секции).
+Пиши на русском.
+{cfg.confidence_instruction}
+
+--- ДИСКУССИЯ ---
+{discussion}
+--- КОНЕЦ ---
+"""
+
+
 def discuss_reply(topic: str, agent_spec: str):
     """Запускает агента чтобы он ответил в дискуссии.
 
@@ -60,23 +138,11 @@ def discuss_reply(topic: str, agent_spec: str):
         display_name = f"{agent_spec}+{acfg.default_frame}" if acfg and acfg.default_frame else agent_spec
     else:
         display_name = agent_spec
-    prompt = f"""Ты участник дискуссии{' ' + cfg.discuss_context if cfg.discuss_context else ''}.
-Твоя роль: @{display_name}.
-{frame_section}
-Прочитай дискуссию и напиши свой ответ.
-Уровень ответа определяй по контексту дискуссии:
-- Если обсуждаются концепции, стратегии, trade-offs — рассуждай на уровне принципов и альтернатив. НЕ прыгай к коду.
-- Если обсуждается конкретная реализация — предлагай структуры, алгоритмы, примеры.
-- Если не согласен с предыдущим участником — аргументируй.
 
-Отвечай ТОЛЬКО текстом своего сообщения (без заголовка, без форматирования секции).
-Пиши на русском.
-{cfg.confidence_instruction}
-
---- ДИСКУССИЯ ---
-{discussion}
---- КОНЕЦ ---
-"""
+    # Determine tier from agent config
+    acfg = cfg.agents.get(model_name)
+    tier = acfg.tier if acfg else "strong"
+    prompt = _build_discuss_prompt(display_name, frame_section, discussion, tier)
 
     from .agents import run_reviewer
     agent_type = model_name  # run_reviewer использует model_name для выбора CLI
