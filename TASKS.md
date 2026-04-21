@@ -259,7 +259,7 @@
 - **Ветка**: task/task-033-realizatsiya-komandy-fr-logs-aider-qwen
 
 ### TASK-034: Реализовать команду ./fr task add
-- **Статус**: open
+- **Статус**: done
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: —
@@ -271,8 +271,8 @@
 - **Проверка**: python3 -c "from forgerace.task_cmd import add_task; print('OK')"
 - **Критерий готовности**: add_task("Test task") создаёт запись в TASKS.md с правильным форматом
 - **Дискуссия**: task-add-cmd
-- **Агент**: —
-- **Ветка**: —
+- **Агент**: aider-gptoss
+- **Ветка**: task/task-034-realizovat-komandu-fr-task-add-aider-gptoss
 
 ### TASK-035: Реализовать команду ./fr task list
 - **Статус**: done
@@ -291,7 +291,7 @@
 - **Ветка**: task/task-035-realizovat-komandu-fr-task-list-aider-gptoss
 
 ### TASK-036: Реализовать команду ./fr task edit
-- **Статус**: open
+- **Статус**: blocked
 - **Приоритет**: P1
 - **Этап**: N
 - **Зависимости**: TASK-035
@@ -303,5 +303,5 @@
 - **Проверка**: `make check`
 - **Критерий готовности**: Команда `./fr task edit` изменяет поля задачи
 - **Дискуссия**: task-add-cmd
-- **Агент**: —
+- **Агент**: aider-devstral
 - **Ветка**: —

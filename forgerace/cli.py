@@ -1245,6 +1245,18 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     mode_p.add_argument("mode_name", nargs="?", help="competitive | distributed")
 
+    # task
+    task_p = sub.add_parser("task", help="Управление задачами")
+    task_sub = task_p.add_subparsers(dest="task_cmd")
+    task_sub.add_parser("list", help="Компактный список задач")
+    task_add = task_sub.add_parser("add", help="Создать задачу")
+    task_add.add_argument("name", help="Название задачи")
+    task_add.add_argument("--priority", default="P1", choices=["P0", "P1", "P2", "P3"])
+    task_add.add_argument("--depends", default="—", help="Зависимости (TASK-XXX)")
+    task_add.add_argument("--files", default="—", help="Файлы (новые)")
+    task_add.add_argument("--discussion", default="—", help="Привязка к дискуссии")
+    task_add.add_argument("--description", default="—", help="Описание")
+
     # init
     sub.add_parser("init", help="Создать forgerace.toml и TASKS.md")
 
@@ -1403,6 +1415,17 @@ def main():
     # stats
     if args.command == "stats":
         _cmd_stats()
+        return
+
+    if args.command == "task":
+        from .task_cmd import list_tasks, add_task
+        cmd = getattr(args, "task_cmd", None)
+        if cmd == "add":
+            add_task(args.name, priority=args.priority, depends=args.depends,
+                     files_new=args.files, description=args.description,
+                     discussion=args.discussion)
+        else:
+            list_tasks()
         return
 
     if args.command == "doctor":
