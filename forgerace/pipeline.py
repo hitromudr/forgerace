@@ -595,11 +595,13 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                         if comments:
                             rework_comments.append(f"### Замечания от {rev} (вердикт: {verdict})\n{comments}")
 
-            # APPROVED только если ВСЕ ревьюеры одобрили
-            all_approved = all(v.get("verdict") == "APPROVED" for v in verdicts.values())
-            
-            # Проверка на терминальный отказ (TASK-051)
-            is_terminal = any(v.get("is_terminal") for v in verdicts.values())
+            # APPROVED if majority approves (exclude FAILED — technical parser errors)
+            real_verdicts = [v for v in verdicts.values() if v.get("verdict") != "FAILED"]
+            approved_count = sum(1 for v in real_verdicts if v.get("verdict") == "APPROVED")
+            all_approved = len(real_verdicts) > 0 and approved_count > len(real_verdicts) / 2
+
+            # Проверка на терминальный отказ (TASK-051) — only from real verdicts
+            is_terminal = any(v.get("is_terminal") for v in real_verdicts)
             if not all_approved and is_terminal:
                 log.error(f"[{task.id}/{result.agent_type}/ревью] ✗ ТЕРМИНАЛЬНЫЙ ОТКАЗ → BLOCKED")
                 update_task_status(task.id, "blocked", agent=result.agent_type)

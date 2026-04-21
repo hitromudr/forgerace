@@ -172,6 +172,9 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
 
         verdict = verdict_match.group(1).upper() if verdict_match else "FAILED"
         is_terminal = terminal_match.group(1).upper() == "TRUE" if terminal_match else False
+        # APPROVED + IS_TERMINAL is nonsensical — weak models confuse the field
+        if verdict == "APPROVED":
+            is_terminal = False
         comments = comments_match.group(1).strip() if comments_match else ""
 
         # REJECTED может быть терминальным
