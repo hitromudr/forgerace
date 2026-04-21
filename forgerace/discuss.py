@@ -621,6 +621,12 @@ def _post_resolve(filepath: Path):
     tasks = parse_tasks(tasks_file)
     max_num = max((int(re.match(r"TASK-(\d+)", t.id).group(1))
                    for t in tasks if re.match(r"TASK-(\d+)", t.id)), default=0)
+    # Also check archived tasks to avoid ID collisions
+    done_dir = cfg.root_dir / "done"
+    if done_dir.exists():
+        for af in done_dir.glob("TASKS_*.md"):
+            for m_arch in re.finditer(r"### TASK-(\d+):", af.read_text(encoding="utf-8", errors="ignore")):
+                max_num = max(max_num, int(m_arch.group(1)))
     next_task_num = max_num + 1
 
     linked_task_id = ""
