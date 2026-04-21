@@ -204,6 +204,54 @@ def link_task_discussion(task_id: str, topic: str):
         _atomic_write(tasks_file, "\n".join(result) + "\n")
 
 
+# --- Архивирование ---
+
+def archive_done_tasks() -> int:
+    """Move done/skip tasks from TASKS.md to done/TASKS_YYYY-MM-DD.md. Returns count archived."""
+    from datetime import date
+
+    with tasks_file_lock():
+        content = cfg.tasks_file.read_text(encoding="utf-8")
+        # Split into header + task blocks
+        blocks = re.split(r"(?=\n### TASK-)", content)
+        header = blocks[0]
+        task_blocks = blocks[1:] if len(blocks) > 1 else []
+
+        keep = []
+        archive = []
+        for block in task_blocks:
+            status_match = re.search(r"\*\*Статус\*\*:\s*(\S+)", block)
+            status = status_match.group(1) if status_match else ""
+            if status in ("done", "skip"):
+                archive.append(block)
+            else:
+                keep.append(block)
+
+        if not archive:
+            return 0
+
+        # Write archive file
+        done_dir = cfg.root_dir / "done"
+        done_dir.mkdir(exist_ok=True)
+        archive_file = done_dir / f"TASKS_{date.today().isoformat()}.md"
+
+        # Append to existing archive for today (multiple runs per day)
+        existing = ""
+        if archive_file.exists():
+            existing = archive_file.read_text(encoding="utf-8")
+        if not existing:
+            existing = f"# Archived tasks ({date.today().isoformat()})\n"
+
+        archive_content = existing.rstrip() + "\n" + "".join(archive).rstrip() + "\n"
+        archive_file.write_text(archive_content, encoding="utf-8")
+
+        # Rewrite TASKS.md without archived tasks
+        new_content = header + "".join(keep)
+        _atomic_write(cfg.tasks_file, new_content.rstrip() + "\n")
+
+    return len(archive)
+
+
 # --- Топик дискуссии ---
 
 def translate_slug(name: str) -> str:

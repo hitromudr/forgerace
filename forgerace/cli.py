@@ -549,14 +549,15 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             for team_name, tt in sorted(teams.items()):
                 done = sum(1 for t in tt if t.status == "done")
                 total = len(tt)
-                # Show completed teams as collapsed single line
                 skip = sum(1 for t in tt if t.status == "skip")
-                completed = done + skip  # both count as "finished"
+                completed = done + skip
 
+                # Hide fully done teams
                 if completed == total and total > 0:
-                    bar = f"{C['green']}{'█' * BAR_LEN}{R}"
-                    skip_str = f" {C['dim']}({skip} skip){R}" if skip > 0 else ""
-                    status_str = f"  {C['green']}DONE{R}{skip_str}"
+                    continue
+
+                if False:  # was: collapsed done line
+                    pass
                 else:
                     ip_tasks = [t for t in tt if "progress" in t.status or t.id in _coding_now]
                     blocked_tasks = [t for t in tt if "blocked" in t.status.lower() and t.id not in _coding_now]
@@ -1256,6 +1257,7 @@ def main():
     task_add.add_argument("--files", default="—", help="Файлы (новые)")
     task_add.add_argument("--discussion", default="—", help="Привязка к дискуссии")
     task_add.add_argument("--description", default="—", help="Описание")
+    task_sub.add_parser("archive", help="Перенести done/skip задачи в done/TASKS_дата.md")
 
     # init
     sub.add_parser("init", help="Создать forgerace.toml и TASKS.md")
@@ -1424,6 +1426,13 @@ def main():
             add_task(args.name, priority=args.priority, depends=args.depends,
                      files_new=args.files, description=args.description,
                      discussion=args.discussion)
+        elif cmd == "archive":
+            from .tasks import archive_done_tasks
+            count = archive_done_tasks()
+            if count:
+                print(f"  {C['green']}Архивировано {count} задач в done/{R}")
+            else:
+                print(f"  {C['dim']}Нет задач для архивирования{R}")
         else:
             list_tasks()
         return
