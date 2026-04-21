@@ -820,14 +820,6 @@ def _cmd_benchmark(agent: Optional[str] = None, format_: str = "table"):
     else:
         print(store.as_table())
 
-def _cmd_benchmark(agent: Optional[str] = None, format_: str = "table"):
-    """Показать таблицу метрик производительности агентов."""
-    store = BenchmarkStore()
-    if format_ == "json":
-        print(store.as_json())
-    else:
-        print(store.as_table())
-
 
 def _cmd_mode(mode_name: str):
     """Переключает режим competitive/distributed в forgerace.toml."""
