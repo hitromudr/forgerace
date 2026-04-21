@@ -1260,6 +1260,10 @@ def main():
     task_add.add_argument("--discussion", default="—", help="Привязка к дискуссии")
     task_add.add_argument("--description", default="—", help="Описание")
     task_sub.add_parser("archive", help="Перенести done/skip задачи в done/TASKS_дата.md")
+    task_edit = task_sub.add_parser("edit", help="Изменить поля задачи")
+    task_edit.add_argument("task_id", help="ID задачи (TASK-036)")
+    task_edit.add_argument("--status", help="Новый статус")
+    task_edit.add_argument("--priority", help="Новый приоритет")
 
     # init
     sub.add_parser("init", help="Создать forgerace.toml и TASKS.md")
@@ -1435,6 +1439,17 @@ def main():
                 print(f"  {C['green']}Архивировано {count} задач в done/{R}")
             else:
                 print(f"  {C['dim']}Нет задач для архивирования{R}")
+        elif cmd == "edit":
+            from .task_cmd import edit_task
+            fields = {}
+            if getattr(args, "status", None):
+                fields["Статус"] = args.status
+            if getattr(args, "priority", None):
+                fields["Приоритет"] = args.priority
+            if fields:
+                edit_task(args.task_id, **fields)
+            else:
+                print(f"  {C['dim']}Укажите --status или --priority{R}")
         else:
             list_tasks()
         return
