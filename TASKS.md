@@ -241,3 +241,19 @@
 - **Дискуссия**: doctor-cmd
 - **Агент**: aider-devstral
 - **Ветка**: task/task-032-realizatsiya-komandy-fr-doctor-aider-devstral
+
+### TASK-033: Реализация команды ./fr logs
+- **Статус**: open
+- **Приоритет**: P1
+- **Этап**: N
+- **Зависимости**: —
+- **Файлы (новые)**: forgerace/logs_cmd.py
+- **Файлы (modify)**: —
+- **Интеграция**: НЕ трогать cli.py (защищённый файл). Только forgerace/logs_cmd.py
+- **Описание**: Реализовать модуль forgerace/logs_cmd.py с функциями просмотра логов задач. Логи хранятся в cfg.log_dir (.agents/logs/), формат имён: task-{NUM}-{AGENT}-attempt{N}.log. Реализовать: (1) list_logs() — таблица файлов отсортированная по mtime, с цветами из utils.C. (2) show_log(task_id, agent=None, tail=50) — показать последние tail строк лога. Для фильтрации: task_id матчится как "task-{id}" в имени файла, agent как подстрока имени. Использовать collections.deque(maxlen=tail) вместо readlines(). (3) follow_log(task_id=None, agent=None) — tail -f с buffering=1, KeyboardInterrupt, time.sleep(0.2). Цветной вывод: строки с ERROR→red, WARN→yellow через utils.C dict. (4) handle_args(namespace) — точка входа из cli.py, диспатч по аргументам.
+- **Запрещено**: readlines() для больших файлов, внешние зависимости, модификация cli.py
+- **Проверка**: python3 -c "from forgerace.logs_cmd import list_logs, show_log, follow_log; print('OK')"
+- **Критерий готовности**: list_logs() выводит таблицу файлов, show_log("032") показывает последние 50 строк лога TASK-032
+- **Дискуссия**: logs-cmd
+- **Агент**: —
+- **Ветка**: —
