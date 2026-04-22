@@ -998,24 +998,24 @@ def _print_full_help():
   ./fr task add 'название' [--priority P1] [--description '...'] [--discussion topic]
   ./fr task edit TASK-038 --status done  Изменить поля задачи
   ./fr task archive                      Перенести done/skip в done/TASKS_дата.md
-
-{Y}ДИАГНОСТИКА:{R}
-  ./fr doctor                            Проверка и автолечение среды
   ./fr retry TASK-038                    Умный перезапуск (анализ причины, смена агента)
   ./fr retry --all                       Перезапустить все blocked задачи
+
+{Y}ЛОГИ:{R}
   ./fr logs                              Список логов
   ./fr logs show TASK-038 [--tail 50]    Показать лог задачи
   ./fr logs follow [TASK-038]            Live-tail логов
 
-{Y}СТАТУС И МЕРЖ:{R}
+{Y}МОНИТОРИНГ:{R}
   ./fr status                            Статус задач + граф зависимостей
-  ./fr merge-pending                     Промержить review-задачи в develop
   ./fr monitor                           Live dashboard прогресса
-
-{Y}СТАТИСТИКА:{R}
-  ./fr stats                             Вывести статистику задач
+  ./fr stats                             Статистика задач
   ./fr models [--test]                   Проверить доступные API-модели
   ./fr benchmark                         Метрики производительности агентов
+
+{Y}ОБСЛУЖИВАНИЕ:{R}
+  ./fr doctor                            Проверка и автолечение среды
+  ./fr merge-pending                     Промержить review-задачи в develop
 
 {Y}ОПЦИИ:{R}
   --config PATH                          Путь к forgerace.toml
