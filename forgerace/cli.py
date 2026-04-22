@@ -955,6 +955,9 @@ def _print_full_help():
   ./fr discuss list                      Список дискуссий
   ./fr discuss show <тема>               Показать дискуссию целиком
   ./fr discuss reply <тема> --agent X    Пакетный ответ агента (без чата)
+  ./fr discuss round <тема>             Все агенты отвечают последовательно (medium → weak)
+  ./fr discuss msg <тема> 'текст'       Добавить сообщение от techlead
+  ./fr discuss resolve <тема> 'решение' Закрыть дискуссию + сгенерировать задачи
   ./fr discuss regen <тема>              Перегенерировать задачи из резолюции
 
   {DIM}В чате: /help — справка, /help <команда> — подробности, Tab — автодополнение{R}
@@ -990,12 +993,29 @@ def _print_full_help():
   ./fr mode competitive                  Все агенты на каждую задачу (race)
   ./fr mode distributed                  Задачи раскидываются по агентам
 
+{Y}ЗАДАЧИ:{R}
+  ./fr task list                         Компактный список задач
+  ./fr task add 'название' [--priority P1] [--description '...'] [--discussion topic]
+  ./fr task edit TASK-038 --status done  Изменить поля задачи
+  ./fr task archive                      Перенести done/skip в done/TASKS_дата.md
+
+{Y}ДИАГНОСТИКА:{R}
+  ./fr doctor                            Проверка и автолечение среды
+  ./fr retry TASK-038                    Умный перезапуск (анализ причины, смена агента)
+  ./fr retry --all                       Перезапустить все blocked задачи
+  ./fr logs                              Список логов
+  ./fr logs show TASK-038 [--tail 50]    Показать лог задачи
+  ./fr logs follow [TASK-038]            Live-tail логов
+
 {Y}СТАТУС И МЕРЖ:{R}
   ./fr status                            Статус задач + граф зависимостей
   ./fr merge-pending                     Промержить review-задачи в develop
+  ./fr monitor                           Live dashboard прогресса
 
 {Y}СТАТИСТИКА:{R}
   ./fr stats                             Вывести статистику задач
+  ./fr models [--test]                   Проверить доступные API-модели
+  ./fr benchmark                         Метрики производительности агентов
 
 {Y}ОПЦИИ:{R}
   --config PATH                          Путь к forgerace.toml
