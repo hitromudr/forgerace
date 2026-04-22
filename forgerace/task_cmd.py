@@ -17,7 +17,8 @@ def list_tasks():
         print(f"{t.id:<10} {t.status:<20} {agent:<15} {t.name}")
 
 def _next_task_id() -> str:
-    """Return the next free TASK-XXX identifier."""
+    """Return the next free TASK-XXX identifier. Checks archive too."""
+    import re as _re
     with tasks_file_lock():
         tasks = parse_tasks()
         max_num = 0
@@ -28,6 +29,12 @@ def _next_task_id() -> str:
                     max_num = num
             except Exception:
                 continue
+        # Also check archived tasks
+        done_dir = cfg.root_dir / "done"
+        if done_dir.exists():
+            for af in done_dir.glob("TASKS_*.md"):
+                for m in _re.finditer(r"### TASK-(\d+):", af.read_text(encoding="utf-8", errors="ignore")):
+                    max_num = max(max_num, int(m.group(1)))
         return f"TASK-{max_num + 1:03d}"
 
 def _format_task_md(task_id: str, name: str, priority: str = "P1",
