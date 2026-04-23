@@ -684,6 +684,13 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
     for r in passed:
         log.info(f"[{task.id}/{r.agent_type}] lines={r.code_lines}, bin={r.binary_size}")
 
+    # Filter out agents with empty diffs — no point reviewing empty code
+    passed = [r for r in passed if r.code_lines > 0]
+    if not passed:
+        log.error(f"[{task.id}] ✗ Все агенты вернули пустой diff → BLOCKED")
+        update_task_status(task.id, "blocked")
+        return False
+
     # Цикл: ревью → доработка
     best_result = None
     prev_summary = None
