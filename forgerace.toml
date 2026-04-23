@@ -13,14 +13,14 @@ args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSear
         "--max-turns", "50", "--output-format", "stream-json", "--verbose"]
 review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
 inactivity_timeout = 600
+enabled = false  # too powerful, slows down forgerace dev; target audience uses free models
 
-enabled = true
 [agents.gemini]
 command = "gemini"
 args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
 review_args = ["-p", "-"]
 inactivity_timeout = 180
-enabled = true
+enabled = false  # always wins over free models; save for benchmarking
 
 [agents.qwen]
 command = "qwen"
