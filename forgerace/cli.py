@@ -108,9 +108,10 @@ def _build_init_toml(name: str, detected_agents: list[str], has_frames: bool) ->
             'file = "frames/vectors.md"',
         ]
 
-    # Agents — только обнаруженные
+    # CLI Agents — только обнаруженные
     lines.append('')
-    lines.append('# ── Агенты ───────────────────────────────────────────────────')
+    lines.append('# ── CLI Агенты (premium) ────────────────────────────────────')
+    lines.append('# Требуют подписку. Отключены по умолчанию — включите если есть доступ.')
 
     all_agents = ["claude", "gemini", "qwen"]
     for agent in all_agents:
@@ -119,12 +120,71 @@ def _build_init_toml(name: str, detected_agents: list[str], has_frames: bool) ->
         lines += [
             '',
             f'[agents.{agent}]',
-            f'enabled = {"true" if enabled else "false"}'
-            f'{"" if enabled else "  # не найден в PATH"}',
+            f'enabled = false'
+            f'{"" if not enabled else "  # найден в PATH, включите при необходимости"}',
             f'command = "{acfg["command"]}"',
             f'args = {acfg["args"]}',
             f'review_args = {acfg["review_args"]}',
             f'inactivity_timeout = {acfg["timeout"]}',
+        ]
+
+    # Free API agents
+    lines += [
+        '',
+        '# ── Бесплатные API-агенты (nvidia) ─────────────────────────',
+        '# Регистрация: https://build.nvidia.com (1000 запросов/день)',
+        '# Используются для дискуссий и кросс-ревью.',
+        '# Замените YOUR-NVIDIA-API-KEY на свой ключ.',
+        '',
+        '[agents.devstral]',
+        'protocol = "openai"',
+        'base_url = "https://integrate.api.nvidia.com/v1"',
+        'api_key = "YOUR-NVIDIA-API-KEY"',
+        'model = "mistralai/devstral-2-123b-instruct-2512"',
+        'tier = "medium"',
+        'enabled = false  # включите после получения nvidia API key',
+        '',
+        '[agents.llama]',
+        'protocol = "openai"',
+        'base_url = "https://integrate.api.nvidia.com/v1"',
+        'api_key = "YOUR-NVIDIA-API-KEY"',
+        'model = "meta/llama-3.3-70b-instruct"',
+        'tier = "weak"',
+        'enabled = false',
+        '',
+        '# ── Aider-агенты (кодинг через LiteLLM proxy) ──────────────',
+        '# Требуется: pip install aider-chat litellm',
+        '# Запуск proxy: litellm --config litellm_config.yaml --port 4000',
+        '# См. docs/MANUAL.md для настройки LiteLLM.',
+    ]
+
+    import shutil as _shutil
+    has_aider = _shutil.which("aider") is not None
+    if has_aider:
+        lines += [
+            '',
+            '[agents.aider-devstral]',
+            'command = "aider"',
+            'args = ["--openai-api-base", "http://127.0.0.1:4000/v1",',
+            '        "--openai-api-key", "fr-local-dev",',
+            '        "--model", "openai/devstral-123b",',
+            '        "--edit-format", "diff",',
+            '        "--message-file", "/dev/stdin",',
+            '        "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",',
+            '        "--no-show-model-warnings", "--no-gitignore",',
+            '        "--no-browser", "--no-analytics", "--no-check-update"]',
+            'protocol = "text"',
+            'prompt_stdin = true',
+            'inactivity_timeout = 300',
+            'enabled = false  # включите после настройки LiteLLM',
+            '[agents.aider-devstral.env]',
+            'HTTP_PROXY = ""',
+            'HTTPS_PROXY = ""',
+        ]
+    else:
+        lines += [
+            '',
+            '# aider не найден в PATH. Установите: pip install aider-chat',
         ]
 
     lines += [
@@ -134,9 +194,9 @@ def _build_init_toml(name: str, detected_agents: list[str], has_frames: bool) ->
         'check_command = ""',
         '',
         '[limits]',
-        'max_parallel_tasks = 10',
-        'agent_timeout = 900',
-        'max_review_rounds = 3',
+        'max_parallel_tasks = 4',
+        'agent_timeout = 300',
+        'max_review_rounds = 2',
         '',
     ]
     return '\n'.join(lines)
@@ -349,7 +409,10 @@ def show_status():
     tasks = parse_tasks()
     if not tasks:
         hint = run_hint().rsplit(" ", 1)[0]
-        print(f"\n  {C['dim']}📋 Нет задач в TASKS.md. Подсказка:{R} {hint} run\n")
+        print(f"\n  {C['dim']}Нет задач в TASKS.md.{R}")
+        print(f"  {hint} discuss new тема 'вопрос'  — создать дискуссию")
+        print(f"  {hint} task add 'название'         — создать задачу")
+        print()
         return
 
     task_map = {t.id: t for t in tasks}
@@ -477,11 +540,43 @@ def _cmd_agents_list():
     """Показывает всех агентов и их статус."""
     mode_color = C['cyan'] if cfg.mode == "competitive" else C['magenta']
     print(f"  Режим: {mode_color}{C['bold']}{cfg.mode}{R}")
-    print()
+
+    coding_set = set(cfg.cli_agent_names)
+    review_set = set(cfg.agent_names) - coding_set
+
+    print(f"\n  {C['bold']}{'Агент':<20} {'Статус':<6} {'Роль':<10} {'Tier':<8} Модель{R}")
+    print(f"  {C['dim']}{'─' * 65}{R}")
     for name, acfg in cfg.agents.items():
-        status = f"{C['green']}ON{R}" if acfg.enabled else f"{C['red']}OFF{R}"
-        print(f"  {C['bold']}{name}{R}: {status}  ({acfg.command})")
-    print(f"\n  Активные: {C['bold']}{cfg.all_agent_names}{R}")
+        status = f"{C['green']}ON{R} " if acfg.enabled else f"{C['red']}OFF{R}"
+        # Determine role
+        if not acfg.enabled:
+            role = C['dim'] + "—" + R
+        elif name in coding_set and name in review_set:
+            role = "code+review"
+        elif name in coding_set:
+            role = "code"
+        else:
+            role = "review"
+        tier = acfg.tier if acfg.tier != "strong" else "—"
+        # Model info
+        if acfg.model:
+            model = acfg.model.split("/")[-1][:30]
+        elif acfg.command == "aider":
+            # Extract model from args
+            model = ""
+            for i, a in enumerate(acfg.args):
+                if a == "--model" and i + 1 < len(acfg.args):
+                    model = acfg.args[i + 1].split("/")[-1][:30]
+            model = model or acfg.command
+        else:
+            model = acfg.command
+        color = agent_color(name) if acfg.enabled else C['dim']
+        print(f"  {color}{name:<20}{R} {status}  {role:<10} {tier:<8} {C['dim']}{model}{R}")
+
+    coding = [n for n in cfg.cli_agent_names]
+    reviewing = [n for n in cfg.agent_names if n not in coding_set]
+    print(f"\n  {C['green']}Код ({len(coding)}):{R} {', '.join(coding)}")
+    print(f"  {C['yellow']}Ревью ({len(reviewing)}):{R} {', '.join(reviewing)}")
 
 
 def _cmd_monitor(interval: int = 10, once: bool = False):

@@ -217,27 +217,46 @@ def discuss_resolve(topic: str, resolution: str):
 
 
 def discuss_list():
-    """Показывает открытые дискуссии."""
+    """Показывает дискуссии с датой, количеством сообщений и участниками."""
     if not cfg.discuss_dir.exists():
         log.info("Нет дискуссий")
         return
 
+    entries = []
     for f in sorted(cfg.discuss_dir.glob("*.md")):
         if f.name == "README.md":
+            continue
+        # Skip -tasks artifacts (generated task lists, not real discussions)
+        if f.stem.endswith("-tasks"):
             continue
         text = f.read_text(encoding="utf-8")
         has_resolution = "ЗАКРЫТО" in text or "РЕЗОЛЮЦИЯ" in text
         reopened = "ДИСКУССИЯ ПЕРЕОТКРЫТА" in text
         if reopened and has_resolution:
-            # переоткрыта после последней резолюции?
             last_resolve = max(text.rfind("ЗАКРЫТО"), text.rfind("РЕЗОЛЮЦИЯ"))
             last_reopen = text.rfind("ДИСКУССИЯ ПЕРЕОТКРЫТА")
             closed = last_resolve > last_reopen
         else:
             closed = has_resolution
-        status = "ЗАКРЫТО" if closed else "ОТКРЫТО"
         participants = set(re.findall(r"## @(\w+)", text))
-        print(f"  [{status}] {f.stem}  участники: {', '.join(sorted(participants))}")
+        msg_count = len(re.findall(r"^## @", text, re.MULTILINE))
+        # Extract date from first message
+        date_match = re.search(r"\((\d{4}-\d{2}-\d{2})", text)
+        date_str = date_match.group(1) if date_match else ""
+        entries.append((closed, f.stem, date_str, msg_count, sorted(participants)))
+
+    if not entries:
+        print(f"  {C['dim']}Нет дискуссий{C['reset']}")
+        return
+
+    for closed, name, date_str, msg_count, parts in entries:
+        if closed:
+            status_str = f"{C['dim']}ЗАКРЫТО{C['reset']}"
+        else:
+            status_str = f"{C['green']}ОТКРЫТО{C['reset']}"
+        date_part = f" {C['dim']}{date_str}{C['reset']}" if date_str else ""
+        parts_str = ", ".join(parts) if parts else f"{C['dim']}—{C['reset']}"
+        print(f"  [{status_str}] {C['bold']}{name}{C['reset']}{date_part}  {C['dim']}({msg_count} сообщ.){C['reset']}  {parts_str}")
 
 
 def discuss_show(topic: str):

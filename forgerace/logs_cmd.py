@@ -14,23 +14,42 @@ def list_logs():
         print(f" {C['dim']}Нет директории логов: {log_dir}{R}")
         return
     
-    files = []
+    # Separate task logs from system logs
+    _SYSTEM_LOGS = {"orchestrator.log", "litellm.log"}
+    task_files = []
+    system_files = []
     for f in log_dir.glob("*.log"):
         if f.is_file():
-            files.append(f)
-    
-    if not files:
+            if f.name in _SYSTEM_LOGS:
+                system_files.append(f)
+            else:
+                task_files.append(f)
+
+    if not task_files and not system_files:
         print(f" {C['dim']}Нет файлов логов{R}")
         return
-    
+
     # Сортировка по mtime (новые сверху)
-    files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-    
+    task_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+    system_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+
+    files = task_files  # show task logs first
+    if system_files:
+        files = task_files + system_files
+
     # Заголовок таблицы
-    print(f"\n{C['bold']}{'Файл':<50} {'Размер':>10} {'Модифицирован':>20}{R}")
-    print(f"{C['dim']}{'─' * 85}{R}")
-    
+    if task_files:
+        print(f"\n{C['bold']}{'Файл':<50} {'Размер':>10} {'Модифицирован':>20}{R}")
+        print(f"{C['dim']}{'─' * 85}{R}")
+    else:
+        print(f" {C['dim']}Нет логов задач{R}")
+
     for f in files:
+        if f in system_files and task_files:
+            # Print separator before system logs
+            if f == system_files[0]:
+                print(f"\n  {C['dim']}Системные:{R}")
+
         stat = f.stat()
         size = stat.st_size
         mtime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))

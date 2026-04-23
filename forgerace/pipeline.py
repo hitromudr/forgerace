@@ -1327,26 +1327,20 @@ def _print_flow_guide(tasks: list[Task]):
         print(f"""
   📋 TASKS.md пуст. Флоу работы с ForgeRace:
 
-  1. Добавь задачи в TASKS.md:
+  1. Создай дискуссию (агенты обсудят архитектуру):
+     {hint} discuss new my-topic 'Как реализовать X?'
+     {hint} discuss round my-topic
+     {hint} discuss resolve my-topic 'Решение такое-то'
 
+  2. Или добавь задачу напрямую:
+     {hint} task add 'Название задачи' --description 'Что сделать'
+
+     Формат в TASKS.md (только нужные поля):
      ### TASK-001: Название задачи
      - **Статус**: open
-     - **Приоритет**: P1
-     - **Зависимости**: —
-     - **Файлы (новые)**: path/to/new_file.py
-     - **Файлы (modify)**: path/to/existing.py
-     - **Описание**: Что сделать
-     - **Критерий готовности**: Что должно работать
-     - **Дискуссия**: —
-     - **Агент**: —
-     - **Ветка**: —
-
-  2. (Опционально) Обсуди архитектуру перед реализацией:
-     {hint} discuss new my-topic 'Как лучше реализовать X?'
-     {hint} discuss chat my-topic
+     - **Описание**: Что сделать, какие файлы создать/изменить
 
   3. Запусти:  {hint} run
-
   4. Статус:   {hint} status""")
         return
 
