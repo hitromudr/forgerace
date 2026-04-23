@@ -85,7 +85,7 @@ args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = false  # llama-70b не понимает SEARCH/REPLACE формат aider
+enabled = true  # fixed: .aider.model.settings.yml forces diff format
 [agents.aider-llama.env]
 BROWSER = "true"
 no_proxy = "127.0.0.1,localhost"
@@ -100,7 +100,7 @@ ALL_PROXY = ""
 command = "aider"
 args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
         "--openai-api-key", "fr-local-dev",
-        "--model", "openai/qwen-122b",
+        "--model", "openai/qwen-480b",
         "--edit-format", "diff",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
@@ -109,7 +109,7 @@ args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = false  # qwen-122b генерирует блок но aider не парсит его  # works via litellm qwen2.5-coder-32b
+enabled = true  # qwen3-coder-480b via litellm
 [agents.aider-qwen.env]
 BROWSER = "true"
 no_proxy = "127.0.0.1,localhost"
