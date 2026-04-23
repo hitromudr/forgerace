@@ -260,6 +260,16 @@ COMPLEXITY: N
                     rf"\g<1>\n- **Дискуссия**: {disc}",
                     tasks_block,
                 )
+            # Final fallback: add before each ### TASK- header (slim format, no Агент/Ветка)
+            if "**Дискуссия**:" not in tasks_block:
+                tasks_block = re.sub(
+                    r"(\n### TASK-)",
+                    f"\n- **Дискуссия**: {disc}\n### TASK-",
+                    tasks_block,
+                )
+                # Also add to the last task (no following ### TASK-)
+                if not tasks_block.rstrip().endswith(disc):
+                    tasks_block = tasks_block.rstrip() + f"\n- **Дискуссия**: {disc}\n"
 
     # Перенумеровать и вставить под file lock (avoid duplicate IDs)
     with tasks_file_lock():

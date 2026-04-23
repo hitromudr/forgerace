@@ -728,6 +728,26 @@ def _post_resolve(filepath: Path):
     fixed_lines = [_fix_oneline_task(line) for line in clean_block.split("\n")]
     clean_block = "\n".join(fixed_lines)
 
+    # Force discussion field into every generated task
+    if "**Дискуссия**:" not in clean_block:
+        clean_block = re.sub(
+            r"(\n### TASK-)",
+            f"\n- **Дискуссия**: {topic}\n### TASK-",
+            clean_block,
+        )
+        if not clean_block.rstrip().endswith(topic):
+            clean_block = clean_block.rstrip() + f"\n- **Дискуссия**: {topic}\n"
+    else:
+        # Ensure ALL tasks have it (some might, some might not)
+        # Split by task headers and ensure each has discussion
+        parts = re.split(r"(### TASK-\d+:.*?)(?=### TASK-|\Z)", clean_block, flags=re.DOTALL)
+        fixed_parts = []
+        for part in parts:
+            if part.startswith("### TASK-") and f"**Дискуссия**:" not in part:
+                part = part.rstrip() + f"\n- **Дискуссия**: {topic}\n"
+            fixed_parts.append(part)
+        clean_block = "".join(fixed_parts)
+
     # Renumber FIRST (before validation — so internal deps stay consistent),
     # then validate (phantom deps checked against final IDs)
     from .tasks import tasks_file_lock, _atomic_write
