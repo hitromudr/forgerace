@@ -14,13 +14,13 @@ args = ["-p", "--allowedTools", "Read,Write,Edit,Bash,Grep,Glob,WebFetch,WebSear
 review_args = ["-p", "-", "--output-format", "text", "--permission-mode", "auto"]
 inactivity_timeout = 600
 
-enabled = false
+enabled = true
 [agents.gemini]
 command = "gemini"
 args = ["-p", "--approval-mode", "yolo", "--output-format", "stream-json"]
 review_args = ["-p", "-"]
 inactivity_timeout = 180
-enabled = false
+enabled = true
 
 [agents.qwen]
 command = "qwen"
@@ -71,7 +71,7 @@ enabled = true
 
 # Aider-based coding agents (nvidia free API)
 # Aider agents — через LiteLLM proxy (localhost:4000)
-# aider-llama disabled: llama-70b зацикливается при кодинге
+# aider-llama: llama-70b via litellm, whole edit format
 [agents.aider-llama]
 command = "aider"
 args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
@@ -85,7 +85,7 @@ args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = false
+enabled = true
 [agents.aider-llama.env]
 BROWSER = "true"
 no_proxy = "127.0.0.1,localhost"
@@ -109,7 +109,7 @@ args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = false  # hangs: qwen format not parsed by aider
+enabled = true  # works via litellm qwen2.5-coder-32b
 [agents.aider-qwen.env]
 BROWSER = "true"
 no_proxy = "127.0.0.1,localhost"
@@ -167,9 +167,8 @@ HTTPS_PROXY = ""
 ALL_PROXY = ""
 
 # Goose agents — через LiteLLM proxy (localhost:4000)
-# Кодинг: goose-llama NO_EDIT_ABORT (25 reads без write), goose-devstral не тестирован как кодер
-# Ревью: "Error: not connected" — goose CLI не предназначен для одноразовых review вызовов
-# TODO: разобраться с goose session management для forgerace
+# goose-llama: зацикливается на tool calls (пишет файлы, ищет extensions вместо ответа)
+# goose-devstral: работает для кодинга
 [agents.goose-llama]
 command = "goose"
 args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
@@ -194,7 +193,7 @@ args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
 protocol = "cli"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = false
+enabled = true  # works for coding, review untested
 [agents.goose-devstral.env]
 OPENAI_HOST = "http://127.0.0.1:4000"
 OPENAI_API_KEY = "fr-local-dev"
