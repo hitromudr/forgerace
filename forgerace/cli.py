@@ -1337,7 +1337,11 @@ def main():
     disc_msg.add_argument("topic")
     disc_msg.add_argument("message", help="Текст сообщения")
 
-    disc_resolve = disc_sub.add_parser("resolve", help="Закрыть дискуссию + сгенерировать задачи")
+    disc_ok = disc_sub.add_parser("ok", help="Финальный раунд + авторезолюция + задачи")
+    disc_ok.add_argument("topic")
+    disc_ok.add_argument("comment", nargs="?", default="", help="Комментарий techlead (опционально)")
+
+    disc_resolve = disc_sub.add_parser("resolve", help="Закрыть дискуссию с резолюцией + задачи")
     disc_resolve.add_argument("topic")
     disc_resolve.add_argument("resolution", help="Текст резолюции")
 
@@ -1487,6 +1491,9 @@ def main():
         elif args.disc_cmd == "msg":
             from .discuss import discuss_msg
             discuss_msg(args.topic, args.message)
+        elif args.disc_cmd == "ok":
+            from .discuss import discuss_ok
+            discuss_ok(args.topic, getattr(args, "comment", ""))
         elif args.disc_cmd == "resolve":
             from .discuss import discuss_resolve
             discuss_resolve(args.topic, args.resolution)

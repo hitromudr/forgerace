@@ -201,6 +201,31 @@ def discuss_msg(topic: str, message: str, author: str = "techlead"):
     log.info(f"@{author} добавил сообщение в {topic}")
 
 
+def discuss_ok(topic: str, comment: str = ""):
+    """Batch /ok: final round from all agents, auto-resolve, generate tasks."""
+    filepath = cfg.discuss_dir / f"{topic}.md"
+    if not filepath.exists():
+        log.error(f"Дискуссия {topic} не найдена")
+        return
+
+    if comment:
+        _chat_append(filepath, "techlead", comment)
+
+    _chat_append(filepath, "techlead",
+                 "Я готов утвердить. Ваши финальные замечания или возражения? "
+                 "Если согласны — напишите 'согласен'. Если нет — аргументируйте.")
+
+    print("[Финальный раунд — все агенты высказываются перед закрытием]\n")
+    for name in cfg.agent_names:
+        print(f"[{name.capitalize()} думает...]")
+        discuss_reply(topic, name)
+
+    _chat_auto_resolve(filepath)
+    _post_resolve(filepath)
+    _auto_link_discussion(topic)
+    log.info(f"Дискуссия {topic}: /ok завершён")
+
+
 def discuss_resolve(topic: str, resolution: str):
     """Close discussion with resolution and generate tasks."""
     filepath = cfg.discuss_dir / f"{topic}.md"
