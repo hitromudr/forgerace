@@ -488,6 +488,22 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
 
 def execute_task_competitive(task: Task, task_idx: int) -> bool:
     """Конкурентное выполнение: агенты параллельно, race-to-merge."""
+    # Поддержка распределённого режима: в режиме "distributed" каждый таск
+    # исполняется одним из executor‑агентов, а остальные (reviewer‑агенты)
+    # выполняют ревью. Для упрощения переиспользуем уже реализованную
+    # логику одиночного режима.
+    if cfg.mode != "competitive":
+        # Выбираем первый доступный executor‑агент
+        executors, _ = cfg.get_valid_agents_for_mode()
+        if not executors:
+            log.error(f"[{task.id}] ✗ Нет доступных executor‑агентов в режиме distributed")
+            update_task_status(task.id, "blocked")
+            return False
+        executor = executors[0]
+        log.info(f"═══ {task.id}: {task.name} (distributed mode) → executor: {executor} ═══")
+        # Делегируем выполнение и ревью одиночному режиму
+        return execute_task_single(task, task_idx, executor)
+
     log.info(f"═══ {task.id}: {task.name} (конкурентный режим) ═══")
 
     # Pre-check: критерий готовности уже выполнен в develop?
