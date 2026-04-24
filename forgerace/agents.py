@@ -851,17 +851,18 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     elif reviewer_type == "codex":
         cmd = [acfg.command, "exec", "--full-auto"]
     elif acfg.command == "goose":
-        # Goose review: text output, no extensions (--no-profile), stdin prompt
+        # Goose CLI mangles output — use API directly for review via LiteLLM
         goose_model = "llama-70b"
-        goose_provider = "openai"
         for j, a in enumerate(acfg.args):
             if a == "--model" and j + 1 < len(acfg.args):
                 goose_model = acfg.args[j + 1]
-            elif a == "--provider" and j + 1 < len(acfg.args):
-                goose_provider = acfg.args[j + 1]
-        cmd = [acfg.command, "run", "-i", "/dev/stdin", "--output-format", "text",
-               "--provider", goose_provider, "--model", goose_model,
-               "--no-profile"]
+        api_base = (acfg.env or {}).get("OPENAI_HOST", "http://127.0.0.1:4000")
+        api_key = (acfg.env or {}).get("OPENAI_API_KEY", "fr-local-dev")
+        # Build ad-hoc config for API call
+        from dataclasses import replace
+        api_acfg = replace(acfg, base_url=api_base + "/v1",
+                           api_key=api_key, model=goose_model)
+        return _call_openai_api(api_acfg, prompt, acfg.inactivity_timeout or 300)
     else:
         cmd = [acfg.command]
         for arg in acfg.review_args:

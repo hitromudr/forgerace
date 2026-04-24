@@ -160,10 +160,11 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
             return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
                     "full_text": "", "comments": "", "summary": "Пустой ответ от ревьюера"}
 
-        verdict_match = re.search(r"\**VERDICT\**:\s*\**(\w+)\**", review_text, re.IGNORECASE)
-        terminal_match = re.search(r"\**IS_TERMINAL\**:\s*\**(\w+)\**", review_text, re.IGNORECASE)
-        comments_match = re.search(r"\**COMMENTS\**:\s*(.+?)(?=\n\**SUMMARY\**:|\Z)", review_text, re.IGNORECASE | re.DOTALL)
-        summary_match = re.search(r"\**SUMMARY\**:\s*(.+)", review_text, re.IGNORECASE)
+        # Robust patterns: handle **BOLD:** **VALUE** markdown from gpt-oss etc.
+        verdict_match = re.search(r"\*{0,2}VERDICT\*{0,2}:\*{0,2}\s*\*{0,2}(\w+)", review_text, re.IGNORECASE)
+        terminal_match = re.search(r"\*{0,2}IS_TERMINAL\*{0,2}:\*{0,2}\s*\*{0,2}(\w+)", review_text, re.IGNORECASE)
+        comments_match = re.search(r"\*{0,2}COMMENTS\*{0,2}:\*{0,2}\s*(.+?)(?=\n\*{0,2}SUMMARY\*{0,2}:|\Z)", review_text, re.IGNORECASE | re.DOTALL)
+        summary_match = re.search(r"\*{0,2}SUMMARY\*{0,2}:\*{0,2}\s*(.+)", review_text, re.IGNORECASE)
 
         # Если ответ не содержит VERDICT или содержит битый JSON — технический сбой
         if not verdict_match:
