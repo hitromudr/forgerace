@@ -488,7 +488,14 @@ def run_single_agent(task: Task, agent_num: int, agent_type: str,
 
 def execute_task_competitive(task: Task, task_idx: int) -> bool:
     """Конкурентное выполнение: агенты параллельно, race-to-merge."""
-    log.info(f"═══ {task.id}: {task.name} (конкурентный режим) ═══")
+    # Определяем режим выполнения задачи
+    if cfg.mode == "distributed":
+        log.info(f"═══ {task.id}: {task.name} (распределенный режим) ═══")
+        return execute_task_distributed(task, task_idx)
+    else:
+        log.info(f"═══ {task.id}: {task.name} (конкурентный режим) ═══")
+    
+    # Оставшаяся логика для конкурентного режима
 
     # Pre-check: критерий готовности уже выполнен в develop?
     if check_already_done(task):
@@ -1844,3 +1851,73 @@ def run_pipeline(
     log.info("ForgeRace завершён")
     os.system("stty sane 2>/dev/null")
     os._exit(0)
+
+
+def execute_task_distributed(task: Task, task_idx: int) -> bool:
+    """Распределенное выполнение: задачи распределяются между агентами."""
+    log.info(f"═══ {task.id}: {task.name} (распределенный режим) ═══")
+    
+    # Получаем допустимых исполнителей и ревьюеров для распределенного режима
+    executors, reviewers = cfg.get_valid_agents_for_mode()
+    
+    if not executors:
+        log.error(f"[{task.id}] ✗ Нет доступных исполнителей для распределенного режима")
+        update_task_status(task.id, "blocked")
+        return False
+
+    update_task_status(task.id, f"in_progress:{','.join(executors)}")
+    
+    # Выбираем исполнителя по round-robin
+    global _rr_agent_index
+    agent_name = executors[_rr_agent_index % len(executors)]
+    _rr_agent_index += 1
+    
+    log.info(f"  ▶ [{task.id}/{agent_name}]")
+    
+    # Создаем ветку для задачи
+    slug = translate_slug(task.name)
+    branch = f"task/{task.id.lower()}-{slug}-{agent_name}"
+    run_cmd(["git", "branch", "-D", branch], cwd=cfg.root_dir, check=False)
+    
+    try:
+        workdir = create_worktree(task_idx, branch)
+    except (RuntimeError, Exception) as e:
+        log.error(f"[{task.id}/{agent_name}] ✗ Не удалось создать worktree: {e}")
+        return False
+
+    # Собираем промпт и запускаем агента
+    prompt = build_prompt(task, "", agent_type=agent_name)
+    result = run_agent_process(agent_name, workdir, task, prompt)
+    
+    # Проверяем результат
+    if result.returncode != 0:
+        log.error(f"[{task.id}/{agent_name}] ✗ Агент завершился с ошибкой")
+        update_task_status(task.id, "blocked")
+        return False
+    
+    # Коммитим изменения
+    run_cmd(["git", "add", "-A"], cwd=workdir, check=False)
+    run_cmd(
+        ["git", "commit", "-m", f"{task.id}: {task.name} [{agent_name}]"],
+        cwd=workdir, check=False,
+    )
+    
+    # Проверяем сборку
+    ok, error = verify_build(workdir, task)
+    if not ok:
+        log.error(f"[{task.id}/{agent_name}] ✗ Сборка провалена: {error}")
+        update_task_status(task.id, "blocked")
+        return False
+    
+    log.info(f"[{task.id}/{agent_name}] ✓ Сборка успешна")
+    
+    # Мержим в develop
+    m_res = merge_to_develop(branch, task.id)
+    if m_res.success:
+        update_task_status(task.id, "done", agent=agent_name, branch=branch)
+        log.info(f"[{task.id}] ✓ done (вмержен в {cfg.dev_branch})")
+        return True
+    else:
+        update_task_status(task.id, f"review:{agent_name}", agent=agent_name, branch=branch)
+        log.warning(f"[{task.id}] ⚠ review (мерж не удался)")
+        return False
