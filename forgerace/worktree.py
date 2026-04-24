@@ -85,6 +85,13 @@ def _create_worktree_impl(agent_num: int, branch: str) -> Path:
         if pf.exists():
             pf.write_text(f"# {protected} — protected by orchestrator, do not edit\n")
 
+    # Copy untracked config files needed by agents (excluded by .gitignore)
+    _COPY_UNTRACKED = (".aider.model.settings.yml",)
+    for fname in _COPY_UNTRACKED:
+        src = cfg.root_dir / fname
+        if src.exists():
+            shutil.copy2(src, agent_dir / fname)
+
     log.info(f"Worktree создан: {agent_dir} → {branch}")
     return agent_dir
 
@@ -104,12 +111,18 @@ def remove_worktree(agent_num: int):
     run_cmd(["git", "worktree", "prune"], cwd=cfg.root_dir, check=False)
 
 
-def cleanup_worktrees(results: list, keep_failed: bool = True) -> None:
+def cleanup_worktrees(results: list, keep_failed: bool = True, keep_all: bool = False) -> None:
     """Удаляет worktree всех агентов из списка результатов.
 
     If keep_failed=True (default), worktrees of agents that failed
     (success=False or blocked) are preserved for debugging.
+    If keep_all=True, all worktrees are preserved (debug mode).
     """
+    if keep_all:
+        for r in results:
+            if hasattr(r, "workdir") and r.workdir:
+                log.info(f"  Worktree сохранён (debug): {r.workdir}")
+        return
     for r in results:
         try:
             if keep_failed and hasattr(r, "success") and r.success is False:

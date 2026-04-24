@@ -193,7 +193,8 @@ args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
 protocol = "cli"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = true  # works for coding, review untested
+enabled = true
+coding = false  # LiteLLM не пробрасывает edit-тулы — только ревью
 [agents.goose-devstral.env]
 OPENAI_HOST = "http://127.0.0.1:4000"
 OPENAI_API_KEY = "fr-local-dev"
@@ -283,6 +284,8 @@ agent_timeout = 300
 max_review_rounds = 2
 review_frame = "evidence"
 max_task_complexity = 5  # decompose only complex tasks (5+/5)
+keep_worktrees = true  # debug: keep all worktrees after run
+protect_orchestrator = false  # pilot tasks modify forgerace itself
 
 # [hooks]
 # on_complete = "curl -X POST https://hooks.slack.com/... -d '{\"text\": \"$FORGERACE_TASK_ID: $FORGERACE_STATUS ($FORGERACE_AGENT)\"}'"

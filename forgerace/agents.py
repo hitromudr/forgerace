@@ -691,8 +691,10 @@ def run_agent_process(agent_name: str, workdir: Path, task: Task, prompt: str,
             # Fix: write prompt to temp file instead of /dev/stdin
             # (aider --message-file /dev/stdin breaks when stdin=PIPE)
             import tempfile
-            prompt_file = Path(tempfile.mktemp(suffix=".md", dir=str(workdir)))
-            prompt_file.write_text(prompt, encoding="utf-8")
+            fd, tmp_path = tempfile.mkstemp(suffix=".md", dir=str(workdir))
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(prompt)
+            prompt_file = Path(tmp_path)
             final_cmd = [a if a != "/dev/stdin" else str(prompt_file) for a in final_cmd]
         return _run_agent_text(
             final_cmd, workdir, tag, acfg.inactivity_timeout,

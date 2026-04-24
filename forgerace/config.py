@@ -39,6 +39,7 @@ class AgentConfig:
     env: dict[str, str] = field(default_factory=dict)  # extra env vars for subprocess
     prompt_stdin: bool = False  # send prompt via stdin (not CLI args)
     tier: str = "strong"  # "strong", "medium", "weak" — affects prompt strategy
+    coding: bool = True  # False = review-only agent (excluded from coding tasks)
     # OpenAI-compatible API settings (protocol = "openai")
     base_url: str = ""
     api_key: str = ""
@@ -83,6 +84,8 @@ class Config:
     min_reviewers: int = 2  # минимальное количество ревьюеров для консенсуса
     max_task_complexity: int = 3
     progress_timeout: int = 600  # kill агента если diff не меняется N секунд (10 мин)
+    keep_worktrees: bool = False  # True = keep all worktrees for debugging
+    protect_orchestrator: bool = True  # protect forgerace/*.py from agent modifications at merge
     max_concurrent: int = 3  # макс. параллельных задач в ConcurrencyLimiter
     budget_per_task_usd: Optional[float] = None
     preflight: bool = False  # enable pre-flight analysis
@@ -189,7 +192,7 @@ CONFIDENCE: XX%
     def cli_agent_names(self) -> list[str]:
         """CLI-only agents — for task execution (writing code in worktree)."""
         return [name for name, acfg in self.agents.items()
-                if acfg.enabled and acfg.protocol in ("cli", "text")]
+                if acfg.enabled and acfg.protocol in ("cli", "text") and acfg.coding]
 
     def get_valid_agents_for_mode(self) -> tuple[list[str], list[str]]:
         """Возвращает списки допустимых исполнителей и ревьюеров для текущего режима."""
@@ -369,6 +372,7 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
                 api_key=acfg.get("api_key", ""),
                 model=acfg.get("model", ""),
                 tier=acfg.get("tier", "strong"),
+                coding=acfg.get("coding", True),
             )
 
     # [frames.*]
@@ -408,7 +412,8 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     limits = data.get("limits", {})
     for key in ("max_parallel_tasks", "agent_timeout", "max_review_rounds",
                 "max_task_complexity", "progress_timeout", "max_concurrent",
-                "budget_per_task_usd", "preflight", "preflight_agent", "preflight_mode"):
+                "budget_per_task_usd", "preflight", "preflight_agent", "preflight_mode",
+                "keep_worktrees", "protect_orchestrator"):
         if key in limits:
             setattr(cfg, key, limits[key])
     if "review_run_log" in limits:

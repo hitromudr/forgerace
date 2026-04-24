@@ -78,16 +78,20 @@ def merge_to_develop(branch: str, task_id: str) -> MergeResult:
                     )
                 log.info(f"  ✅ Тесты пройдены для {task_id}")
 
-            # 2.5. Revert agent changes to orchestrator core files
-            _MERGE_PROTECTED = (
+            # 2.5. Revert agent changes to protected files
+            # Core orchestrator files protected only when protect_orchestrator=True (default)
+            _ALWAYS_PROTECTED = (
                 "TASKS.md", "forgerace.toml", "litellm_config.yaml",
                 "CLAUDE.md", ".gitignore",
-                # Orchestrator core — agents must not modify the tool that runs them
+            )
+            _ORCHESTRATOR_FILES = (
                 "forgerace/cli.py", "forgerace/pipeline.py", "forgerace/agents.py",
                 "forgerace/config.py", "forgerace/merge.py", "forgerace/worktree.py",
                 "forgerace/tasks.py", "forgerace/decompose.py", "forgerace/discuss.py",
                 "forgerace/utils.py", "forgerace/cost.py",
             )
+            protect_orch = getattr(cfg, "protect_orchestrator", True)
+            _MERGE_PROTECTED = _ALWAYS_PROTECTED + (_ORCHESTRATOR_FILES if protect_orch else ())
             changed = run_cmd(
                 ["git", "diff", "--name-only", dev_sha, "HEAD"],
                 cwd=merge_dir, check=False,

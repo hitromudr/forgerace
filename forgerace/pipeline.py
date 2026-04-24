@@ -599,12 +599,14 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                             rework_comments.append(f"### Замечания от {rev} (вердикт: {verdict})\n{comments}")
 
             # APPROVED if majority approves (exclude FAILED — technical parser errors)
+            # Tie (50/50) goes to author — use >=
             real_verdicts = [v for v in verdicts.values() if v.get("verdict") != "FAILED"]
             approved_count = sum(1 for v in real_verdicts if v.get("verdict") == "APPROVED")
-            all_approved = len(real_verdicts) > 0 and approved_count > len(real_verdicts) / 2
+            all_approved = len(real_verdicts) > 0 and approved_count >= len(real_verdicts) / 2
 
-            # Проверка на терминальный отказ (TASK-051) — only from real verdicts
-            is_terminal = any(v.get("is_terminal") for v in real_verdicts)
+            # Terminal refusal only from REJECTED verdicts (NEEDS_WORK is reworkable)
+            is_terminal = any(v.get("is_terminal") and v.get("verdict") == "REJECTED"
+                              for v in real_verdicts)
             if not all_approved and is_terminal:
                 log.error(f"[{task.id}/{result.agent_type}/ревью] ✗ ТЕРМИНАЛЬНЫЙ ОТКАЗ → BLOCKED")
                 update_task_status(task.id, "blocked", agent=result.agent_type)
@@ -663,7 +665,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
     # Все futures завершены — cleanup worktree безопасен
     if race_winner:
         _log_total_cost(task.id, all_results)
-        cleanup_worktrees(all_results)
+        cleanup_worktrees(all_results, keep_all=cfg.keep_worktrees)
         return True
 
     # Оба завершились, никто не получил APPROVED
@@ -678,7 +680,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
         update_task_status(task.id, "blocked")
         run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
         _log_total_cost(task.id, all_results)
-        cleanup_worktrees(all_results)
+        cleanup_worktrees(all_results, keep_all=cfg.keep_worktrees)
         return False
 
     for r in passed:
@@ -704,7 +706,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             update_task_status(task.id, "blocked")
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, all_results)
-            cleanup_worktrees(all_results)
+            cleanup_worktrees(all_results, keep_all=cfg.keep_worktrees)
             return False
 
         log.info(f"[{task.id}/ревью] результат:\n{rv.get('full_text', rv.get('reason', ''))}")
@@ -720,7 +722,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
             update_task_status(task.id, "blocked")
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, all_results)
-            cleanup_worktrees(all_results)
+            cleanup_worktrees(all_results, keep_all=cfg.keep_worktrees)
             return False
 
         if rv["verdict"] == "APPROVED":
@@ -743,7 +745,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 })
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, all_results)
-            cleanup_worktrees(all_results)
+            cleanup_worktrees(all_results, keep_all=cfg.keep_worktrees)
             return False
 
         # Проверка лимита переделок (TASK-058/095)
@@ -763,7 +765,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 })
             run_hook(cfg.hook_on_complete, task.id, "stuck", "none")
             _log_total_cost(task.id, all_results)
-            cleanup_worktrees(all_results)
+            cleanup_worktrees(all_results, keep_all=cfg.keep_worktrees)
             return False
 
         # Детекция зацикливания: одинаковое замечание 2 раунда подряд → эскалация
@@ -776,7 +778,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 update_task_status(task.id, "blocked")
                 run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
                 _log_total_cost(task.id, all_results)
-                cleanup_worktrees(all_results)
+                cleanup_worktrees(all_results, keep_all=cfg.keep_worktrees)
                 return False
         else:
             repeat_count = 0
@@ -853,7 +855,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                 })
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, all_results)
-            cleanup_worktrees(all_results)
+            cleanup_worktrees(all_results, keep_all=cfg.keep_worktrees)
             return False
 
     # Мерж
@@ -879,7 +881,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
              send_to_rework(best_result, task, rework_msg)
 
     _log_total_cost(task.id, all_results)
-    cleanup_worktrees(all_results)
+    cleanup_worktrees(all_results, keep_all=cfg.keep_worktrees)
     return True
 
 
@@ -906,7 +908,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         update_task_status(task.id, "blocked")
         run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
         _log_total_cost(task.id, [result])
-        cleanup_worktrees([result])
+        cleanup_worktrees([result], keep_all=cfg.keep_worktrees)
         return False
 
     log.info(f"[{task.id}/{result.agent_type}] lines={result.code_lines}, bin={result.binary_size}")
@@ -928,7 +930,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
         update_task_status(task.id, "blocked")
         run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
         _log_total_cost(task.id, [result])
-        cleanup_worktrees([result])
+        cleanup_worktrees([result], keep_all=cfg.keep_worktrees)
         return False
 
     best_result = result
@@ -959,7 +961,8 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
                     log.info(f"[{task.id}/{rev}/ревью] {summary}")
                 
                 # Собираем замечания для доработки (поддержка NEEDS_WORK, NEEDS_REWORK, REJECTED) (TASK-095)
-                if verdict != "APPROVED":
+                # FAILED = technical failure, not a real review — skip
+                if verdict not in ("APPROVED", "FAILED"):
                     comments = rv.get("comments", rv.get("summary", ""))
                     if comments:
                         rework_comments.append(f"### Замечания от {rev} (вердикт: {verdict})\n{comments}")
@@ -967,13 +970,19 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
                     # if rv.get("full_text"):
                     #     rework_comments.append(f"### Полный текст от {rev}\n{rv['full_text']}")
 
-        all_approved = all(v.get("verdict") == "APPROVED" for v in verdicts.values())
+        # FAILED = technical failure (no VERDICT in response), not a real review
+        real_verdicts = {k: v for k, v in verdicts.items() if v.get("verdict") != "FAILED"}
+        if not real_verdicts:
+            log.warning(f"[{task.id}/ревью] ⚠ все ревьюеры вернули технический сбой — пропускаю раунд")
+            continue
+        approved_count = sum(1 for v in real_verdicts.values() if v.get("verdict") == "APPROVED")
+        all_approved = len(real_verdicts) > 0 and approved_count >= len(real_verdicts) / 2
         if all_approved:
-            log.info(f"[{task.id}/{agent_type}/ревью] ✅ одобрено")
+            log.info(f"[{task.id}/{agent_type}/ревью] ✅ одобрено ({approved_count}/{len(real_verdicts)})")
             break
 
-        # Проверка на терминальный отказ (TASK-052)
-        if any(v.get("is_terminal") for v in verdicts.values()):
+        # Terminal refusal only from REJECTED verdicts (NEEDS_WORK is reworkable)
+        if any(v.get("is_terminal") and v.get("verdict") == "REJECTED" for v in real_verdicts.values()):
             log.error(f"[{task.id}] ✗ ТЕРМИНАЛЬНЫЙ ОТКАЗ → BLOCKED")
             update_task_status(task.id, "blocked")
             # Сохраняем замечания для истории (TASK-095)
@@ -992,7 +1001,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
                 })
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, [result])
-            cleanup_worktrees([result])
+            cleanup_worktrees([result], keep_all=cfg.keep_worktrees)
             return False
 
         # Проверка лимита переделок (TASK-058/095)
@@ -1016,11 +1025,11 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
                 })
             run_hook(cfg.hook_on_complete, task.id, "stuck", "none")
             _log_total_cost(task.id, [result])
-            cleanup_worktrees([result])
+            cleanup_worktrees([result], keep_all=cfg.keep_worktrees)
             return False
 
-        # Детекция зацикливания (по первому ревьюеру для простоты)
-        first_rv = list(verdicts.values())[0]
+        # Детекция зацикливания (по первому реальному ревьюеру, не FAILED)
+        first_rv = list(real_verdicts.values())[0] if real_verdicts else list(verdicts.values())[0]
         cur_summary = first_rv.get("summary", "").strip()
         if cur_summary and cur_summary == prev_summary:
             repeat_count += 1
@@ -1030,7 +1039,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
                 update_task_status(task.id, "blocked")
                 run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
                 _log_total_cost(task.id, [result])
-                cleanup_worktrees([result])
+                cleanup_worktrees([result], keep_all=cfg.keep_worktrees)
                 return False
         else:
             repeat_count = 0
@@ -1077,7 +1086,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
                 })
             run_hook(cfg.hook_on_complete, task.id, "blocked", "none")
             _log_total_cost(task.id, [result])
-            cleanup_worktrees([result])
+            cleanup_worktrees([result], keep_all=cfg.keep_worktrees)
             return False
         log.info(f"[{task.id}/{agent_type}/ревью] ✅ одобрено (финал)")
 
@@ -1107,7 +1116,7 @@ def execute_task_single(task: Task, task_idx: int, agent_type: str) -> bool:
     log.info(f"[{task.id}] Время выполнения: {total_time:.2f}s, раундов ревью: {review_rounds}")
 
     _log_total_cost(task.id, [result])
-    cleanup_worktrees([result])
+    cleanup_worktrees([result], keep_all=cfg.keep_worktrees)
     return True
 
 
