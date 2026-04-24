@@ -1,7 +1,7 @@
 TASKS — forgerace
 
 ### TASK-038: Интеграция Distributed Mode в pipeline.py
-- **Статус**: done
+- **Статус**: blocked
 - **Описание**:
   1. Модифицировать функцию `execute_task_competitive()` в `forgerace/pipeline.py` для поддержки distributed mode:
      - Добавить проверку `config.mode == "distributed"`.
