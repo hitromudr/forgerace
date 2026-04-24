@@ -1,7 +1,7 @@
 TASKS — forgerace
 
 ### TASK-038: Интеграция Distributed Mode в pipeline.py
-- **Статус**: open
+- **Статус**: done
 - **Описание**:
   1. Модифицировать функцию `execute_task_competitive()` в `forgerace/pipeline.py` для поддержки distributed mode:
      - Добавить проверку `config.mode == "distributed"`.
@@ -18,7 +18,7 @@ TASKS — forgerace
 
 - **Дискуссия**: pilot-distributed
 ### TASK-039: Валидация конфигурации для Distributed Mode
-- **Статус**: in_progress:aider-llama
+- **Статус**: done
 - **Описание**:
   1. Добавить в `forgerace/config.py` класс `Config` с методами:
      - `__init__(path: Path)` — загрузка и парсинг `forgerace.toml`.
@@ -33,7 +33,7 @@ TASKS — forgerace
 
 - **Дискуссия**: pilot-distributed
 ### TASK-040: Тесты для Distributed Mode
-- **Статус**: in_progress:aider-qwen
+- **Статус**: done
 - **Описание**:
   1. Создать тесты в `tests/test_pipeline.py`:
      - `test_distributed_mode_explicit_agent` — проверка явного назначения агента.
