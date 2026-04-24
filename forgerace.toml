@@ -85,7 +85,7 @@ args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
-enabled = true  # fixed: .aider.model.settings.yml forces diff format
+enabled = false  # llama-70b не осиливает diff на больших файлах (600+ строк)
 [agents.aider-llama.env]
 BROWSER = "true"
 no_proxy = "127.0.0.1,localhost"
