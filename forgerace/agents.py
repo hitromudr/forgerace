@@ -962,9 +962,17 @@ def run_text_agent(prompt: str, timeout: int = 300, tag: str = "",
 
 def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
     """Формирует промпт для агента."""
-    # Claude CLI сам читает CLAUDE.md — не дублируем. Остальным агентам инжектим.
+    # Claude CLI сам читает CLAUDE.md — не дублируем.
+    # Aider (protocol=text) тоже не получает project_docs: aider парсит prompt
+    # на упоминания файлов и с --yes-always авто-добавляет их все в chat
+    # (что раздувает контекст и вешает gpt-oss/devstral на minute+). У aider
+    # уже есть --map-tokens repo-map для архитектурного обзора. См. probe-agents
+    # findings (smoke3 attempt 2018587-2): aider-gptoss молчит 5 минут именно
+    # на add-files-from-CLAUDE.md цикле.
     project_section = ""
-    if agent_type != "claude" and cfg.project_docs:
+    acfg_for_proto = cfg.agents.get(agent_type)
+    is_text_agent = bool(acfg_for_proto and acfg_for_proto.protocol == "text")
+    if agent_type != "claude" and not is_text_agent and cfg.project_docs:
         project_section = f"""
 ## Документация проекта (CLAUDE.md)
 {cfg.project_docs}
