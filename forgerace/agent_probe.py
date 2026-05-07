@@ -144,9 +144,10 @@ def _aider_underlying(acfg) -> dict | None:
         model = args[args.index("--model") + 1]
     except IndexError:
         return None
-    # Aider model often prefixed with "openai/" — strip for direct call.
-    if model.startswith("openai/"):
-        model = model[len("openai/"):]
+    # Aider models are written as "openai/<model_id>" so litellm picks the
+    # OpenAI-compat handler. When we hit /v1/chat/completions DIRECTLY we
+    # skip exactly one such marker. Don't strip twice — `openai/openai/X`
+    # is a real nvidia model id (gpt-oss is published as `openai/gpt-oss-120b`).
     if model.startswith("openai/"):
         model = model[len("openai/"):]
     base_url = args[args.index("--openai-api-base") + 1] if "--openai-api-base" in args else ""
