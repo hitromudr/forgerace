@@ -51,21 +51,40 @@ TASKS — forgerace
 - **Дискуссия**: pilot-distributed
 
 ### TASK-041: Утилита format_duration + тесты
-- **Статус**: blocked
+- **Статус**: open
 - **Описание**:
-  1. Добавить в `forgerace/utils.py` функцию `format_duration(seconds: float) -> str`,
-     возвращающую человекочитаемую длительность:
-     - `< 60` секунд → `"42s"` (целые секунды).
-     - `< 3600` → `"5m 12s"` (минуты + секунды).
-     - `>= 3600` → `"1h 23m"` (часы + минуты, без висящих нулей: 3600 → "1h", 3660 → "1h 1m").
-     - Отрицательное значение → `ValueError`.
-     - Дробные секунды округлять вниз.
-  2. Расширить `tests/test_utils.py` блоком тестов на все ветки выше,
-     включая edge cases: 0 секунд, ровно 60, ровно 3600, очень большие
-     значения (24h+), отрицательные → ValueError.
+  Добавить в `forgerace/utils.py` функцию `format_duration(seconds: float) -> str`,
+  которая возвращает человекочитаемую длительность с **латинскими** суффиксами
+  s / m / h. Дробные секунды округляются вниз (int(seconds)).
+
+  **Точная семантика — assert ровно эти строки:**
+
+  ```python
+  format_duration(0)        == "0s"
+  format_duration(1)        == "1s"
+  format_duration(42)       == "42s"
+  format_duration(59)       == "59s"
+  format_duration(60)       == "1m 0s"
+  format_duration(60.5)     == "1m 0s"      # 60.5 → int → 60
+  format_duration(125)      == "2m 5s"
+  format_duration(3599)     == "59m 59s"
+  format_duration(3600)     == "1h 0m"      # без висящих нулей секунд в часах
+  format_duration(3660)     == "1h 1m"
+  format_duration(7200)     == "2h 0m"
+  format_duration(86400)    == "24h 0m"     # 24h+ — те же часы и минуты
+  format_duration(-1)       # → raises ValueError
+  ```
+
+  В файл `tests/test_utils.py` добавить ОДНУ функцию `test_format_duration`,
+  которая проверяет **ровно** перечисленные выше пары. Не выдумывай дополнительных
+  ассертов с другой логикой — они должны проходить именно так.
+
+  **Реализацию (utils.py) и тесты (test_utils.py) добавляй в одном edit-batch.**
+  Если функции ещё нет, а тесты её импортируют — pytest упадёт на ImportError.
+
 - **Файлы (modify)**: forgerace/utils.py, tests/test_utils.py
 - **Зависимости**: —
 - **Проверка**:
   ```bash
-  python3 -m pytest tests/test_utils.py -v
+  python3 -m pytest tests/test_utils.py::test_format_duration -v
   ```
