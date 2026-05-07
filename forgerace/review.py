@@ -192,7 +192,9 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
                    changed_files: list[str] | None = None,
                    workdir: Path | None = None) -> dict:
     """Один ревьюер проверяет одного автора. Запускается как полноценный агент в worktree автора."""
-    from .pipeline import run_text_agent
+    # Import from .agents directly — pipeline used to re-export run_text_agent,
+    # but ruff autofix dropped that re-export when it cleaned unused imports.
+    from .agents import run_text_agent
 
     files_context = f"Файлы: {', '.join(changed_files)}" if changed_files else ""
 

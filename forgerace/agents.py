@@ -978,10 +978,26 @@ def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
 {cfg.project_docs}
 """
 
+    # Don't list orchestrator file paths inline for aider (text protocol):
+    # aider parses ANY path mention in user input as «add file?» candidate
+    # and with --yes-always auto-confirms. Result: aider load .gitignore,
+    # CLAUDE.md, TASKS.md, forgerace.toml — context blows up, agent freezes.
+    # CLI/openai agents read the rule normally without mention-detection.
+    if is_text_agent:
+        forbidden_section = (
+            "ЗАПРЕЩЕНО РЕДАКТИРОВАТЬ файлы оркестратора (списки задач, "
+            "конфиги проекта, документация). Правь ТОЛЬКО файлы из секции «Файлы»."
+        )
+    else:
+        forbidden_section = (
+            "ЗАПРЕЩЕНО РЕДАКТИРОВАТЬ: TASKS.md, CLAUDE.md, forgerace.toml, "
+            ".gitignore — это файлы оркестратора. "
+            "Правь ТОЛЬКО файлы указанные в секции \"Файлы\"."
+        )
+
     prompt = f"""Ты автономный агент разработки {cfg.project_context}.
 {project_section}
-ЗАПРЕЩЕНО РЕДАКТИРОВАТЬ: TASKS.md, CLAUDE.md, forgerace.toml, .gitignore — это файлы оркестратора.
-Правь ТОЛЬКО файлы указанные в секции "Файлы".
+{forbidden_section}
 
 ## Твоя задача: {task.id} — {task.name}
 
