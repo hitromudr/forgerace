@@ -605,19 +605,17 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                         if comments:
                             rework_comments.append(f"### Замечания от {rev} (вердикт: {verdict})\n{comments}")
 
-            # APPROVED if majority approves (exclude FAILED — technical parser errors)
-            # Tie (50/50) goes to author — use >=
-            real_verdicts = [v for v in verdicts.values() if v.get("verdict") != "FAILED"]
-            approved_count = sum(1 for v in real_verdicts if v.get("verdict") == "APPROVED")
-            all_approved = len(real_verdicts) > 0 and approved_count >= len(real_verdicts) / 2
+            # Решение принимает merger-агент (вместо majority vote).
+            # Получает diff кандидата + ревью + спеку и возвращает merge|rework|fail.
+            from .merger import merger_decide
+            reviews_by_author = {result.agent_type: list(verdicts.values())}
+            diffs_by_author = {result.agent_type: diff}
+            decision = merger_decide(task, [result], reviews_by_author, diffs_by_author)
+            log.info(f"[{task.id}/merger] {decision.decision} winner={decision.winner} — {decision.reason}")
 
-            # Terminal refusal only from REJECTED verdicts (NEEDS_WORK is reworkable)
-            is_terminal = any(v.get("is_terminal") and v.get("verdict") == "REJECTED"
-                              for v in real_verdicts)
-            if not all_approved and is_terminal:
-                log.error(f"[{task.id}/{result.agent_type}/ревью] ✗ ТЕРМИНАЛЬНЫЙ ОТКАЗ → BLOCKED")
+            if decision.decision == "fail":
+                log.error(f"[{task.id}/{result.agent_type}/merger] ✗ FAIL → BLOCKED — {decision.reason}")
                 update_task_status(task.id, "blocked", agent=result.agent_type)
-                # Сохраняем замечания для истории (TASK-095)
                 all_comments = "\n\n".join(rework_comments)
                 if all_comments:
                     task.last_attempts.append({
@@ -626,8 +624,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                     })
                 continue
 
-            if all_approved:
-                log.info(f"[{task.id}/{result.agent_type}/ревью] ✅ одобрено")
+            if decision.decision == "merge":
                 log.info(f"[{task.id}/{result.agent_type}/мерж] 🏆 победитель")
                 cancel_event.set()  # сигнал остальным агентам на завершение
                 # Мержим СРАЗУ, не ждём остальных
@@ -651,7 +648,7 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                          log.info(f"[{task.id}/{result.agent_type}/доработка] отправлен на исправление (ошибка мержа)")
                          send_to_rework(result, task, rework_msg)
                 race_winner = result
-            else:
+            else:  # decision.decision == "rework"
                 # Проверка лимита переделок (TASK-058/095)
                 max_reworks = getattr(cfg, "max_reworks", 3)
                 if task.rework_count >= max_reworks:
@@ -659,15 +656,14 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
                     update_task_status(task.id, "stuck", agent=result.agent_type, branch=result.branch)
                     continue
 
-                # Сразу отправляем на доработку — не ждём других агентов
-                all_comments = "\n\n".join(rework_comments)
-                if all_comments:
-                    log.info(f"[{task.id}/{result.agent_type}/доработка] {C['yellow']}отправлен на исправление{R}")
-                    send_to_rework(result, task, all_comments)
+                # Объединяем reason merger'а с замечаниями ревьюеров для доработки
+                merger_note = f"### Merger: rework\n{decision.reason}"
+                if rework_comments:
+                    all_comments = merger_note + "\n\n" + "\n\n".join(rework_comments)
                 else:
-                    # Если нет комментариев, но вердикт не APPROVED, всё равно отправляем на доработку с заглушкой
-                    log.warning(f"[{task.id}/{result.agent_type}/доработка] Вердикт не APPROVED, но нет комментариев. Отправляем на доработку.")
-                    send_to_rework(result, task, "### Замечания\nНет конкретных комментариев от ревьюеров, но код не одобрен.")
+                    all_comments = merger_note
+                log.info(f"[{task.id}/{result.agent_type}/доработка] {C['yellow']}отправлен на исправление (merger){R}")
+                send_to_rework(result, task, all_comments)
 
     # Все futures завершены — cleanup worktree безопасен
     if race_winner:
