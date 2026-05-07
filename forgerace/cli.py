@@ -586,14 +586,19 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
     BAR_LEN = 15
     try:
         while True:
-            # Cursor home + clear to end of screen (no flicker vs full clear)
-            print("\033[H\033[J", end="")
+            # Collect data BEFORE clearing the screen — otherwise the user
+            # sees a blank monitor for ~1s while pgrep+curl run.
             tasks = parse_tasks()
             teams = {}
+            _NO_TEAM = "(no team)"
             for t in tasks:
                 d = t.discussion or ""
                 if d and d != "—" and len(d) < 60 and "**" not in d and not d.startswith("- "):
                     teams.setdefault(d, []).append(t)
+                else:
+                    # Tasks without a discussion still need to show up in the
+                    # monitor; otherwise Total reads 0/0 while agents are running.
+                    teams.setdefault(_NO_TEAM, []).append(t)
 
             now = _time.strftime("%H:%M:%S")
             # Count live processes
@@ -613,6 +618,8 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 _litellm_ok = _hc.stdout.strip() in ("200", "401")
             except Exception:
                 _litellm_ok = False
+            # Now clear and render — short window between clear and full output.
+            print("\033[H\033[J", end="")
             litellm_status = f"{C['green']}LiteLLM ✓{R}" if _litellm_ok else f"{C['red']}LiteLLM ✗{R}"
             if procs > 0:
                 proc_str = f"{C['green']}▶ {procs} running{R}"
@@ -704,9 +711,13 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
 
             # Blocked section removed — already shown inline per team
 
-            # Totals — sum from visible teams only (excludes completed old teams)
-            visible_tasks = [t for team_tt in teams.values() for t in team_tt
-                             if sum(1 for x in teams.get(t.discussion or "", []) if x.status == "done") < len(teams.get(t.discussion or "", []))]
+            # Totals — sum from visible teams only (excludes fully-done old teams).
+            # Visibility is per-team (not per-task): a team is visible iff at
+            # least one of its tasks isn't done. Iterate teams directly so we
+            # don't have to map a task back to its bucket key.
+            visible_tasks = [t for team_tt in teams.values()
+                             if any(x.status != "done" for x in team_tt)
+                             for t in team_tt]
             total_done = sum(1 for t in visible_tasks if t.status == "done")
             total_all = len(visible_tasks)
             pct = f"{total_done*100//total_all}%" if total_all else "—"
