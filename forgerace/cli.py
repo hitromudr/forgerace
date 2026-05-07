@@ -744,46 +744,55 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             agent_activity = {}
             now_ts = _time.time()
             _ansi_re = _re.compile(r'\x1b\[[0-9;]*m')
-            if procs > 0:
-              log_files = list(cfg.log_dir.glob("*.log"))
-              orch = cfg.log_dir / "orchestrator.log"
-              if orch.exists():
-                log_files.append(orch)
-              for logf in log_files:
-                try:
-                    if now_ts - logf.stat().st_mtime > 60:
-                        continue  # skip logs inactive > 1min
-                    lines = logf.read_text(errors="replace").splitlines()[-100:]
-                    for line in reversed(lines):
-                        line = _ansi_re.sub('', line)  # strip ANSI codes
-                        m = _re.search(r"\[(TASK-\d+)/([\w,-]+)\].*?(⏳ \S+.*?—\s*(.+)|Applied edit to (.+)|📖 Read (.+)|✏️\s+\w+ (.+)|💻 Bash: (.+)|🔍 (?:Grep|Glob): (.+)|📝 Прогресс: (.+)|replace (.+)|write_file (.+))", line)
-                        if m:
-                            agent = m.group(2).split(",")[0]
-                            if agent not in agent_activity:
-                                task_id = m.group(1)
-                                action = m.group(4) or m.group(5) or m.group(6) or m.group(7) or m.group(8) or m.group(9) or ""
-                                agent_activity[agent] = (task_id, action.strip()[:50])
-                except Exception:
-                    pass
 
-              # Also scan for review/discuss activity
-              for logf in cfg.log_dir.glob("*.log"):
+            def _tail_lines(p, max_bytes=32768):
+                """Read just the last ~32KB of a log file as decoded lines.
+                On a 60MB orchestrator.log this is ~1000x faster than
+                read_text().splitlines()[-100:] which loads the whole file."""
                 try:
-                    if now_ts - logf.stat().st_mtime > 60:
-                        continue
-                    lines = logf.read_text(errors="replace").splitlines()[-50:]
-                    for line in reversed(lines):
-                        line = _ansi_re.sub('', line)
-                        # Review: [TASK-123/ревью] llama→gemini: APPROVED
-                        m = _re.search(r"\[(TASK-\d+)/ревью\].*?(\w[\w-]*)→(\w[\w-]*)", line)
-                        if m and m.group(2) not in agent_activity:
-                            agent_activity[m.group(2)] = (m.group(1), "review", f"→{m.group(3)}")
-                        # Review: 📋 llama ревьюит gemini
-                        m = _re.search(r"📋\s+(\w[\w-]*)\s+ревьюит\s+(\w[\w-]*)", line)
-                        if m and m.group(1) not in agent_activity:
-                            agent_activity[m.group(1)] = (None, "review", f"→{m.group(2)}")
-                except Exception:
-                    pass
+                    with open(p, "rb") as f:
+                        f.seek(0, 2)
+                        size = f.tell()
+                        f.seek(max(0, size - max_bytes))
+                        chunk = f.read()
+                    text = chunk.decode("utf-8", errors="replace")
+                    # First line might be a fragment if we sliced mid-line.
+                    return text.splitlines()[1:] if size > max_bytes else text.splitlines()
+                except OSError:
+                    return []
+
+            if procs > 0:
+                # Collect once, dedupe (orchestrator.log gets matched by glob anyway).
+                log_files = set(cfg.log_dir.glob("*.log"))
+                _coding_re = _re.compile(
+                    r"\[(TASK-\d+)/([\w,-]+)\].*?(⏳ \S+.*?—\s*(.+)|Applied edit to (.+)|📖 Read (.+)|✏️\s+\w+ (.+)|💻 Bash: (.+)|🔍 (?:Grep|Glob): (.+)|📝 Прогресс: (.+)|replace (.+)|write_file (.+))"
+                )
+                _review_arrow_re = _re.compile(r"\[(TASK-\d+)/ревью\].*?(\w[\w-]*)→(\w[\w-]*)")
+                _review_emoji_re = _re.compile(r"📋\s+(\w[\w-]*)\s+ревьюит\s+(\w[\w-]*)")
+                for logf in log_files:
+                    try:
+                        if now_ts - logf.stat().st_mtime > 60:
+                            continue  # skip logs inactive > 1min
+                        lines = _tail_lines(logf)[-100:]
+                        for line in reversed(lines):
+                            line = _ansi_re.sub('', line)  # strip ANSI codes
+                            # Coding activity
+                            m = _coding_re.search(line)
+                            if m:
+                                agent = m.group(2).split(",")[0]
+                                if agent not in agent_activity:
+                                    task_id = m.group(1)
+                                    action = m.group(4) or m.group(5) or m.group(6) or m.group(7) or m.group(8) or m.group(9) or ""
+                                    agent_activity[agent] = (task_id, action.strip()[:50])
+                            # Review activity (single pass — both regexes here)
+                            m = _review_arrow_re.search(line)
+                            if m and m.group(2) not in agent_activity:
+                                agent_activity[m.group(2)] = (m.group(1), "review", f"→{m.group(3)}")
+                            m = _review_emoji_re.search(line)
+                            if m and m.group(1) not in agent_activity:
+                                agent_activity[m.group(1)] = (None, "review", f"→{m.group(2)}")
+                    except Exception:
+                        pass
             # end if procs > 0
 
             if agent_activity:
