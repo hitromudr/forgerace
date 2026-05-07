@@ -20,6 +20,7 @@ __all__ = [
     "C", "R", "agent_color", "log", "setup_logging", "run_cmd",
     "slugify", "is_valid_path", "log_preflight", "parse_pytest_output",
     "find_short_test_summary", "strip_ansi", "format_duration",
+    "format_bytes",
 ]
 
 # --- ANSI цвета ---
@@ -579,6 +580,24 @@ def format_duration(seconds: float) -> str:
     parts.append(f"{seconds}s")
 
     return " ".join(parts)
+
+
+def format_bytes(n: int) -> str:
+    """
+    Преобразует количество байт в человекочитаемую строку с суффиксами B, KB, MB, GB.
+    Делитель — 1024, округление до одной десятой для KB/MB/GB.
+    """
+    if n < 0:
+        raise ValueError("Размер не может быть отрицательным")
+    units = ["B", "KB", "MB", "GB"]
+    size = float(n)
+    idx = 0
+    while idx < len(units) - 1 and size >= 1024:
+        size /= 1024
+        idx += 1
+    if idx == 0:
+        return f"{int(size)} B"
+    return f"{size:.1f} {units[idx]}"
 
 def parse_pytest_output(output: str) -> list[str]:
     """
