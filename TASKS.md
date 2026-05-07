@@ -51,7 +51,7 @@ TASKS — forgerace
 - **Дискуссия**: pilot-distributed
 
 ### TASK-041: Утилита format_duration + тесты
-- **Статус**: open
+- **Статус**: blocked
 - **Описание**:
   Добавить в `forgerace/utils.py` функцию `format_duration(seconds: float) -> str`,
   которая возвращает человекочитаемую длительность с **латинскими** суффиксами
