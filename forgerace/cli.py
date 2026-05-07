@@ -588,6 +588,11 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
     BAR_LEN = 15
     try:
         while True:
+            # Mark the start of this cycle BEFORE doing any work.
+            # The tick loop later uses this to compute "сколько осталось
+            # до следующего full-render", so the cycle as a whole takes
+            # exactly `interval` seconds — not interval + render-time.
+            cycle_started = _time.time()
             # Collect data BEFORE clearing the screen — otherwise the user
             # sees a blank monitor for ~1s while pgrep+curl run.
             tasks = parse_tasks()
@@ -613,10 +618,13 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             try:
                 _clean_env = {k: v for k, v in os.environ.items()
                               if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")}
-                _hc = _sp.run(["curl", "-s", "--connect-timeout", "2",
+                # localhost — короткие таймауты. Иначе при недоступном LiteLLM
+                # full-render зависает на 5с и countdown "1s" застывает.
+                _hc = _sp.run(["curl", "-s", "--connect-timeout", "1",
+                               "--max-time", "1",
                                "-o", "/dev/null", "-w", "%{http_code}",
                                "http://127.0.0.1:4000/health"],
-                              capture_output=True, text=True, timeout=5, env=_clean_env)
+                              capture_output=True, text=True, timeout=2, env=_clean_env)
                 _litellm_ok = _hc.stdout.strip() in ("200", "401")
             except Exception:
                 _litellm_ok = False
@@ -803,14 +811,15 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             if once:
                 break
 
-            # Tick loop: каждую секунду переписываем только header line
-            # (время + countdown). Остальное полотно стоит до следующего
-            # full-render через `interval` секунд. ANSI: save/home/clear-line/restore.
-            full_render_at = _time.time()
-            for _tick in range(interval - 1):
-                _time.sleep(1)
-                _elapsed = int(_time.time() - full_render_at)
-                _secs_left = max(0, interval - _elapsed)
+            # Tick loop: переписываем header in-place до момента
+            # cycle_started + interval. Семантика — «осталось до следующего
+            # обновления». В конце цикла _secs_left == 0 → выходим и сразу
+            # стартуем full-render; никаких лишних sleep после "1s".
+            while True:
+                _elapsed = _time.time() - cycle_started
+                _secs_left = int(interval - _elapsed)
+                if _secs_left <= 0:
+                    break
                 _now_str = _time.strftime("%H:%M:%S")
                 _refresh_str = f"{C['dim']}Refresh: {_secs_left}s{R}"
                 _header = (f"  {C['cyan']}{C['bold']}ForgeRace Monitor{R}  "
@@ -819,7 +828,11 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 # \033[s save, \033[H home, \033[K clear-line, \033[u restore.
                 sys.stdout.write(f"\033[s\033[H\033[K{_header}\033[u")
                 sys.stdout.flush()
-            _time.sleep(1)
+                # Спим до следующей целой секунды cycle_started, не "ровно 1с":
+                # последняя итерация может быть короче — иначе "1s" зависнет.
+                _next_tick = cycle_started + (int(_elapsed) + 1)
+                _delay = max(0.05, min(1.0, _next_tick - _time.time()))
+                _time.sleep(_delay)
     except KeyboardInterrupt:
         # Guard: if Ctrl+C lands while stdout is swapped to the frame buffer,
         # restore the real stdout so "Monitor stopped." actually shows.
