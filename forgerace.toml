@@ -209,6 +209,12 @@ ALL_PROXY = ""
 command = "goose"
 args = ["run", "-i", "/dev/stdin", "--output-format", "stream-json",
         "--model", "devstral-123b", "--provider", "openai"]
+# review_args без --output-format stream-json: для review нам нужен сырой текст
+# с VERDICT/COMMENTS, а не JSON-events. Без review_args run_text_agent запускал
+# `goose` без подкоманды → goose попадал в interactive welcome (telemetry prompt) →
+# review парсер возвращал FAILED.
+review_args = ["run", "-i", "-", "--output-format", "text",
+               "--model", "devstral-123b", "--provider", "openai"]
 protocol = "cli"
 prompt_stdin = true
 inactivity_timeout = 300
