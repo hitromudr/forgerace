@@ -944,9 +944,15 @@ def run_text_agent(prompt: str, timeout: int = 300, tag: str = "",
 
             # CLI agents
             cmd = [acfg.command] + [a for a in acfg.review_args if a != "{prompt}"]
-            proc_env = {**os.environ}
+            # Merge agent-specific env (OPENAI_HOST/OPENAI_API_KEY и т.п.) — без
+            # этого goose-devstral в review-режиме ловил 401, потому что fix
+            # review_args позволил ему стартовать, но ключ не дошёл.
+            proc_env = {**os.environ, **(acfg.env or {})}
             proc_env["PYTHONUNBUFFERED"] = "1"
             proc_env["FORCE_COLOR"] = "1"
+            for pv in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+                if proc_env.get(pv) == "":
+                    proc_env.pop(pv, None)
             result = subprocess.run(
                 cmd, cwd=cfg.root_dir, input=prompt,
                 capture_output=True, text=True, timeout=timeout,
