@@ -19,7 +19,7 @@ MAX_SUMMARY_LENGTH = 500
 __all__ = [
     "C", "R", "agent_color", "log", "setup_logging", "run_cmd",
     "slugify", "is_valid_path", "log_preflight", "parse_pytest_output",
-    "find_short_test_summary", "strip_ansi",
+    "find_short_test_summary", "strip_ansi", "format_duration",
 ]
 
 # --- ANSI цвета ---
@@ -552,6 +552,34 @@ def find_short_test_summary(output: str) -> str:
     return ""
 
 
+def format_duration(seconds: float) -> str:
+    """
+    Форматирует продолжительность в секундах в строку вида "Xh Ym Zs".
+
+    Args:
+        seconds: Продолжительность в секундах.
+
+    Returns:
+        Строка в формате "Xh Ym Zs", где X, Y, Z — целые числа.
+        Нулевые компоненты опускаются, кроме случая, когда все компоненты равны нулю.
+    """
+    if seconds < 0:
+        raise ValueError("Продолжительность не может быть отрицательной")
+
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    seconds = int(seconds % 60)
+
+    parts = []
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    if seconds > 0 or not parts:
+        parts.append(f"{seconds}s")
+
+    return " ".join(parts)
+
 def parse_pytest_output(output: str) -> list[str]:
     """
     Парсит вывод pytest и возвращает список полных имён упавших тестов.
@@ -605,7 +633,7 @@ def parse_pytest_output(output: str) -> list[str]:
                 if p.rstrip(":") in ("FAILED", "ERROR"):
                     found_idx = i
                     break
-            
+
             if found_idx >= 0:
                 # Идентификатор должен быть ДО FAILED/ERROR
                 for p in reversed(parts[:found_idx]):
