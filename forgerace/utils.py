@@ -251,8 +251,13 @@ def _agent_c(name: str) -> str:
     return agent_color(name)
 
 
-def setup_logging(verbose: bool = False):
-    """Настраивает логирование в консоль и файл."""
+def setup_logging(verbose: bool = False, rotate: bool = False):
+    """Настраивает логирование в консоль и файл.
+
+    `rotate=True` (для команды `run`) переносит прошлый orchestrator.log
+    в orchestrator.log.prev и стартует новый — чтобы файл не разрастался
+    до 60+MB между прогонами и monitor не упирался в его размер.
+    """
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
     level = logging.DEBUG if verbose else logging.INFO
 
@@ -260,8 +265,20 @@ def setup_logging(verbose: bool = False):
     console = logging.StreamHandler()
     console.setFormatter(_ColorFormatter())
 
-    # Файл — без цветов
-    fh = logging.FileHandler(cfg.log_dir / "orchestrator.log")
+    log_path = cfg.log_dir / "orchestrator.log"
+    if rotate and log_path.exists():
+        try:
+            prev = log_path.with_suffix(".log.prev")
+            if prev.exists():
+                prev.unlink()
+            log_path.rename(prev)
+        except OSError as e:
+            # Don't crash startup over a rotation failure.
+            print(f"  [warn] couldn't rotate orchestrator.log: {e}")
+
+    # Файл — без цветов. mode='w' = свежий файл при rotate (старый уже
+    # переименован) либо обычный append если rotate=False.
+    fh = logging.FileHandler(log_path, mode="w" if rotate else "a")
     fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 
     logging.basicConfig(level=level, handlers=[console, fh])

@@ -1528,7 +1528,9 @@ def main():
     # Инициализация конфига
     # --root имеет приоритет; если не указан — TOML root; если и его нет — CWD
     init_config(config_path=args.config, root_dir=args.root)
-    setup_logging(verbose=args.verbose)
+    # Rotate orchestrator.log only when starting an actual pipeline run.
+    # Other commands (status, monitor, discuss, etc.) just append.
+    setup_logging(verbose=args.verbose, rotate=(args.command == "run"))
 
     # Дискуссии
     if args.command == "discuss":
