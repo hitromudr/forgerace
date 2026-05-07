@@ -583,6 +583,8 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
     """Live dashboard: progress with auto-refresh."""
     import time as _time
     import subprocess as _sp
+    import io as _io
+    from contextlib import redirect_stdout as _redirect_stdout
     BAR_LEN = 15
     try:
         while True:
@@ -618,8 +620,13 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 _litellm_ok = _hc.stdout.strip() in ("200", "401")
             except Exception:
                 _litellm_ok = False
-            # Now clear and render — short window between clear and full output.
-            print("\033[H\033[J", end="")
+            # Render the entire frame into a buffer and flush once.
+            # Per-print() flush on a TTY tears the screen — header appears,
+            # then teams, then activity. Swap sys.stdout to a StringIO so
+            # the existing `print()` calls accumulate without changing indent.
+            _frame = _io.StringIO()
+            _orig_stdout = sys.stdout
+            sys.stdout = _frame
             litellm_status = f"{C['green']}LiteLLM ✓{R}" if _litellm_ok else f"{C['red']}LiteLLM ✗{R}"
             if procs > 0:
                 proc_str = f"{C['green']}▶ {procs} running{R}"
@@ -787,10 +794,18 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                         tid, action = info
                         print(f"  {color}{name}{R}{' '*pad}{C['magenta']}{'coding':<8}{R} {C['yellow']}{tid}{R}  {C['dim']}{action}{R}")
 
+            # Restore real stdout, then atomically clear+write the frame.
+            sys.stdout = _orig_stdout
+            sys.stdout.write("\033[H\033[J" + _frame.getvalue())
+            sys.stdout.flush()
+
             if once:
                 break
             _time.sleep(interval)
     except KeyboardInterrupt:
+        # Guard: if Ctrl+C lands while stdout is swapped to the frame buffer,
+        # restore the real stdout so "Monitor stopped." actually shows.
+        sys.stdout = sys.__stdout__
         print(f"\n  {C['dim']}Monitor stopped.{R}")
 
 
