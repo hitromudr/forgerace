@@ -89,6 +89,35 @@ TASKS — forgerace
   python3 -m pytest tests/test_utils.py::test_format_duration -v
   ```
 
+### TASK-042: Утилита format_bytes + тесты
+- **Статус**: done
+- **Приоритет**: P2
+- **Описание**:
+  Добавить в `forgerace/utils.py` функцию `format_bytes(n: int) -> str`,
+  которая возвращает человекочитаемый размер с **латинскими** суффиксами
+  B / KB / MB / GB. Делитель — 1024.
+
+  **Точная семантика — assert ровно эти строки:**
+
+  ```python
+  format_bytes(0)                             == "0 B"
+  format_bytes(1)                             == "1 B"
+  format_bytes(1023)                          == "1023 B"
+  format_bytes(1024)                          == "1.0 KB"
+  format_bytes(1536)                          == "1.5 KB"
+  format_bytes(1024 * 1024)                   == "1.0 MB"
+  format_bytes(1024 * 1024 + 512 * 1024)      == "1.5 MB"
+  format_bytes(1024 ** 3)                     == "1.0 GB"
+  format_bytes(-1)                            # → raises ValueError
+  ```
+
+- **Файлы (modify)**: forgerace/utils.py, tests/test_utils.py
+- **Зависимости**: —
+- **Проверка**:
+  ```bash
+  python3 -m pytest tests/test_utils.py::test_format_bytes -v
+  ```
+
 ### TASK-043: Утилита truncate_string + тесты
 - **Статус**: done
 - **Приоритет**: P2
