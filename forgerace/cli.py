@@ -592,7 +592,7 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             # sees a blank monitor for ~1s while pgrep+curl run.
             tasks = parse_tasks()
             teams = {}
-            _NO_TEAM = "(no team)"
+            _NO_TEAM = "standalone"
             for t in tasks:
                 d = t.discussion or ""
                 if d and d != "—" and len(d) < 60 and "**" not in d and not d.startswith("- "):
@@ -632,7 +632,7 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
                 proc_str = f"{C['green']}▶ {procs} running{R}"
             else:
                 proc_str = f"{C['red']}■ stopped{R}"
-            print(f"  {C['cyan']}{C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}{R}  {proc_str}  {litellm_status}  {C['dim']}(Ctrl+C){R}")
+            print(f"  {C['cyan']}{C['bold']}ForgeRace Monitor{R}  {C['dim']}{now}{R}  {proc_str}  {litellm_status}  {C['dim']}Refresh: {interval}s{R}  {C['dim']}(Ctrl+C){R}")
             print()
 
             # Teams table
@@ -728,7 +728,8 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
             total_done = sum(1 for t in visible_tasks if t.status == "done")
             total_all = len(visible_tasks)
             pct = f"{total_done*100//total_all}%" if total_all else "—"
-            print(f"\n  {C['bold']}Total: {C['green']}{total_done}{R}{C['bold']}/{total_all} ({pct}){R}  {C['dim']}Refresh: {interval}s{R}")
+            # Refresh-counter перенесён в header (тикает каждую секунду).
+            print(f"\n  {C['bold']}Total: {C['green']}{total_done}{R}{C['bold']}/{total_all} ({pct}){R}")
 
             # Per-agent activity: only when processes are running
             import re as _re
@@ -801,7 +802,24 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
 
             if once:
                 break
-            _time.sleep(interval)
+
+            # Tick loop: каждую секунду переписываем только header line
+            # (время + countdown). Остальное полотно стоит до следующего
+            # full-render через `interval` секунд. ANSI: save/home/clear-line/restore.
+            full_render_at = _time.time()
+            for _tick in range(interval - 1):
+                _time.sleep(1)
+                _elapsed = int(_time.time() - full_render_at)
+                _secs_left = max(0, interval - _elapsed)
+                _now_str = _time.strftime("%H:%M:%S")
+                _refresh_str = f"{C['dim']}Refresh: {_secs_left}s{R}"
+                _header = (f"  {C['cyan']}{C['bold']}ForgeRace Monitor{R}  "
+                           f"{C['dim']}{_now_str}{R}  {proc_str}  {litellm_status}  "
+                           f"{_refresh_str}  {C['dim']}(Ctrl+C){R}")
+                # \033[s save, \033[H home, \033[K clear-line, \033[u restore.
+                sys.stdout.write(f"\033[s\033[H\033[K{_header}\033[u")
+                sys.stdout.flush()
+            _time.sleep(1)
     except KeyboardInterrupt:
         # Guard: if Ctrl+C lands while stdout is swapped to the frame buffer,
         # restore the real stdout so "Monitor stopped." actually shows.
