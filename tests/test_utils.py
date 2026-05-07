@@ -1,4 +1,3 @@
-import pytest
 from forgerace.utils import parse_pytest_output
 
 def test_parse_pytest_output_empty():

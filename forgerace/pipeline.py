@@ -18,8 +18,7 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
-from .agents import AgentResult, build_prompt, run_agent_process, build_post_mortem_prompt, run_text_agent
-from .benchmark import BenchmarkStore
+from .agents import AgentResult, build_prompt, run_agent_process
 from .config import cfg, run_hint, run_hook
 from .cost import TokenUsage
 from .decompose import assess_and_maybe_decompose, create_checkpoint_task, get_task_complexity
@@ -535,11 +534,6 @@ def execute_task_competitive(task: Task, task_idx: int) -> bool:
     cancel_event = threading.Event()  # сигнал отмены для проигравших
 
     race_winner = None
-
-    # Инициализация метрик
-    start_time = time.perf_counter()
-    review_rounds = 0
-    total_cost = 0.0
 
     with ThreadPoolExecutor(max_workers=len(agent_names)) as pool:
         futures = {}
@@ -1167,7 +1161,6 @@ def _escalate_review_stall(task: Task, results: list, last_rv: dict):
 
 def _ensure_litellm_proxy():
     """Auto-start LiteLLM proxy if agents need it and it's not running."""
-    import urllib.request
     # Check if any enabled agent uses localhost proxy
     proxy_url = ""
     for name, acfg in cfg.agents.items():

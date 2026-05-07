@@ -1634,15 +1634,11 @@ def main():
         return
 
     if args.command == "web-server":
-        try:
-            import asyncio
-            from .diagnose_engine import DiagnoseEngine
-        except ImportError:
-            print(f"  {C['red']}Модуль web_server/diagnose_engine не найден — функция ещё не реализована{R}")
-            return
-        engine = DiagnoseEngine()
-        server = create_web_server(engine)
-        asyncio.run(server.start())
+        # Web UI is deprioritised — see memory feedback_no_web_ui_work.md.
+        # The diagnose_engine / create_web_server stack was never finished;
+        # leave the command registered but bail with a clear message instead
+        # of importing names that don't exist.
+        print(f"  {C['red']}web-server отключён: веб-интерфейс заморожен, работаем через CLI/batch.{R}")
         return
 
     if args.command in ("dashboard", "web"):

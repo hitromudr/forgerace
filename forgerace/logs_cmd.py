@@ -1,9 +1,6 @@
 """Команда ./fr logs — просмотр логов задач."""
-import os
-import re
 import time
 from collections import deque
-from pathlib import Path
 from .config import cfg
 from .utils import log, C, R
 

@@ -1,11 +1,8 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from pathlib import Path
 from forgerace.tasks import Task
 from forgerace.agents import AgentResult
 from forgerace.review import send_to_rework
-import forgerace.pipeline
-import forgerace.tasks
 
 @pytest.fixture
 def mock_task():

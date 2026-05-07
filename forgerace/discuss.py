@@ -10,7 +10,6 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import cfg, run_hint, resolve_agent_frame
-from .decompose import insert_tasks_into_tasksmd
 from .tasks import parse_tasks, link_task_discussion
 from .utils import log, C, agent_color
 
@@ -768,7 +767,7 @@ def _post_resolve(filepath: Path):
         parts = re.split(r"(### TASK-\d+:.*?)(?=### TASK-|\Z)", clean_block, flags=re.DOTALL)
         fixed_parts = []
         for part in parts:
-            if part.startswith("### TASK-") and f"**Дискуссия**:" not in part:
+            if part.startswith("### TASK-") and "**Дискуссия**:" not in part:
                 part = part.rstrip() + f"\n- **Дискуссия**: {topic}\n"
             fixed_parts.append(part)
         clean_block = "".join(fixed_parts)

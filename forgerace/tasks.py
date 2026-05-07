@@ -5,6 +5,7 @@ import re
 import tempfile
 import json
 import threading
+import fcntl
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,8 +15,6 @@ from .utils import log, slugify, is_valid_path
 # Legacy threading lock — kept for backward compat but file lock is primary.
 _tasks_file_lock = threading.Lock()
 
-
-import fcntl
 
 class _FileLock:
     """Cross-process file lock using fcntl.flock."""

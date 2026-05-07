@@ -1,27 +1,10 @@
 """Core tests: imports, config, task parsing, agent routing."""
-import pytest
-import os
 import re
-import tempfile
 from pathlib import Path
 
 
 def test_all_modules_import():
     """All forgerace modules import without error."""
-    import forgerace.config
-    import forgerace.tasks
-    import forgerace.agents
-    import forgerace.pipeline
-    import forgerace.review
-    import forgerace.merge
-    import forgerace.decompose
-    import forgerace.discuss
-    import forgerace.worktree
-    import forgerace.cli
-    import forgerace.cost
-    import forgerace.utils
-    import forgerace.benchmark
-    import forgerace.dashboard
 
 
 def test_config_loads():

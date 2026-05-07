@@ -397,7 +397,8 @@ def _read_streams_nonblocking(proc: subprocess.Popen, timeout: float | None = No
                 try:
                     while True:
                         chunk = os.read(fd, 65536)
-                        if not chunk: break
+                        if not chunk:
+                            break
                         streams[fd][1].extend(chunk)
                 except (BlockingIOError, OSError):
                     pass

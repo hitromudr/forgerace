@@ -10,7 +10,6 @@ Run: python3 -m pytest tests/test_dashboard_e2e.py -v
 import os
 import re
 import pytest
-from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
 pytestmark = pytest.mark.skip(
@@ -320,7 +319,7 @@ class TestSSE:
     def test_sse_updates(self, page):
         _goto(page)
         bar = page.locator("#statusBar")
-        t1 = bar.inner_text()
+        bar.inner_text()  # initial read; SSE refresh happens asynchronously
         page.wait_for_timeout(6000)
         t2 = bar.inner_text()
         assert "Updated:" in t2

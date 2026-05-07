@@ -49,3 +49,23 @@ TASKS — forgerace
   ```
 ```
 - **Дискуссия**: pilot-distributed
+
+### TASK-041: Утилита format_duration + тесты
+- **Статус**: in_progress:aider-qwen,aider-devstral,aider-gptoss
+- **Описание**:
+  1. Добавить в `forgerace/utils.py` функцию `format_duration(seconds: float) -> str`,
+     возвращающую человекочитаемую длительность:
+     - `< 60` секунд → `"42s"` (целые секунды).
+     - `< 3600` → `"5m 12s"` (минуты + секунды).
+     - `>= 3600` → `"1h 23m"` (часы + минуты, без висящих нулей: 3600 → "1h", 3660 → "1h 1m").
+     - Отрицательное значение → `ValueError`.
+     - Дробные секунды округлять вниз.
+  2. Расширить `tests/test_utils.py` блоком тестов на все ветки выше,
+     включая edge cases: 0 секунд, ровно 60, ровно 3600, очень большие
+     значения (24h+), отрицательные → ValueError.
+- **Файлы (modify)**: forgerace/utils.py, tests/test_utils.py
+- **Зависимости**: —
+- **Проверка**:
+  ```bash
+  python3 -m pytest tests/test_utils.py -v
+  ```

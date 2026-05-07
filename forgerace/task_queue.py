@@ -3,7 +3,7 @@
 import heapq
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any, Callable, Optional, List, Dict
+from typing import Any, Callable, Optional
 
 
 class TaskQueue:

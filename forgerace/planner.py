@@ -2,7 +2,6 @@
 
 import json
 import re
-from typing import Optional
 
 from .agents import run_text_agent
 from .tasks import Task

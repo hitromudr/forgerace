@@ -6,9 +6,7 @@ smoke runs against TASK-041.
 """
 
 from dataclasses import dataclass
-from forgerace import merger as merger_mod
 from forgerace.merger import (
-    MergeDecision,
     build_merger_prompt,
     parse_merger_response,
     merger_decide,

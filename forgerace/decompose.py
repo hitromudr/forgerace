@@ -1,10 +1,9 @@
 """Оценка сложности задач и авто-декомпозиция."""
 
 import re
-from pathlib import Path
 
 from .config import cfg, run_hint
-from .tasks import Task, parse_tasks, _tasks_file_lock, _atomic_write, tasks_file_lock
+from .tasks import Task, parse_tasks, _atomic_write, tasks_file_lock
 from .utils import log, is_valid_path
 
 # Кэш: задачи, которые уже оценивались (id -> complexity)

@@ -8,7 +8,6 @@ if os.name == "nt":
 else:
     import fcntl
 from pathlib import Path
-from typing import Optional
 
 __all__ = ["acquire_file_lock"]
 

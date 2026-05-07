@@ -1,11 +1,7 @@
 """Диагностика и автолечение среды ForgeRace."""
 
 import os
-import re
 import shutil
-import subprocess
-from pathlib import Path
-from typing import Optional
 
 from .config import cfg
 from .utils import log, run_cmd, C, R

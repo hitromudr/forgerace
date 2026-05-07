@@ -1,9 +1,6 @@
 """Умный перезапуск задач: анализ логов, классификация причин провала, выбор агента."""
 
 import argparse
-import re
-import subprocess
-from pathlib import Path
 from typing import Optional, Tuple
 
 from .config import cfg

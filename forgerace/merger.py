@@ -12,7 +12,6 @@ implementations on quality / spec-fit, not on whether code runs.
 import re
 from dataclasses import dataclass
 
-from .config import cfg
 from .utils import log
 
 

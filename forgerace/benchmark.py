@@ -6,7 +6,7 @@ import statistics
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from .config import cfg
 from .filelock import acquire_file_lock

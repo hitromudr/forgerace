@@ -4,10 +4,10 @@ import random
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .utils import log, run_cmd, C, R
+from .utils import log, run_cmd
 from .config import cfg
 from .agents import AgentResult, run_agent_process, is_agent_disabled
-from .tasks import Task, task_paths, update_task_status
+from .tasks import Task, task_paths
 
 _DIFF_MAX = 20000
 _DIFF_EXCLUDE = ["*.yaml", "*.yml", "*.json", "*.lock", "*.log", "*.csv", "*.bin"]
