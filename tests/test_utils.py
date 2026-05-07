@@ -1,4 +1,4 @@
-from forgerace.utils import parse_pytest_output, format_duration
+from forgerace.utils import parse_pytest_output, format_duration, format_bytes
 
 def test_parse_pytest_output_empty():
     assert parse_pytest_output("") == []
@@ -123,3 +123,18 @@ def test_parse_pytest_output_long():
     
     assert results == ["tests/test_long_1.py::test_1", "tests/test_long_2.py"]
     assert duration < 1.0  # Должно быть быстро
+
+def test_format_bytes():
+    assert format_bytes(0) == "0 B"
+    assert format_bytes(1) == "1 B"
+    assert format_bytes(1023) == "1023 B"
+    assert format_bytes(1024) == "1.0 KB"
+    assert format_bytes(1536) == "1.5 KB"
+    assert format_bytes(1024 * 1024) == "1.0 MB"
+    assert format_bytes(1024 * 1024 + 512 * 1024) == "1.5 MB"
+    assert format_bytes(1024 ** 3) == "1.0 GB"
+    try:
+        format_bytes(-1)
+        assert False, "Expected ValueError"
+    except ValueError:
+        pass
