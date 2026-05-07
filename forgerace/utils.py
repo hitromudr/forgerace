@@ -623,6 +623,10 @@ def clamp(value, low, high):
         return high
     return value
 
+def is_blank(s: str) -> bool:
+    """Return ``True`` if the string is empty or consists only of whitespace."""
+    return not s or s.isspace()
+
 def truncate_string(s: str, max_len: int) -> str:
     """
     Обрезает строку `s` до `max_len` символов, добавляя суффикс "..."
