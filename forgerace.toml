@@ -287,8 +287,15 @@ Find:
 Be specific about the user scenario and what goes wrong."""
 
 [build]
-commands = [["python3", "-c", "import forgerace"]]
-check_command = "python3 -c 'import forgerace; from forgerace.tasks import parse_tasks; parse_tasks()'"
+# Test gate — runs pytest in the agent's worktree as part of build verification.
+# Without this, code with failing tests merges (see baseline run TASK-041).
+# `-x` stops at first failure; `-q` keeps the log readable.
+commands = [
+    ["python3", "-c", "import forgerace"],
+    ["python3", "-m", "pytest", "-x", "-q"],
+]
+# Post-merge gate — repeated in the detached merge worktree.
+check_command = "python3 -m pytest -x -q"
 
 [limits]
 max_parallel_tasks = 4

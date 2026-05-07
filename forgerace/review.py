@@ -217,6 +217,10 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
 
         parsed = parse_review_text(review_text, build_passed=build_passed, reviewer=reviewer)
         if parsed is None:
+            # Surface the raw answer so reviewer regressions are debuggable
+            # without re-running the whole pipeline. Keep it bounded.
+            preview = review_text.replace("\n", " ⏎ ")[:500]
+            log.warning(f"[{reviewer}/ревью] парсинг провалился, нет VERDICT. raw[:500]: {preview}")
             return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
                     "full_text": review_text, "comments": "", "summary": "Ответ не содержит VERDICT"}
 
