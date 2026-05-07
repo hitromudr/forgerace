@@ -131,6 +131,62 @@ SUMMARY: краткое резюме одной строкой
 """
 
 
+def parse_review_text(review_text: str, build_passed: bool = True,
+                       reviewer: str = "") -> dict | None:
+    """Parse a reviewer's free-form output into a structured verdict dict.
+
+    Returns None if no VERDICT field is found (caller treats as FAILED).
+    Handles bold markdown (**VERDICT**: **APPROVED**) emitted by gpt-oss
+    and applies the same auto-corrections single_review used to do inline:
+    - APPROVED with <20 chars of justification → NEEDS_WORK.
+    - NEEDS_WORK claiming compile failure when build_passed=True → APPROVED.
+    - REJECTED + terminal keywords in comments → is_terminal=True.
+    """
+    verdict_match = re.search(r"\*{0,2}VERDICT\*{0,2}:\*{0,2}\s*\*{0,2}(\w+)", review_text, re.IGNORECASE)
+    terminal_match = re.search(r"\*{0,2}IS_TERMINAL\*{0,2}:\*{0,2}\s*\*{0,2}(\w+)", review_text, re.IGNORECASE)
+    comments_match = re.search(r"\*{0,2}COMMENTS\*{0,2}:\*{0,2}\s*(.+?)(?=\n\*{0,2}SUMMARY\*{0,2}:|\Z)", review_text, re.IGNORECASE | re.DOTALL)
+    summary_match = re.search(r"\*{0,2}SUMMARY\*{0,2}:\*{0,2}\s*(.+)", review_text, re.IGNORECASE)
+
+    if not verdict_match:
+        return None
+
+    verdict = verdict_match.group(1).upper()
+    is_terminal = terminal_match.group(1).upper() == "TRUE" if terminal_match else False
+    if verdict == "APPROVED":
+        is_terminal = False
+    comments = comments_match.group(1).strip() if comments_match else ""
+
+    if verdict == "REJECTED":
+        comments_lower = comments.lower()
+        terminal_keywords = ["невозможно", "бессмыслен", "невыполним", "противоречит"]
+        if any(kw in comments_lower for kw in terminal_keywords):
+            is_terminal = True
+
+    if verdict == "APPROVED" and len(comments) < 20:
+        log.warning(f"[{reviewer}] APPROVED без обоснования — понижаю до NEEDS_WORK")
+        verdict = "NEEDS_WORK"
+        comments = "Ревьюер не обосновал APPROVED. Требуется повторное ревью с конкретным анализом."
+
+    if verdict == "NEEDS_WORK":
+        build_fail_phrases = [
+            "не компилируется", "не собирается", "ошибка компиляции",
+            "compilation error", "does not compile", "build fails",
+        ]
+        comments_lower = comments.lower()
+        has_build_claim = any(p in comments_lower for p in build_fail_phrases)
+        if has_build_claim and build_passed:
+            log.warning(f"[{reviewer}] NEEDS_WORK утверждает что не компилируется, но сборка прошла — повышаю до APPROVED")
+            verdict = "APPROVED"
+            comments = f"(автокоррекция: ревьюер ложно заявил о проблемах компиляции, сборка прошла)\n{comments}"
+
+    return {
+        "verdict": verdict,
+        "is_terminal": is_terminal,
+        "comments": comments,
+        "summary": summary_match.group(1).strip() if summary_match else "",
+    }
+
+
 def single_review(reviewer: str, author: str, diff: str, task: Task,
                    build_passed: bool = True, build_log: str = "",
                    changed_files: list[str] | None = None,
@@ -148,7 +204,6 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
     try:
         # Пытаемся запустить ревьюера (до 3 раз при пустых ответах)
         review_text = ""
-        actual_reviewer = reviewer.split("+")[0]
         for _retry in range(3):
             review_text = run_text_agent(prompt, agent_name=reviewer)
             if review_text:
@@ -160,59 +215,19 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
             return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
                     "full_text": "", "comments": "", "summary": "Пустой ответ от ревьюера"}
 
-        # Robust patterns: handle **BOLD:** **VALUE** markdown from gpt-oss etc.
-        verdict_match = re.search(r"\*{0,2}VERDICT\*{0,2}:\*{0,2}\s*\*{0,2}(\w+)", review_text, re.IGNORECASE)
-        terminal_match = re.search(r"\*{0,2}IS_TERMINAL\*{0,2}:\*{0,2}\s*\*{0,2}(\w+)", review_text, re.IGNORECASE)
-        comments_match = re.search(r"\*{0,2}COMMENTS\*{0,2}:\*{0,2}\s*(.+?)(?=\n\*{0,2}SUMMARY\*{0,2}:|\Z)", review_text, re.IGNORECASE | re.DOTALL)
-        summary_match = re.search(r"\*{0,2}SUMMARY\*{0,2}:\*{0,2}\s*(.+)", review_text, re.IGNORECASE)
-
-        # Если ответ не содержит VERDICT или содержит битый JSON — технический сбой
-        if not verdict_match:
+        parsed = parse_review_text(review_text, build_passed=build_passed, reviewer=reviewer)
+        if parsed is None:
             return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
                     "full_text": review_text, "comments": "", "summary": "Ответ не содержит VERDICT"}
 
-        verdict = verdict_match.group(1).upper() if verdict_match else "FAILED"
-        is_terminal = terminal_match.group(1).upper() == "TRUE" if terminal_match else False
-        # APPROVED + IS_TERMINAL is nonsensical — weak models confuse the field
-        if verdict == "APPROVED":
-            is_terminal = False
-        comments = comments_match.group(1).strip() if comments_match else ""
-
-        # REJECTED может быть терминальным
-        if verdict == "REJECTED":
-            # Если ревьюер явно сказал IS_TERMINAL: TRUE или в комментариях есть ключевые слова
-            comments_lower = comments.lower()
-            terminal_keywords = ["невозможно", "бессмыслен", "невыполним", "противоречит"]
-            if any(kw in comments_lower for kw in terminal_keywords):
-                is_terminal = True
-
-        # APPROVED без обоснования — невалидное ревью
-        if verdict == "APPROVED" and len(comments) < 20:
-            log.warning(f"[{reviewer}] APPROVED без обоснования — понижаю до NEEDS_WORK")
-            verdict = "NEEDS_WORK"
-            comments = "Ревьюер не обосновал APPROVED. Требуется повторное ревью с конкретным анализом."
-
-        # NEEDS_WORK с ложным замечанием "не компилируется" — если сборка прошла, отклоняем
-        if verdict == "NEEDS_WORK":
-            build_fail_phrases = [
-                "не компилируется", "не собирается", "ошибка компиляции",
-                "compilation error", "does not compile", "build fails",
-            ]
-            comments_lower = comments.lower()
-            has_build_claim = any(p in comments_lower for p in build_fail_phrases)
-            if has_build_claim and build_passed:
-                log.warning(f"[{reviewer}] NEEDS_WORK утверждает что не компилируется, но сборка прошла — повышаю до APPROVED")
-                verdict = "APPROVED"
-                comments = f"(автокоррекция: ревьюер ложно заявил о проблемах компиляции, сборка прошла)\n{comments}"
-
         return {
-            "verdict": verdict,
-            "is_terminal": is_terminal,
+            "verdict": parsed["verdict"],
+            "is_terminal": parsed["is_terminal"],
             "reviewer": reviewer,
             "author": author,
             "full_text": review_text,
-            "comments": comments,
-            "summary": summary_match.group(1).strip() if summary_match else "",
+            "comments": parsed["comments"],
+            "summary": parsed["summary"],
         }
     except Exception as e:
         return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
