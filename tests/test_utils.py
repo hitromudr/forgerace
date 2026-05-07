@@ -1,4 +1,19 @@
-from forgerace.utils import parse_pytest_output, format_duration, format_bytes, truncate_string
+from forgerace.utils import parse_pytest_output, format_duration, format_bytes, truncate_string, clamp
+
+def test_clamp():
+    assert clamp(5, 0, 10) == 5
+    assert clamp(-1, 0, 10) == 0
+    assert clamp(11, 0, 10) == 10
+    assert clamp(0, 0, 10) == 0
+    assert clamp(10, 0, 10) == 10
+    assert clamp(5.5, 1, 9) == 5.5
+    assert clamp(-0.5, 0, 1) == 0
+    assert clamp(1.5, 0, 1) == 1
+    try:
+        clamp(5, 10, 0)
+        assert False, "Expected ValueError"
+    except ValueError:
+        pass
 
 def test_parse_pytest_output_empty():
     assert parse_pytest_output("") == []

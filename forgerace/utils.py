@@ -20,7 +20,7 @@ __all__ = [
     "C", "R", "agent_color", "log", "setup_logging", "run_cmd",
     "slugify", "is_valid_path", "log_preflight", "parse_pytest_output",
     "find_short_test_summary", "strip_ansi", "format_duration",
-    "format_bytes", "truncate_string",
+    "format_bytes", "truncate_string", "clamp",
 ]
 
 # --- ANSI цвета ---
@@ -599,6 +599,29 @@ def format_bytes(n: int) -> str:
         return f"{int(size)} B"
     return f"{size:.1f} {units[idx]}"
 
+
+def clamp(value, low, high):
+    """
+    Ограничивает значение отрезком [low, high].
+
+    Args:
+        value: Значение для ограничения (int или float)
+        low: Нижняя граница
+        high: Верхняя граница
+
+    Returns:
+        Значение, ограниченное отрезком [low, high]. Тип результата соответствует типу value.
+
+    Raises:
+        ValueError: Если low > high
+    """
+    if low > high:
+        raise ValueError("low must be less than or equal to high")
+    if value < low:
+        return low
+    if value > high:
+        return high
+    return value
 
 def truncate_string(s: str, max_len: int) -> str:
     """
