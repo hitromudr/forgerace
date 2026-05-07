@@ -51,7 +51,7 @@ TASKS — forgerace
 - **Дискуссия**: pilot-distributed
 
 ### TASK-041: Утилита format_duration + тесты
-- **Статус**: in_progress:aider-qwen,aider-devstral,aider-gptoss
+- **Статус**: blocked
 - **Описание**:
   1. Добавить в `forgerace/utils.py` функцию `format_duration(seconds: float) -> str`,
      возвращающую человекочитаемую длительность:
