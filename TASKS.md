@@ -118,6 +118,42 @@ TASKS — forgerace
   python3 -m pytest tests/test_utils.py::test_format_bytes -v
   ```
 
+### TASK-044: Утилита clamp + тесты
+- **Статус**: done
+- **Приоритет**: P2
+- **Описание**:
+  Добавить в `forgerace/utils.py` функцию
+  `clamp(value, low, high)`, которая возвращает `value` ограниченный
+  отрезком `[low, high]`. Поддерживает int и float. Если `low > high` —
+  `ValueError`. Аргумент `value` может быть int или float, тип
+  результата соответствует входному (без приведения).
+
+  **Точная семантика — assert ровно эти строки:**
+
+  ```python
+  clamp(5, 0, 10)        == 5
+  clamp(-1, 0, 10)       == 0
+  clamp(11, 0, 10)       == 10
+  clamp(0, 0, 10)        == 0
+  clamp(10, 0, 10)       == 10
+  clamp(5.5, 1, 9)       == 5.5
+  clamp(-0.5, 0, 1)      == 0
+  clamp(1.5, 0, 1)       == 1
+  clamp(5, 10, 0)        # → raises ValueError (low > high)
+  ```
+
+  В файл `tests/test_utils.py` добавить ОДНУ функцию `test_clamp`,
+  которая проверяет **ровно** перечисленные выше пары.
+
+  **Реализацию (utils.py) и тесты (test_utils.py) добавляй в одном edit-batch.**
+
+- **Файлы (modify)**: forgerace/utils.py, tests/test_utils.py
+- **Зависимости**: —
+- **Проверка**:
+  ```bash
+  python3 -m pytest tests/test_utils.py::test_clamp -v
+  ```
+
 ### TASK-043: Утилита truncate_string + тесты
 - **Статус**: done
 - **Приоритет**: P2
