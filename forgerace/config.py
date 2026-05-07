@@ -357,19 +357,33 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
     if agents_data:
         cfg.agents = {}
         for name, acfg in agents_data.items():
+            raw_api_key = acfg.get("api_key", "")
+            api_key = os.path.expandvars(raw_api_key)
+            protocol = acfg.get("protocol", "cli")
+            enabled = acfg.get("enabled", True)
+            # For OpenAI-protocol agents an API key is mandatory. If the raw
+            # value referenced an env var that wasn't set, expandvars leaves
+            # the literal `${VAR}` — fail loudly instead of producing a 401.
+            if protocol == "openai" and enabled:
+                if not api_key or "${" in api_key:
+                    raise RuntimeError(
+                        f"Agent '{name}': api_key is empty or env var "
+                        f"unresolved (raw={raw_api_key!r}). "
+                        f"Set the referenced environment variable."
+                    )
             cfg.agents[name] = AgentConfig(
                 command=acfg.get("command", name),
                 args=acfg.get("args", []),
                 review_args=acfg.get("review_args", []),
                 inactivity_timeout=acfg.get("inactivity_timeout", 300),
-                enabled=acfg.get("enabled", True),
-                protocol=acfg.get("protocol", "cli"),
+                enabled=enabled,
+                protocol=protocol,
                 cognitive_frame=acfg.get("cognitive_frame", ""),
                 default_frame=acfg.get("default_frame", ""),
                 env=dict(acfg.get("env", {})),
                 prompt_stdin=acfg.get("prompt_stdin", False),
                 base_url=acfg.get("base_url", ""),
-                api_key=acfg.get("api_key", ""),
+                api_key=api_key,
                 model=acfg.get("model", ""),
                 tier=acfg.get("tier", "strong"),
                 coding=acfg.get("coding", True),

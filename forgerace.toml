@@ -29,6 +29,18 @@ review_args = ["-p", "-", "--approval-mode", "yolo"]
 inactivity_timeout = 180
 enabled = false
 
+# Gemini via Google AI Studio (OpenAI-compatible endpoint).
+# Corporate key — read from $GEMINI_API_KEY env var, NOT committed inline.
+[agents.gemini-api]
+protocol = "openai"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+api_key = "${GEMINI_API_KEY}"
+model = "gemini-3.1-flash-lite-preview"
+default_frame = "architect"
+tier = "medium"
+inactivity_timeout = 300
+enabled = true
+
 [agents.llama]
 protocol = "openai"
 base_url = "https://integrate.api.nvidia.com/v1"
