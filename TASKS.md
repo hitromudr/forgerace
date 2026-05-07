@@ -118,6 +118,37 @@ TASKS — forgerace
   python3 -m pytest tests/test_utils.py::test_format_bytes -v
   ```
 
+### TASK-045: Утилита is_blank + тесты
+- **Статус**: done
+- **Приоритет**: P2
+- **Описание**:
+  Добавить в `forgerace/utils.py` функцию `is_blank(s: str) -> bool`,
+  которая возвращает `True` если строка пустая или состоит только из
+  whitespace-символов (пробел, tab, newline). Иначе — `False`.
+
+  **Точная семантика — assert ровно эти строки:**
+
+  ```python
+  is_blank("")           == True
+  is_blank("   ")        == True
+  is_blank("\t\n")       == True
+  is_blank("a")          == False
+  is_blank(" a ")        == False
+  is_blank("\n\n   x")   == False
+  ```
+
+  В файл `tests/test_utils.py` добавить ОДНУ функцию `test_is_blank`,
+  которая проверяет **ровно** перечисленные выше пары.
+
+  **Реализацию (utils.py) и тесты (test_utils.py) добавляй в одном edit-batch.**
+
+- **Файлы (modify)**: forgerace/utils.py, tests/test_utils.py
+- **Зависимости**: —
+- **Проверка**:
+  ```bash
+  python3 -m pytest tests/test_utils.py::test_is_blank -v
+  ```
+
 ### TASK-044: Утилита clamp + тесты
 - **Статус**: done
 - **Приоритет**: P2
