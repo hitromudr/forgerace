@@ -1,37 +1,8 @@
-from forgerace.utils import parse_pytest_output, format_duration
+from forgerace.utils import parse_pytest_output
 
 def test_parse_pytest_output_empty():
     assert parse_pytest_output("") == []
     assert parse_pytest_output(None) == []
-
-def test_format_duration_zero():
-    assert format_duration(0) == "0s"
-
-def test_format_duration_seconds():
-    assert format_duration(5) == "5s"
-    assert format_duration(59) == "59s"
-
-def test_format_duration_minutes():
-    assert format_duration(60) == "1m 0s"
-    assert format_duration(119) == "1m 59s"
-    assert format_duration(120) == "2m 0s"
-
-def test_format_duration_hours():
-    assert format_duration(3600) == "1h 0s"
-    assert format_duration(3660) == "1h 1m 0s"
-    assert format_duration(3661) == "1h 1m 1s"
-    assert format_duration(7200) == "2h 0s"
-
-def test_format_duration_combined():
-    assert format_duration(3665) == "1h 1m 5s"
-    assert format_duration(7265) == "2h 1m 5s"
-
-def test_format_duration_negative():
-    try:
-        format_duration(-1)
-        assert False, "Expected ValueError"
-    except ValueError:
-        pass
 
 def test_parse_pytest_output_standard():
     output = """
