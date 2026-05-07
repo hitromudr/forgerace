@@ -1830,12 +1830,20 @@ def run_pipeline(
     if cfg.review_run_log:
         review_run_log()
 
-    # Коммитим статусы (только если НЕ на feature branch — иначе засирает develop)
+    # Коммитим статусы (только если НЕ на feature branch — иначе засирает develop).
+    # ВНИМАНИЕ: merge_to_develop обновляет ref через `git update-ref`, не
+    # переключая working tree main repo. После этого `git diff` сравнивает
+    # старое working tree с новой HEAD, и любой `git commit -m` подхватывает
+    # «обратные» изменения файлов из task-ветки. Поэтому коммитим строго
+    # `git commit -- TASKS.md` (pathspec), который игнорирует остальные пути.
     if not team:
         status_diff = run_cmd(["git", "diff", "--stat", "TASKS.md"], cwd=cfg.root_dir, check=False)
         if status_diff.stdout.strip():
             run_cmd(["git", "add", "TASKS.md"], cwd=cfg.root_dir, check=False)
-            run_cmd(["git", "commit", "-m", "update: статусы задач после прогона"], cwd=cfg.root_dir, check=False)
+            run_cmd(
+                ["git", "commit", "-m", "update: статусы задач после прогона", "--", "TASKS.md"],
+                cwd=cfg.root_dir, check=False,
+            )
 
     # Restore original dev_branch if we were on a feature branch
     if team:
