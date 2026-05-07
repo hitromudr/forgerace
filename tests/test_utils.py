@@ -1,4 +1,4 @@
-from forgerace.utils import parse_pytest_output, format_duration, format_bytes
+from forgerace.utils import parse_pytest_output, format_duration, format_bytes, truncate_string
 
 def test_parse_pytest_output_empty():
     assert parse_pytest_output("") == []
@@ -135,6 +135,21 @@ def test_format_bytes():
     assert format_bytes(1024 ** 3) == "1.0 GB"
     try:
         format_bytes(-1)
+        assert False, "Expected ValueError"
+    except ValueError:
+        pass
+
+def test_truncate_string():
+    assert truncate_string("", 10) == ""
+    assert truncate_string("hello", 10) == "hello"
+    assert truncate_string("hello", 5) == "hello"
+    assert truncate_string("hello world", 8) == "hello..."
+    assert truncate_string("hello world", 5) == "he..."
+    assert truncate_string("hello world", 3) == "..."
+    assert truncate_string("hello", 2) == ".."
+    assert truncate_string("hello", 0) == ""
+    try:
+        truncate_string("hello", -1)
         assert False, "Expected ValueError"
     except ValueError:
         pass

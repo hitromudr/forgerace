@@ -20,7 +20,7 @@ __all__ = [
     "C", "R", "agent_color", "log", "setup_logging", "run_cmd",
     "slugify", "is_valid_path", "log_preflight", "parse_pytest_output",
     "find_short_test_summary", "strip_ansi", "format_duration",
-    "format_bytes",
+    "format_bytes", "truncate_string",
 ]
 
 # --- ANSI цвета ---
@@ -598,6 +598,29 @@ def format_bytes(n: int) -> str:
     if idx == 0:
         return f"{int(size)} B"
     return f"{size:.1f} {units[idx]}"
+
+
+def truncate_string(s: str, max_len: int) -> str:
+    """
+    Обрезает строку `s` до `max_len` символов, добавляя суффикс "..."
+    если строка была урезана. Длина результата никогда не превышает `max_len`.
+
+    Правила:
+    - если max_len < 0 → ValueError
+    - если max_len == 0 → ""
+    - если max_len < 3 → возвращает первые max_len символов строки "..."
+    - если len(s) <= max_len → возвращает s
+    - иначе → s[:max_len-3] + "..."
+    """
+    if max_len < 0:
+        raise ValueError("max_len cannot be negative")
+    if max_len == 0:
+        return ""
+    if max_len < 3:
+        return "..."[:max_len]
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 3] + "..."
 
 def parse_pytest_output(output: str) -> list[str]:
     """
