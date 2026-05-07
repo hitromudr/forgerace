@@ -51,7 +51,7 @@ TASKS — forgerace
 - **Дискуссия**: pilot-distributed
 
 ### TASK-041: Утилита format_duration + тесты
-- **Статус**: blocked
+- **Статус**: open
 - **Описание**:
   Добавить в `forgerace/utils.py` функцию `format_duration(seconds: float) -> str`,
   которая возвращает человекочитаемую длительность с **латинскими** суффиксами
@@ -87,4 +87,46 @@ TASKS — forgerace
 - **Проверка**:
   ```bash
   python3 -m pytest tests/test_utils.py::test_format_duration -v
+  ```
+
+### TASK-043: Утилита truncate_string + тесты
+- **Статус**: done
+- **Приоритет**: P2
+- **Описание**:
+  Добавить в `forgerace/utils.py` функцию
+  `truncate_string(s: str, max_len: int) -> str`, которая укорачивает
+  строку до `max_len` символов, добавляя суффикс `"..."` если строка
+  была урезана. Длина результата НИКОГДА не превышает `max_len`.
+
+  **Точная семантика — assert ровно эти строки:**
+
+  ```python
+  truncate_string("", 10)               == ""
+  truncate_string("hello", 10)          == "hello"
+  truncate_string("hello", 5)           == "hello"
+  truncate_string("hello world", 8)     == "hello..."   # 5 + 3 = 8
+  truncate_string("hello world", 5)     == "he..."      # 2 + 3 = 5
+  truncate_string("hello world", 3)     == "..."        # только троеточие
+  truncate_string("hello", 2)           == ".."         # < 3 → обрезается само троеточие
+  truncate_string("hello", 0)           == ""           # 0 — пусто
+  truncate_string("hello", -1)          # → raises ValueError
+  ```
+
+  Правила:
+  - если `len(s) <= max_len` — возвращай `s` без изменений
+  - иначе результат = `s[:max_len-3] + "..."`
+  - при `max_len < 3` — возвращай `"..."[:max_len]` (без префикса)
+  - при `max_len < 0` — `ValueError`
+
+  В файл `tests/test_utils.py` добавить ОДНУ функцию `test_truncate_string`,
+  которая проверяет **ровно** перечисленные выше пары. Не выдумывай
+  дополнительных ассертов.
+
+  **Реализацию (utils.py) и тесты (test_utils.py) добавляй в одном edit-batch.**
+
+- **Файлы (modify)**: forgerace/utils.py, tests/test_utils.py
+- **Зависимости**: —
+- **Проверка**:
+  ```bash
+  python3 -m pytest tests/test_utils.py::test_truncate_string -v
   ```
