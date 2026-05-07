@@ -1,4 +1,4 @@
-from forgerace.utils import parse_pytest_output, format_duration, format_bytes, truncate_string, clamp
+from forgerace.utils import parse_pytest_output, format_duration, format_bytes, truncate_string, clamp, is_blank
 
 def test_clamp():
     assert clamp(5, 0, 10) == 5
@@ -168,3 +168,11 @@ def test_truncate_string():
         assert False, "Expected ValueError"
     except ValueError:
         pass
+
+def test_is_blank():
+    assert is_blank("") is True
+    assert is_blank("   ") is True
+    assert is_blank("\t\n") is True
+    assert is_blank("a") is False
+    assert is_blank(" a ") is False
+    assert is_blank("\n\n   x") is False
