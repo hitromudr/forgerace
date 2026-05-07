@@ -1482,6 +1482,15 @@ def main():
     # doctor
     sub.add_parser("doctor", help="Диагностика и автолечение среды")
 
+    # probe-agents — реальные latency/throughput/stability запросы к каждому агенту
+    probe_p = sub.add_parser("probe-agents", help="Замер latency/throughput/стабильности всех агентов")
+    probe_p.add_argument("--parallel", type=int, default=4,
+                          help="Параллельных проб одновременно (default 4)")
+    probe_p.add_argument("--json", action="store_true",
+                          help="JSON в stdout вместо таблицы")
+    probe_p.add_argument("--all", action="store_true",
+                          help="Включая отключённых (enabled=false) агентов")
+
     # logs
     logs_p = sub.add_parser("logs", help="Просмотр логов задач")
     logs_sub = logs_p.add_subparsers(dest="logs_cmd")
@@ -1666,6 +1675,14 @@ def main():
         from .doctor import doctor
         ok = doctor()
         sys.exit(0 if ok else 1)
+
+    if args.command == "probe-agents":
+        from .agent_probe import run_probe
+        sys.exit(run_probe(
+            parallel=args.parallel,
+            json_out=args.json,
+            all_agents=args.all,
+        ))
 
     if args.command == "logs":
         from .logs_cmd import list_logs, show_log, follow_log
