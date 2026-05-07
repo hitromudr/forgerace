@@ -204,15 +204,20 @@ def single_review(reviewer: str, author: str, diff: str, task: Task,
     tier = acfg.tier if acfg else "strong"
     prompt = _build_review_prompt(reviewer, author, diff, task, files_context, tier)
     try:
-        # Пытаемся запустить ревьюера (до 3 раз при пустых ответах)
+        # Пытаемся запустить ревьюера (до 3 раз при пустых ответах или
+        # таймаутах). Короткий per-attempt timeout — гасим хвост дисперсии
+        # (gpt-oss наблюдалось 4-40с на одной модели), retry компенсирует
+        # одиночные провалы вместо одной длинной попытки.
         review_text = ""
         for _retry in range(3):
-            review_text = run_text_agent(prompt, agent_name=reviewer)
+            review_text = run_text_agent(prompt, agent_name=reviewer,
+                                          timeout=cfg.review_timeout)
             if review_text:
                 break
             if is_agent_disabled(actual_reviewer):
                 break  # quota, no point retrying
-            log.warning(f"[{reviewer}] пустой ответ, retry {_retry + 1}/3...")
+            log.warning(f"[{reviewer}] пустой ответ/timeout, retry {_retry + 1}/3 "
+                        f"(per-attempt={cfg.review_timeout}s)")
         if not review_text:
             return {"verdict": "FAILED", "reviewer": reviewer, "author": author,
                     "full_text": "", "comments": "", "summary": "Пустой ответ от ревьюера"}

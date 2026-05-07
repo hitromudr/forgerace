@@ -182,9 +182,8 @@ inactivity_timeout = 300
 enabled = true
 [agents.aider-gptoss.env]
 BROWSER = "true"
-HTTP_PROXY = ""
-HTTPS_PROXY = ""
-ALL_PROXY = ""
+# aider-gptoss идёт прямо к nvidia API — корпоративный HTTP_PROXY обязателен,
+# наследуем из пользовательского окружения (не override-им пустыми строками).
 
 # Goose agents — через LiteLLM proxy (localhost:4000)
 # goose-llama: зацикливается на tool calls (пишет файлы, ищет extensions вместо ответа)

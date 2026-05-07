@@ -307,15 +307,87 @@ def save_json(results: list[AgentDiagnosis], path: Path | None = None) -> Path:
     return path
 
 
-def run_probe(parallel: int = 4, json_out: bool = False, all_agents: bool = False) -> int:
-    """CLI entry point. Returns exit code (0 = ok, 1 = at least one bad)."""
+REGRESSION_MULTIPLIER = 2.0  # флагуем регресс если new_avg > old_avg * 2
+
+
+def find_previous_diagnostic(out_dir: Path, exclude: Path | None = None) -> Path | None:
+    """Самый свежий JSON в out_dir, кроме указанного (только что записанного)."""
+    if not out_dir.exists():
+        return None
+    candidates = [p for p in out_dir.glob("agents-*.json") if p != exclude]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def compare_with_baseline(results: list[AgentDiagnosis],
+                            baseline_path: Path,
+                            multiplier: float = REGRESSION_MULTIPLIER) -> list[dict]:
+    """Сравнивает текущий probe-результат с baseline JSON.
+    Возвращает список регрессий: {agent, metric, old, new, ratio}.
+    Учитывает short_avg и medium_avg. Игнорирует агентов без значения в baseline.
+    """
+    try:
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        log.warning(f"Не удалось прочитать baseline {baseline_path}: {e}")
+        return []
+    base_by_name = {r["name"]: r for r in baseline.get("results", [])}
+    regressions: list[dict] = []
+    for d in results:
+        if not d.enabled:
+            continue
+        old = base_by_name.get(d.name)
+        if not old:
+            continue
+        for metric in ("short_avg", "medium_avg"):
+            old_val = old.get(metric)
+            new_val = getattr(d, metric)
+            if old_val is None or new_val is None or old_val <= 0:
+                continue
+            ratio = new_val / old_val
+            if ratio > multiplier:
+                regressions.append({
+                    "agent": d.name,
+                    "metric": metric,
+                    "old": old_val,
+                    "new": new_val,
+                    "ratio": ratio,
+                })
+    return regressions
+
+
+def print_regressions(regressions: list[dict], baseline_path: Path) -> None:
+    print(f"  {C['red']}{C['bold']}Регресс латентности vs {baseline_path.name}:{R}")
+    for r in regressions:
+        print(f"    {C['red']}{r['agent']}{R} {r['metric']}: "
+              f"{r['old']:.2f}s → {r['new']:.2f}s ({r['ratio']:.1f}×)")
+    print()
+
+
+def run_probe(parallel: int = 4, json_out: bool = False, all_agents: bool = False,
+               baseline: bool = False) -> int:
+    """CLI entry point. Returns exit code (0 = ok, 1 = at least one bad,
+    2 = regression vs previous baseline)."""
     results = diagnose_all(parallel=parallel, only_enabled=not all_agents)
+    saved_path: Path | None = None
     if json_out:
-        path = save_json(results)
+        saved_path = save_json(results)
         print(json.dumps([asdict(d) for d in results], indent=2, ensure_ascii=False))
-        log.info(f"Saved JSON to {path}")
+        log.info(f"Saved JSON to {saved_path}")
     else:
         print_report(results)
-        save_json(results)
+        saved_path = save_json(results)
+
     bad = [d for d in results if d.enabled and d.note not in ("ok", "slow", "disabled")]
+    if baseline and saved_path is not None:
+        prev = find_previous_diagnostic(saved_path.parent, exclude=saved_path)
+        if prev is None:
+            log.info("Baseline mode: предыдущих диагностик нет, текущая сохранена как baseline")
+        else:
+            regressions = compare_with_baseline(results, prev)
+            if regressions:
+                print_regressions(regressions, prev)
+                return 2
+            log.info(f"Baseline OK: латентность не регрессирует vs {prev.name}")
     return 1 if bad else 0

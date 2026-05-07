@@ -377,9 +377,12 @@ def _run_agent_streaming(
     proc_env = {**os.environ, **(env or {})}
     proc_env["PYTHONUNBUFFERED"] = "1"
     proc_env["FORCE_COLOR"] = "1"
-    # Remove proxy vars entirely — empty string breaks requests library
+    # Remove ONLY empty-string proxy overrides (which break requests library).
+    # Valid user proxies (e.g. corporate HTTP_PROXY) must survive — without them
+    # aider can't reach external APIs and hangs silently waiting on connect.
     for pv in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
-        proc_env.pop(pv, None)
+        if proc_env.get(pv) == "":
+            proc_env.pop(pv, None)
     try:
         proc = subprocess.Popen(
             cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -559,9 +562,12 @@ def _run_agent_text(
     proc_env = {**os.environ, **(env or {})}
     proc_env["PYTHONUNBUFFERED"] = "1"
     proc_env["FORCE_COLOR"] = "1"
-    # Remove proxy vars entirely — empty string breaks requests library
+    # Remove ONLY empty-string proxy overrides (which break requests library).
+    # Valid user proxies (e.g. corporate HTTP_PROXY) must survive — without them
+    # aider can't reach external APIs and hangs silently waiting on connect.
     for pv in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
-        proc_env.pop(pv, None)
+        if proc_env.get(pv) == "":
+            proc_env.pop(pv, None)
     deadline = time.time() + cfg.agent_timeout
     last_diff_snapshot = _get_diff_snapshot(workdir)
     last_diff_change = time.time()
@@ -569,8 +575,12 @@ def _run_agent_text(
     stdout_lines = []
 
     try:
+        # stderr=STDOUT: aider/rich пишет progress в stderr, и при stderr=PIPE
+        # буфер pipe заполняется (~64KB), aider блокируется на write() —
+        # снаружи выглядит как «зависание на минуты». Сливаем оба потока,
+        # читаем единый stdout — deadlock'а нет.
         proc = subprocess.Popen(
-            cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cmd, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             stdin=subprocess.PIPE if prompt_stdin else subprocess.DEVNULL,
             text=False, bufsize=0, env=proc_env,
         )
@@ -626,13 +636,11 @@ def _run_agent_text(
                 break
 
         proc.wait(timeout=10)
-        stderr_bytes = proc.stderr.read() if proc.stderr else b""
-        stderr = stderr_bytes.decode("utf-8", errors="replace")
-        stderr = _filter_aider_stderr(stderr)
+        # stderr merged into stdout above; keep stderr-shaped field empty.
         return AgentProcessResult(
             returncode=proc.returncode or 0,
             stdout="".join(stdout_lines),
-            stderr=stderr,
+            stderr="",
             usage=usage_acc,
         )
     except Exception as e:
@@ -872,9 +880,12 @@ def run_reviewer(reviewer_type: str, prompt: str) -> str:
     proc_env = {**os.environ, **(acfg.env if acfg.env else {})}
     proc_env["PYTHONUNBUFFERED"] = "1"
     proc_env["FORCE_COLOR"] = "1"
-    # Remove proxy vars entirely — empty string breaks requests library
+    # Remove ONLY empty-string proxy overrides (which break requests library).
+    # Valid user proxies (e.g. corporate HTTP_PROXY) must survive — without them
+    # aider can't reach external APIs and hangs silently waiting on connect.
     for pv in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
-        proc_env.pop(pv, None)
+        if proc_env.get(pv) == "":
+            proc_env.pop(pv, None)
     timeout = acfg.inactivity_timeout or 300
     result = subprocess.run(
         cmd, cwd=cfg.root_dir, input=prompt,

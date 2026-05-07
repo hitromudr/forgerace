@@ -82,11 +82,11 @@ def parse_tasks(path: Path | None = None) -> list[Task]:
             deps=_parse_deps(_field(raw, r"\*\*Зависимости\*\*:\s*(.+)")),
             files_new=_field(raw, r"\*\*Файлы \(новые\)\*\*:\s*(.+)"),
             files_modify=_field(raw, r"\*\*Файлы \(modify\)\*\*:\s*(.+)"),
-            integration=_field(raw, r"\*\*Интеграция\*\*:\s*(.+)"),
-            description=_field(raw, r"\*\*Описание\*\*:\s*(.+)"),
-            forbidden=_field(raw, r"\*\*Запрещено\*\*:\s*(.+)"),
-            verification=_field(raw, r"\*\*Проверка\*\*:\s*(.+)"),
-            acceptance=_field(raw, r"\*\*Критерий готовности\*\*:\s*(.+)"),
+            integration=_multiline_field(raw, "Интеграция"),
+            description=_multiline_field(raw, "Описание"),
+            forbidden=_multiline_field(raw, "Запрещено"),
+            verification=_multiline_field(raw, "Проверка"),
+            acceptance=_multiline_field(raw, "Критерий готовности"),
             agent=_field(raw, r"\*\*Агент\*\*:\s*(.+)"),
             branch=_field(raw, r"\*\*Ветка\*\*:\s*(.+)"),
             discussion=_field(raw, r"\*\*Дискуссия\*\*:\s*(.+)"),
@@ -98,6 +98,25 @@ def parse_tasks(path: Path | None = None) -> list[Task]:
 
 
 def _field(text: str, pattern: str) -> str:
+    m = re.search(pattern, text)
+    return m.group(1).strip() if m else ""
+
+
+def _multiline_field(text: str, label: str) -> str:
+    """Парсит markdown-поле, у которого тело может занимать несколько строк
+    (включая блоки кода, отступы, пустые строки). Граница — следующая
+    metadata-строка `- **<label>**:` или `### TASK-...` или конец блока.
+
+    Без этого `_field` (re.search с `(.+)`) обрезает тело по первой строке —
+    спека уходит к агенту неполной, и он работает по интуиции.
+    """
+    pattern = (
+        rf"\*\*{re.escape(label)}\*\*:\s*"
+        r"((?:.|\n)*?)"
+        r"(?=\n[ \t]*[-*][ \t]+\*\*[^*\n]+\*\*:"  # next field
+        r"|\n###[ \t]+TASK-"                       # next task
+        r"|\Z)"
+    )
     m = re.search(pattern, text)
     return m.group(1).strip() if m else ""
 

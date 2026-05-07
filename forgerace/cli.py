@@ -584,7 +584,6 @@ def _cmd_monitor(interval: int = 10, once: bool = False):
     import time as _time
     import subprocess as _sp
     import io as _io
-    from contextlib import redirect_stdout as _redirect_stdout
     BAR_LEN = 15
     try:
         while True:
@@ -1490,6 +1489,8 @@ def main():
                           help="JSON в stdout вместо таблицы")
     probe_p.add_argument("--all", action="store_true",
                           help="Включая отключённых (enabled=false) агентов")
+    probe_p.add_argument("--baseline", action="store_true",
+                          help="Сравнить с предыдущим прогоном; exit=2 при регрессе латентности >2×")
 
     # logs
     logs_p = sub.add_parser("logs", help="Просмотр логов задач")
@@ -1682,6 +1683,7 @@ def main():
             parallel=args.parallel,
             json_out=args.json,
             all_agents=args.all,
+            baseline=args.baseline,
         ))
 
     if args.command == "logs":

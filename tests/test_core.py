@@ -33,6 +33,55 @@ def test_task_parsing():
     assert isinstance(tasks, list)
 
 
+def test_multiline_field_captures_full_body():
+    """_multiline_field берёт весь блок до следующего поля,
+    включая пустые строки и code fences. Раньше _field обрывал
+    описание на первой строке (баг: спека уходила к агенту неполной).
+    """
+    from forgerace.tasks import _multiline_field
+    raw = """### TASK-099: Demo
+- **Статус**: open
+- **Описание**:
+  Добавить функцию `f(x)`.
+
+  ```python
+  f(0) == "0"
+  f(1) == "1"
+  ```
+
+  Дополнительные правила здесь.
+- **Файлы (modify)**: forgerace/utils.py
+- **Зависимости**: —
+"""
+    desc = _multiline_field(raw, "Описание")
+    assert "Добавить функцию" in desc
+    assert 'f(0) == "0"' in desc
+    assert "Дополнительные правила здесь." in desc
+    assert "Файлы (modify)" not in desc  # boundary respected
+    assert "TASK-099" not in desc
+
+
+def test_multiline_field_stops_at_next_task():
+    """Граница _multiline_field — следующая `### TASK-`."""
+    from forgerace.tasks import _multiline_field
+    raw = """### TASK-001: A
+- **Описание**:
+  Body of task 1
+### TASK-002: B
+- **Описание**:
+  Body of task 2
+"""
+    desc = _multiline_field(raw, "Описание")
+    assert "Body of task 1" in desc
+    assert "Body of task 2" not in desc
+
+
+def test_multiline_field_missing_returns_empty():
+    """Поля нет → пустая строка."""
+    from forgerace.tasks import _multiline_field
+    assert _multiline_field("nothing here", "Описание") == ""
+
+
 def test_task_deduplication():
     """Duplicate task IDs are deduplicated."""
     from forgerace.tasks import _deduplicate_tasks, Task
@@ -91,6 +140,21 @@ def test_protected_files():
     from forgerace.agents import _PROTECTED_FILES
     assert "TASKS.md" in _PROTECTED_FILES
     assert "forgerace.toml" in _PROTECTED_FILES
+
+
+def test_review_timeout_default():
+    """review_timeout defaults to 90s in dataclass."""
+    from forgerace.config import Config
+    assert Config().review_timeout == 90
+
+
+def test_review_timeout_from_toml(tmp_path):
+    """[limits] review_timeout overrides dataclass default."""
+    from forgerace.config import load_config
+    toml = tmp_path / "forgerace.toml"
+    toml.write_text("[limits]\nreview_timeout = 45\n")
+    cfg_local = load_config(config_path=toml, root_dir=tmp_path)
+    assert cfg_local.review_timeout == 45
 
 
 def test_review_majority_vote():

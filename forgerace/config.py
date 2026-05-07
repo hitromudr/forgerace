@@ -78,6 +78,7 @@ class Config:
     max_parallel_tasks: int = 10
     agent_timeout: int = 900
     build_timeout: int = 120
+    review_timeout: int = 90  # short timeout for single review call; retries handled by review.py
     max_review_rounds: int = 3
     review_frame: str = "adversarial"  # cognitive frame for self-review when only one agent
     review_consensus: bool = False  # использовать консенсус ревью (несколько ревьюеров)
@@ -424,7 +425,8 @@ def load_config(config_path: Optional[Path] = None, root_dir: Optional[Path] = N
 
     # [limits]
     limits = data.get("limits", {})
-    for key in ("max_parallel_tasks", "agent_timeout", "max_review_rounds",
+    for key in ("max_parallel_tasks", "agent_timeout", "review_timeout",
+                "max_review_rounds",
                 "max_task_complexity", "progress_timeout", "max_concurrent",
                 "budget_per_task_usd", "preflight", "preflight_agent", "preflight_mode",
                 "keep_worktrees", "protect_orchestrator"):
