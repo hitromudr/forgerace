@@ -1,6 +1,10 @@
 """E2E test: full flow from creating a discussion/team to verifying results.
 
-Requires: dashboard running on localhost:8080, playwright installed.
+Web UI work is currently deprioritised — the project runs via CLI / batch
+mode. Skip the whole module instead of maintaining the dashboard server
+and playwright fixtures. Re-enable by removing the module-level skip.
+
+Requires (when re-enabled): dashboard running on localhost:8080, playwright installed.
 Run: python3 -m pytest tests/test_dashboard_e2e.py -v
 """
 import os
@@ -8,6 +12,11 @@ import re
 import pytest
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
+
+pytestmark = pytest.mark.skip(
+    reason="Web UI deprioritised — focus is on CLI/batch mode. "
+           "Remove this skip to re-enable e2e."
+)
 
 BASE_URL = "http://localhost:8080"
 os.environ.pop("HTTP_PROXY", None)
