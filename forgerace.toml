@@ -93,7 +93,8 @@ args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
         "--no-show-model-warnings", "--no-gitignore",
-        "--no-browser", "--no-analytics", "--no-check-update"]
+        "--no-browser", "--no-analytics", "--no-check-update",
+        "--map-tokens", "256"]
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
@@ -117,7 +118,8 @@ args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
         "--no-show-model-warnings", "--no-gitignore",
-        "--no-browser", "--no-analytics", "--no-check-update"]
+        "--no-browser", "--no-analytics", "--no-check-update",
+        "--map-tokens", "256"]
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
@@ -141,7 +143,8 @@ args = ["--openai-api-base", "http://127.0.0.1:4000/v1",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
         "--no-show-model-warnings", "--no-gitignore",
-        "--no-browser", "--no-analytics", "--no-check-update"]
+        "--no-browser", "--no-analytics", "--no-check-update",
+        "--map-tokens", "256"]
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300
@@ -167,7 +170,8 @@ args = ["--openai-api-base", "https://integrate.api.nvidia.com/v1",
         "--message-file", "/dev/stdin",
         "--yes-always", "--no-auto-commits", "--no-pretty", "--no-stream",
         "--no-show-model-warnings", "--no-gitignore",
-        "--no-browser", "--no-analytics", "--no-check-update"]
+        "--no-browser", "--no-analytics", "--no-check-update",
+        "--map-tokens", "256"]
 protocol = "text"
 prompt_stdin = true
 inactivity_timeout = 300

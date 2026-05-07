@@ -1008,6 +1008,12 @@ def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
     prompt += f"""
 ## Правила
 - Правь ТОЛЬКО файлы указанные в "Файлы" выше. Не переписывай файлы целиком — делай точечные правки.
+- Если задача содержит ПРИМЕРЫ (input → output) — следуй им БУКВАЛЬНО. Не переводи
+  единицы измерения, не «русифицируй» суффиксы и не подгоняй под свою интуицию.
+- Тесты пиши строго по примерам из задачи. Если задача требует «округление вниз
+  для 60.5 → 1m 0s» — assert именно "1m 0s", а не "1m 1s" «потому что логично».
+- Реализацию и тесты добавляй в ОДНОМ применённом изменении (один edit-batch).
+  Если тесты импортируют функцию, которой ещё нет — это ImportError → провалит build.
 {cfg.agent_rules}
 """
 
@@ -1040,27 +1046,12 @@ def build_prompt(task: Task, error_log: str = "", agent_type: str = "") -> str:
 {preflight_result}
 """
 
-    # Text-protocol agents (aider): inject file contents and SEARCH/REPLACE instructions
+    # Text-protocol agents (aider): the files are ALREADY passed via --file
+    # in run_agent_process, so aider reads them itself. We don't dump file
+    # contents here a second time — that doubled the prompt size for nothing.
+    # Just keep the SEARCH/REPLACE instruction.
     acfg = cfg.agents.get(agent_type)
     if acfg and acfg.protocol == "text":
-        file_contents = ""
-        task_files = _extract_task_files(task)
-        for fpath in task_files:
-            full = cfg.root_dir / fpath
-            if full.exists() and full.is_file():
-                try:
-                    content = full.read_text(encoding="utf-8", errors="ignore")
-                    # Limit per-file content to avoid blowing up context
-                    if len(content) > 4000:
-                        content = content[:4000] + "\n... (truncated)"
-                    file_contents += f"\n--- {fpath} ---\n{content}\n"
-                except (OSError, UnicodeDecodeError):
-                    pass
-        if file_contents:
-            prompt += f"""
-## Current file contents
-{file_contents}
-"""
         prompt += """
 ## Edit instructions
 Edit the files using SEARCH/REPLACE blocks. Example:
